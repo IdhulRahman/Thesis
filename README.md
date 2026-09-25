@@ -188,6 +188,7 @@ The xApp performs near-real-time traffic steering while respecting the policy co
 │   ├── native-setup-guide.md
 │   ├── rapp-xapp-ieee-tutorial-guide.md
 │   ├── penjelasan-simpel-rapp-xapp.md
+│   ├── changelog-dan-ringkasan-perubahan.md
 │   ├── e2-integration.md
 │   ├── handover-and-slicing.md
 │   └── troubleshooting.md
