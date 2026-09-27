@@ -13,192 +13,7 @@ The platform is deployed entirely on virtual machines connected over a dedicated
 
 The experimental testbed implements a fully disaggregated, standards-compliant O-RAN and 3GPP Release 16/17 network divided across 6 dedicated virtual machines:
 
-```mermaid
-flowchart TB
-
-    %% =====================================================
-    %% NON-RT RIC
-    %% =====================================================
-
-    subgraph VM1["VM-1 — Non-RT RIC | 10.10.10.11"]
-        
-        rApp["QoS-Aware Traffic-Steering rApp<br/>Long-Timescale Control (> 1 s)<br/><br/>Traffic Prediction<br/>QoS/SLA Analysis<br/>Policy Generation"]
-        
-        A1PMS["O-RAN SC A1 Policy<br/>Management Service"]
-        
-        rApp -->|"REST / Policy API"| A1PMS
-    end
-
-
-    %% =====================================================
-    %% NEAR-RT RIC
-    %% =====================================================
-
-    subgraph VM2["VM-2 — O-RAN SC Near-RT RIC | 10.10.10.12"]
-        
-        A1Shim["A1 Compatibility Layer<br/>(Experimental Integration)"]
-
-        A1Med["O-RAN SC<br/>A1 Mediator"]
-
-        xApp["QoS-Aware Traffic-Steering xApp<br/>Near-RT Closed Loop<br/>(10 ms - 1 s domain)"]
-
-        SubMgr["Subscription Manager"]
-        E2Term["E2 Termination"]
-        E2Mgr["E2 Manager"]
-        RNIB[("DBaaS / RNIB")]
-
-        A1Shim --> A1Med
-        
-        A1Med -->|"A1 Policy via RMR"| xApp
-        xApp -->|"Policy Status"| A1Med
-
-        xApp -->|"E2 Subscription"| SubMgr
-        SubMgr --> E2Term
-
-        E2Term -->|"E2 Indication<br/>KPI / Measurement"| xApp
-        xApp -->|"E2 Control Request"| E2Term
-
-        E2Term --> E2Mgr
-        E2Mgr --> RNIB
-    end
-
-
-    %% =====================================================
-    %% OAI RAN
-    %% =====================================================
-
-    subgraph VM4["VM-4 — OAI 5G RAN | 10.10.10.14"]
-
-        subgraph CU["OAI Central Unit"]
-            CUCP["CU-CP<br/>RRC / PDCP-C"]
-            CUUP["CU-UP<br/>SDAP / PDCP-U"]
-
-            CUCP <-->|E1 logical split| CUUP
-        end
-
-        DU1["OAI DU-1<br/>Cell-1<br/>RLC / MAC / PHY"]
-        DU2["OAI DU-2<br/>Cell-2<br/>RLC / MAC / PHY"]
-
-        E2Agent["OAI / FlexRIC E2 Agent<br/>E2AP + E2 Service Models<br/>KPM / RC"]
-
-        CUCP <-->|F1-C| DU1
-        CUUP <-->|F1-U| DU1
-
-        CUCP <-->|F1-C| DU2
-        CUUP <-->|F1-U| DU2
-
-        E2Agent --- CU
-        E2Agent --- DU1
-        E2Agent --- DU2
-    end
-
-
-    %% =====================================================
-    %% UE / RADIO EMULATION
-    %% =====================================================
-
-    subgraph VM5["VM-5 — OAI nrUE Emulator | 10.10.10.15"]
-
-        RFsim["RF Simulator<br/>(Radio Channel Emulation)"]
-
-        UE1["nrUE-1<br/>eMBB"]
-        UE2["nrUE-2<br/>URLLC-like"]
-        UE3["nrUE-3<br/>mMTC"]
-
-        Mobility["Mobility / Handover<br/>Scenario Controller"]
-
-        RFsim --- UE1
-        RFsim --- UE2
-        RFsim --- UE3
-
-        Mobility --> RFsim
-    end
-
-
-    %% =====================================================
-    %% 5G CORE
-    %% =====================================================
-
-    subgraph VM3["VM-3 — OAI 5G Core | 10.10.10.13"]
-
-        AMF["AMF"]
-
-        NSSF["NSSF"]
-        NRF["NRF"]
-        AUSF["AUSF"]
-        UDM["UDM / UDR"]
-
-        SMF1["SMF — Slice 1"]
-        UPF1["UPF — Slice 1<br/>eMBB"]
-
-        SMF2["SMF — Slice 2"]
-        UPF2["UPF — Slice 2<br/>URLLC-like"]
-
-        SMF3["SMF / Policy Mapping<br/>Slice 3 — mMTC"]
-
-        AMF --- NSSF
-        AMF --- NRF
-        AMF --- AUSF
-        AMF --- UDM
-
-        SMF1 --> UPF1
-        SMF2 --> UPF2
-    end
-
-
-    %% =====================================================
-    %% MONITORING
-    %% =====================================================
-
-    subgraph VM6["VM-6 — Monitoring & Experimentation | 10.10.10.16"]
-
-        Prom["Prometheus"]
-        Grafana["Grafana"]
-
-        Logger["Experiment Data Logger<br/>Latency / Jitter / Throughput<br/>Loss / PRB / SLA"]
-
-        Prom --> Grafana
-        Prom --> Logger
-    end
-
-
-    %% =====================================================
-    %% STANDARD / EXPERIMENTAL INTERFACES
-    %% =====================================================
-
-    A1PMS ==>|"A1 Policy Interface"| A1Shim
-
-    E2Agent ==>|"E2 / E2AP over SCTP"| E2Term
-
-
-    %% =====================================================
-    %% RAN — CORE
-    %% =====================================================
-
-    CUCP ==>|"N2 / NGAP<br/>Control Plane"| AMF
-
-    CUUP ==>|"N3 / GTP-U<br/>User Plane"| UPF1
-
-    CUUP ==>|"N3 / GTP-U<br/>User Plane"| UPF2
-
-
-    %% =====================================================
-    %% RADIO EMULATION
-    %% =====================================================
-
-    DU1 ==>|"RFsim — Cell 1"| RFsim
-    DU2 ==>|"RFsim — Cell 2"| RFsim
-
-
-    %% =====================================================
-    %% TELEMETRY
-    %% =====================================================
-
-    VM4 -.->|"RAN KPI"| Prom
-    VM2 -.->|"RIC Decision / Policy Logs"| Logger
-    VM5 -.->|"UE QoS Measurements"| Logger
-    VM3 -.->|"Core / Slice Metrics"| Prom
-```
+![System Architecture Overview](docs/diagram/System%20Architecture%20Overview.png)
 
 ---
 
@@ -206,39 +21,7 @@ flowchart TB
 
 The fundamental contribution of this thesis is the **coordination mechanism between two asynchronous control loops** operating at different timescales to resolve the trade-off between long-term QoS guarantee and immediate radio resource optimization:
 
-```mermaid
-flowchart LR
-
-    Traffic["Historical Traffic<br/>Long-Term KPI"]
-
-    rApp["QoS-Aware rApp<br/>> 1 s"]
-
-    A1["A1 Policy<br/>QoS Constraints"]
-
-    xApp["Traffic-Steering xApp<br/>Near-RT"]
-
-    RAN["OAI CU / DU<br/>Multi-Cell RAN"]
-
-    UE["Multi-Slice UEs<br/>eMBB / URLLC-like / mMTC"]
-
-    KPI["KPI<br/>PRB / Load / Latency<br/>Throughput / Loss / Jitter"]
-
-    Traffic --> rApp
-
-    rApp -->|"Prediction + Policy"| A1
-
-    A1 --> xApp
-
-    xApp -->|"E2 Control"| RAN
-
-    RAN --> UE
-
-    UE --> KPI
-
-    KPI -->|"E2 KPM / Telemetry"| xApp
-
-    KPI -->|"Historical Aggregation"| rApp
-```
+![Multi-Timescale Control & Proposed Research Mechanism](docs/diagram/Multi-Timescale%20Control%20%26%20Proposed%20Research%20Mechanism.png)
 
 ### The Proposed Coordination Mechanism
 1. **Preventing xApp Myopia:** A standalone xApp optimizing purely on instantaneous radio channel states (CQI/RSRP) often causes ping-pong handovers or starves lower-priority slices. The rApp introduces **stability thresholds and slice QoS weights** via A1 to enforce global optimality over long horizons.
@@ -322,6 +105,121 @@ All virtual machines run on Ubuntu 22.04 LTS interconnected via static IP assign
 | **PLMN Identity** | `MCC = 208, MNC = 95` | `MCC = 208, MNC = 95` | 3GPP TS 38.413 / TS 23.003 |
 | **Tracking Area** | `TAC = 0xa000` (`40960`) | `TAC = 0xa000` (`40960`) | 3GPP TS 24.501 |
 | **Cell Allocation** | Cell-1 (DU-1, PCI 1, rfsim :4043) | Cell-2 (DU-2, PCI 2, rfsim :4044) | 3GPP TS 38.211 (PCI 0–1007) |
+
+### 5.1 Extension Guide: How to Add a New Network Slice
+
+The experimental platform is architected to scale beyond the initial 2 slices (e.g., adding **Slice 3 — Massive IoT / Custom**, with `SST = 3`, `SD = 0x000003` / decimal `3`, and `DNN = iot`). Because network slicing spans the end-to-end 3GPP protocol stack, adding a slice requires synchronized configuration across all system layers:
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│ VM-3 (5G Core)                                                         │
+│  1. MySQL: Provision subscriber (IMSI, SST, SD, DNN)                   │
+│  2. AMF: Expose supported SST/SD via docker-compose environment        │
+│  3. NSSF: Register S-NSSAI to SMF/UPF mapping profile                  │
+│  4. SMF/UPF: Spawn oai_smf_slice3 & oai_upf_slice3 on 192.168.70.0/24   │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ N2 / N3
+┌───────────────────────────────────▼────────────────────────────────────┐
+│ VM-4 (OAI RAN)                                                         │
+│  5. cu_gnb.conf: Append { sst = 3; sd = 0x000003; } to snssaiList      │
+│  6. du_gnb*.conf: Append { sst = 3; sd = 0x000003; } to cell slice list │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ RFsim (:4043/:4044)
+┌───────────────────────────────────▼────────────────────────────────────┐
+│ VM-5 (OAI nrUE)                                                        │
+│  7. Launch UE with --uicc0.nssai_sst 3 --uicc0.nssai_sd 3 --dnn iot    │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ E2 / A1
+┌───────────────────────────────────▼────────────────────────────────────┐
+│ VM-2 (Near-RT RIC) & VM-1 (Non-RT RIC)                                 │
+│  8. E2SM-SLICE / E2SM-KPM: Collect Slice-3 PRB usage and delay         │
+│  9. rApp / xApp: Apply traffic steering policy targeting Slice-3 SLA   │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Step 1: Provision Subscriber in 5GC MySQL Database (VM-3)
+Register the new S-NSSAI for the target UE identity (e.g., IMSI `208950000000033` or additional slice for `208950000000031`) in MySQL (`database/oai_db2.sql` or live container):
+```sql
+-- Connect to MySQL container
+docker exec -it mysql mysql -uroot -plinux -D oai_db
+
+-- Add Session Management Subscription for Slice 3
+INSERT INTO `SessionManagementSubscriptionData` (`ueid`, `servingPlmnid`, `sequenceNumber`, `sst`, `sd`, `dnisArray`)
+VALUES ('208950000000033', '20895', 1, 3, '000003', '{"iot":{"dnn": "iot"}}');
+
+-- (Optional) If using a new IMSI, insert authentication credentials:
+INSERT INTO `AuthenticationSubscription` (`ueid`, `authenticationMethod`, `encPermanentKey`, `protectionParameterId`, `sequenceNumber`, `authenticationManagementField`, `algorithmId`, `encOpcKey`, `encTopcKey`, `vectorGenerationInHss`)
+VALUES ('208950000000033', '5G_AKA', '0C0A34601D4F07677303652C0462535B', '0C0A34601D4F07677303652C0462535B', '000000000000', '8000', 'milenage', '63bfa50ee6523365ff14c1f45f88737d', NULL, 0);
+```
+
+#### Step 2: Register Slice in Core Network Functions (VM-3)
+Edit `/opt/oran/5gc/oai-cn5g-fed/docker-compose/docker-compose-slicing-basic-nrf.yaml`:
+
+1. **AMF Configuration:** Append Slice 3 to supported S-NSSAI environment variables:
+   ```yaml
+   oai_amf:
+     environment:
+       # Existing Slice 0 & 1 variables...
+       - SST_2=3                     # [MANDATORY MATCH RAN/UE] Slice 3 SST
+       - SD_2=3                      # [MANDATORY MATCH RAN/UE] Slice 3 SD
+       - SERVED_GUAMI_SST_2=3
+       - SERVED_GUAMI_SD_2=3
+       - PLMN_SUPPORT_SST_2=3
+       - PLMN_SUPPORT_SD_2=3
+   ```
+
+2. **NSSF Configuration (`conf/nssf_slice_config.yaml`):** Register S-NSSAI `[SST: 3, SD: 3]` so NSSF selects candidate SMF/UPF instances upon PDU Session Establishment.
+
+3. **Deploy Dedicated SMF & UPF Instances:**
+   Add `oai_smf_slice3` and `oai_upf_slice3` container definitions:
+   - Dedicated UPF IP on Docker bridge: `192.168.70.144:2152`
+   - Dedicated UE IPv4 Subnet Pool: `12.1.3.0/24`
+   - Data Network Name (DNN): `iot`
+   - Add routing and NAT masquerade rule in `oai_ext_dn` for subnet `12.1.3.0/24`.
+
+4. **Restart 5GC stack:**
+   ```bash
+   cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
+   docker compose -f docker-compose-slicing-basic-nrf.yaml up -d
+   ```
+
+#### Step 3: Advertise Supported Slice in RAN CU & DU (VM-4)
+1. **Update CU Configuration (`/opt/oran/ran/conf/cu_gnb.conf`):**
+   Append Slice 3 under `plmn_list[0].snssaiList`:
+   ```hcl
+   snssaiList = (
+     { sst = 1; sd = 0x000001; },      # Slice 1: eMBB
+     { sst = 222; sd = 0x00007B; },    # Slice 2: Low Latency
+     { sst = 3; sd = 0x000003; }       # Slice 3: IoT / Custom [NEW]
+   );
+   ```
+
+2. **Update DU Configurations (`/opt/oran/ran/conf/du_gnb1.conf` & `du_gnb2.conf`):**
+   Add `{ sst = 3; sd = 0x000003; }` to `snssaiList` for any cell (Cell-1, Cell-2, or both) designated to host Slice 3.
+
+3. **Restart CU and DUs:**
+   ```bash
+   # Restart CU and DU softmodems
+   # CU sends NGSetupRequest to AMF; AMF validates SST=1, 222, 3 against its configured list.
+   ```
+   *Validation:* In CU log, confirm: `[NGAP] Received NGSetupResponse with 3 supported slices`.
+
+#### Step 4: Attach nrUE on the New Slice (VM-5)
+Launch the simulated UE requesting the new S-NSSAI:
+```bash
+cd /opt/oran/ran/openairinterface5g/cmake_targets/ran_build/build
+sudo ./nr-uesoftmodem -r 106 --numerology 1 --band 78 -C 3619200000 \
+  --rfsim --rfsimulator.serveraddr 10.10.10.14 --rfsimulator.serverport 4043 \
+  --uicc0.imsi 208950000000033 \
+  --uicc0.nssai_sst 3 \
+  --uicc0.nssai_sd 3 \
+  --uicc0.dnn iot
+```
+*Validation:* Confirm tunnel `oaitun_ue1` receives an IP from `12.1.3.0/24` (e.g., `12.1.3.2`) and can reach `12.1.3.1`.
+
+#### Step 5: Incorporate into O-RAN RIC Telemetry & Steering (VM-2 & VM-1)
+1. **VM-2 (Near-RT RIC xApp):** The FlexRIC E2 Agent (`slice_sm`) on VM-4 automatically exposes metrics tagged with `sst: 3, sd: 3`. The xApp can now read Slice 3 PRB utilization and apply slice-differentiated handover decisions.
+2. **VM-1 (Non-RT RIC rApp):** In A1 Policy Management Service, define policy instances targeting `sst: 3, sd: 3` to enforce distinct SLA bounds (e.g., maximum delay, throughput floors, or target DU preference).
 
 ---
 

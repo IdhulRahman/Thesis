@@ -44,65 +44,7 @@ Long-timescale QoS adaptation
 
 ## 2. High-Level Topology
 
-```text
-                         ┌──────────────────────────────┐
-                         │            VM-1              │
-                         │         Non-RT RIC           │
-                         │                              │
-                         │  Custom QoS-aware rApp       │
-                         │            │                 │
-                         │            ▼                 │
-                         │  A1 Policy Management        │
-                         │  Service                     │
-                         └──────────────┬───────────────┘
-                                        │
-                                        │ A1
-                                        ▼
-                         ┌──────────────────────────────┐
-                         │            VM-2              │
-                         │         Near-RT RIC          │
-                         │                              │
-                         │  A1 Compatibility Shim       │
-                         │            │                 │
-                         │            ▼                 │
-                         │  A1 Mediator                 │
-                         │            │                 │
-                         │            ▼                 │
-                         │  QoS Traffic-Steering xApp   │
-                         │            │                 │
-                         │            ▼                 │
-                         │  E2Term / E2Mgr / SubMgr     │
-                         └──────────────┬───────────────┘
-                                        │
-                                        │ E2
-                                        ▼
-                         ┌──────────────────────────────┐
-                         │            VM-4              │
-                         │           OAI RAN            │
-                         │                              │
-                         │  CU                          │
-                         │   ├── DU-1 / Cell-1          │
-                         │   └── DU-2 / Cell-2          │
-                         │                              │
-                         │  OAI E2 Agent                │
-                         └──────────────┬───────────────┘
-                                        │
-                          RFsim / F1 / RAN connectivity
-                                        │
-                                        ▼
-                         ┌──────────────────────────────┐
-                         │            VM-5              │
-                         │          OAI nrUE            │
-                         └──────────────────────────────┘
-
-       ┌────────────────────────────┐     ┌────────────────────────────┐
-       │            VM-3            │     │            VM-6            │
-       │          OAI 5GC           │     │     Monitoring & Data      │
-       │                            │     │                            │
-       │ AMF / SMF / UPF            │     │ Prometheus / Grafana       │
-       │ NSSF / PCF / NRF / UDM...  │     │ Experiment logger / DB     │
-       └────────────────────────────┘     └────────────────────────────┘
-```
+![High-Level System Architecture Overview](diagram/High-Level%20System%20Architecture%20Overview.png)
 
 ---
 
@@ -125,37 +67,7 @@ The platform uses the subnet:
 
 The IP assignments are static so that component configuration remains reproducible across experiment runs.
 
----
-
-## 4. Main Architectural Layers
-
-The system is divided into four logical layers.
-
-```text
-┌──────────────────────────────────────┐
-│ Non-RT Control Layer                 │
-│ rApp + A1 Policy Management          │
-└──────────────────┬───────────────────┘
-                   │ A1
-┌──────────────────▼───────────────────┐
-│ Near-RT Control Layer                │
-│ A1 Mediator + xApp + Near-RT RIC     │
-└──────────────────┬───────────────────┘
-                   │ E2
-┌──────────────────▼───────────────────┐
-│ RAN and Core Layer                   │
-│ OAI 5GC + CU + DU-1 + DU-2 + nrUE   │
-└──────────────────┬───────────────────┘
-                   │
-┌──────────────────▼───────────────────┐
-│ Monitoring and Experiment Layer      │
-│ Metrics + logs + experiment dataset  │
-└──────────────────────────────────────┘
-```
-
----
-
-## 5. Non-RT Control Layer
+## 4. Non-RT Control Layer
 
 VM-1 represents the Non-RT side of the control architecture.
 
@@ -189,7 +101,7 @@ The rApp does not directly perform per-second handover or steering decisions.
 
 ---
 
-## 6. Near-RT Control Layer
+## 5. Near-RT Control Layer
 
 VM-2 represents the Near-RT control layer.
 
@@ -241,7 +153,7 @@ that are later applied through E2 control.
 
 ---
 
-## 7. Multi-Timescale Coordination
+## 6. Multi-Timescale Coordination
 
 The central research mechanism is the interaction between two different control loops.
 
@@ -313,7 +225,7 @@ steering execution
 
 ---
 
-## 8. A1 Control Path
+## 7. A1 Control Path
 
 The validated A1 path is:
 
@@ -363,7 +275,7 @@ Detailed setup:
 
 ---
 
-## 9. E2 Control Path
+## 8. E2 Control Path
 
 The planned E2 path is:
 
@@ -407,7 +319,7 @@ The exact OAI service-model configuration will be frozen after VM-4 integration 
 
 ---
 
-## 10. RAN Architecture
+## 9. RAN Architecture
 
 The planned RAN architecture uses:
 
@@ -450,7 +362,7 @@ Cell-2
 
 ---
 
-## 11. 5G Core Architecture
+## 10. 5G Core Architecture
 
 VM-3 hosts the OAI 5G Core.
 
@@ -474,7 +386,7 @@ The 5GC is kept on a separate VM so that core-network issues can be isolated fro
 
 ---
 
-## 12. UE Architecture
+## 11. UE Architecture
 
 VM-5 hosts software-based OAI nrUE instances.
 
@@ -497,7 +409,7 @@ The UE environment is used to generate repeatable software-only experiments for:
 
 ---
 
-## 13. Slice Model
+## 12. Slice Model
 
 The initial research setup uses two logical slices.
 
@@ -535,7 +447,7 @@ The low-latency slice should not be presented as a full standards-compliant URLL
 
 ---
 
-## 14. Traffic-Steering Decision Model
+## 13. Traffic-Steering Decision Model
 
 The initial steering action space is:
 
@@ -584,7 +496,7 @@ Action
 
 ---
 
-## 15. DRL Integration
+## 14. DRL Integration
 
 DRL training is planned to be performed outside VM-2, primarily on a laptop or training environment.
 
@@ -607,7 +519,7 @@ The training dataset can be produced from experiment data exported from VM-6.
 
 ---
 
-## 16. Monitoring and Data Flow
+## 15. Monitoring and Data Flow
 
 VM-6 is dedicated to monitoring and experiment data.
 
@@ -644,7 +556,7 @@ This allows the control decisions to be correlated with network outcomes.
 
 ---
 
-## 17. Experimental Baselines
+## 16. Experimental Baselines
 
 The architecture is designed so that all baselines can use the same infrastructure.
 
@@ -694,7 +606,7 @@ stability mechanism
 
 ---
 
-## 18. Main Evaluation Objectives
+## 17. Main Evaluation Objectives
 
 The architecture supports evaluation of three main hypotheses.
 
@@ -712,7 +624,7 @@ Multi-timescale coordination improves steering stability and reduces ping-pong b
 
 ---
 
-## 19. Main Experiment Flow
+## 18. Main Experiment Flow
 
 A complete experiment is expected to follow this sequence:
 
@@ -749,7 +661,7 @@ A complete experiment is expected to follow this sequence:
 
 ---
 
-## 20. Network Interfaces
+## 19. Network Interfaces
 
 The main interfaces are:
 
@@ -765,7 +677,7 @@ The main interfaces are:
 
 ---
 
-## 21. Implementation Status
+## 20. Implementation Status
 
 Current status:
 
@@ -795,7 +707,7 @@ VM-6 monitoring              ⏳
 
 ---
 
-## 22. Architecture Boundaries
+## 21. Architecture Boundaries
 
 The following are intentionally outside the current scope:
 
@@ -810,7 +722,7 @@ The platform is an experimental research environment focused on reproducibility 
 
 ---
 
-## 23. Design Principle
+## 22. Design Principle
 
 The architecture follows one simple separation:
 

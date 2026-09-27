@@ -615,6 +615,49 @@ All acceptance criteria have been verified on VM-4:
 
 ---
 
+## 11. Extension Guide: Adding a New Network Slice to RAN (CU/DU)
+
+To configure CU and DUs to advertise and support an additional slice (e.g., **Slice 3 — Massive IoT**, `SST = 3`, `SD = 0x000003`):
+
+### Step 1: Update CU Configuration (`/opt/oran/ran/conf/cu_gnb.conf`)
+Under `gNBs.plmn_list[0].snssaiList`, append the new S-NSSAI:
+```hcl
+      snssaiList = (
+        { sst = 1; sd = 0x000001; },      # Slice 1: eMBB
+        { sst = 222; sd = 0x00007B; },    # Slice 2: Low Latency
+        { sst = 3; sd = 0x000003; }       # Slice 3: IoT / Custom [NEW]
+      );
+```
+
+### Step 2: Update DU Configurations (`/opt/oran/ran/conf/du_gnb1.conf` & `du_gnb2.conf`)
+Append the slice to `snssaiList` in `du_gnb1.conf` (for Cell-1) and/or `du_gnb2.conf` (for Cell-2):
+```hcl
+    plmn_list = ({
+      mcc = 208;
+      mnc = 95;
+      mnc_length = 2;
+      snssaiList = (
+        { sst = 1, sd = 0x000001 },
+        { sst = 222, sd = 0x00007B },
+        { sst = 3, sd = 0x000003 }        # Slice 3: IoT / Custom [NEW]
+      );
+    });
+```
+
+### Step 3: Restart Services & Verify NGAP Association
+Restart CU and DUs in sequence:
+```bash
+# In CU terminal
+sudo ./nr-softmodem -O /opt/oran/ran/conf/cu_gnb.conf 2>&1 | tee /opt/oran/ran/cu.log
+
+# In DU-1 and DU-2 terminals
+sudo ./nr-softmodem -O /opt/oran/ran/conf/du_gnb1.conf --rfsim 2>&1 | tee /opt/oran/ran/du1.log
+sudo ./nr-softmodem -O /opt/oran/ran/conf/du_gnb2.conf --rfsim 2>&1 | tee /opt/oran/ran/du2.log
+```
+*Verification:* Inspect `/opt/oran/ran/cu.log` to confirm that `NGSetupResponse` from AMF acknowledges all three slices without rejection.
+
+---
+
 ## References
 - 3GPP TS 23.501: System architecture for the 5G System (Stage 2)
 - 3GPP TS 38.413: NG-RAN; NG Application Protocol (NGAP)
@@ -622,3 +665,4 @@ All acceptance criteria have been verified on VM-4:
 - 3GPP TS 38.211: NR; Physical channels and modulation (PCI)
 - O-RAN WG3: E2 Application Protocol (E2AP) v02.03
 - OpenAirInterface 5G RAN Repository: https://gitlab.eurecom.fr/oai/openairinterface5g
+

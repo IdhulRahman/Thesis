@@ -272,8 +272,69 @@ All acceptance checks have passed on VM-3:
 
 ---
 
+## 11. Extension Guide: Adding a New Network Slice to 5GC
+
+To add a 3rd network slice (e.g., **Slice 3 — Massive IoT**, `SST = 3`, `SD = 0x000003` / decimal `3`, DNN `iot`, UPF IP `192.168.70.144`, UE pool `12.1.3.0/24`), follow these steps on VM-3:
+
+### Step 1: Provision Subscriber in MySQL Database
+```sql
+-- Connect to MySQL container
+docker exec -it mysql mysql -uroot -plinux -D oai_db
+
+-- Add Session Management Data for the UE
+INSERT INTO `SessionManagementSubscriptionData` (`ueid`, `servingPlmnid`, `sequenceNumber`, `sst`, `sd`, `dnisArray`)
+VALUES ('208950000000033', '20895', 1, 3, '000003', '{"iot":{"dnn": "iot"}}');
+
+-- (Optional) If using a new IMSI, insert authentication record into AuthenticationSubscription:
+INSERT INTO `AuthenticationSubscription` (`ueid`, `authenticationMethod`, `encPermanentKey`, `protectionParameterId`, `sequenceNumber`, `authenticationManagementField`, `algorithmId`, `encOpcKey`, `encTopcKey`, `vectorGenerationInHss`)
+VALUES ('208950000000033', '5G_AKA', '0C0A34601D4F07677303652C0462535B', '0C0A34601D4F07677303652C0462535B', '000000000000', '8000', 'milenage', '63bfa50ee6523365ff14c1f45f88737d', NULL, 0);
+```
+
+### Step 2: Register Slice in AMF (`docker-compose-slicing-basic-nrf.yaml`)
+Under `services.oai_amf.environment`, declare the 3rd slice:
+```yaml
+            - SST_2=3                     # [MANDATORY MATCH RAN/UE] Slice 3 SST
+            - SD_2=3                      # [MANDATORY MATCH RAN/UE] Slice 3 SD (0x000003)
+            - SERVED_GUAMI_SST_2=3
+            - SERVED_GUAMI_SD_2=3
+            - PLMN_SUPPORT_SST_2=3
+            - PLMN_SUPPORT_SD_2=3
+```
+
+### Step 3: Register Slice in NSSF (`conf/nssf_slice_config.yaml`)
+Add the S-NSSAI mapping entry:
+```yaml
+configuration:
+  slices:
+    - sst: 3
+      sd: 3
+      candidate_nssais:
+        - sst: 3
+          sd: 3
+          dnn: "iot"
+          default_smf_id: "smf-slice3"
+```
+
+### Step 4: Define Dedicated SMF and UPF Services
+In `docker-compose-slicing-basic-nrf.yaml`, add the `oai_smf_slice3` and `oai_upf_slice3` container definitions:
+- Assign static IP: `192.168.70.144` on `demo-net`.
+- Configure DNN: `iot`.
+- Allocate UE IP pool: `12.1.3.0/24`.
+- Add `12.1.3.0/24` subnet routing rule to `oai_ext_dn`.
+
+### Step 5: Restart Core Services & Verify
+```bash
+cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
+docker compose -f docker-compose-slicing-basic-nrf.yaml up -d
+docker logs oai-nssf | grep -i "3"
+docker logs oai-amf | grep -i "SST"
+```
+
+---
+
 ## References
 - 3GPP TS 23.501: System Architecture for the 5G System
 - 3GPP TS 38.413: NG Application Protocol (NGAP)
 - 3GPP TS 33.501: Security Architecture and Procedures for 5G
 - OAI CN5G Federation: https://github.com/OPENAIRINTERFACE/oai-cn5g-fed
+
