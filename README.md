@@ -14,76 +14,190 @@ The platform is deployed entirely on virtual machines connected over a dedicated
 The experimental testbed implements a fully disaggregated, standards-compliant O-RAN and 3GPP Release 16/17 network divided across 6 dedicated virtual machines:
 
 ```mermaid
-graph TB
-    subgraph NonRT["VM-1: Non-RT RIC (10.10.10.11)"]
-        rApp["QoS-Aware rApp<br/>(Long-Timescale > 1s)"]
-        A1PMS["O-RAN SC A1 PMS<br/>(Policy Management Service v2.6.0)"]
-        rApp -->|REST API| A1PMS
+flowchart TB
+
+    %% =====================================================
+    %% NON-RT RIC
+    %% =====================================================
+
+    subgraph VM1["VM-1 — Non-RT RIC | 10.10.10.11"]
+        
+        rApp["QoS-Aware Traffic-Steering rApp<br/>Long-Timescale Control (> 1 s)<br/><br/>Traffic Prediction<br/>QoS/SLA Analysis<br/>Policy Generation"]
+        
+        A1PMS["O-RAN SC A1 Policy<br/>Management Service"]
+        
+        rApp -->|"REST / Policy API"| A1PMS
     end
 
-    subgraph NearRT["VM-2: Near-RT RIC (10.10.10.12)"]
-        A1Shim["A1 Compatibility Shim<br/>(NGINX :10001)"]
-        A1Med["A1 Mediator<br/>(:10000)"]
-        xApp["QoS Traffic-Steering xApp<br/>(Near-Real-Time 10ms - 1s)"]
-        E2Mgr["E2 Manager<br/>(ric_e2mgr)"]
-        DBaaS[("DBaaS / RNIB<br/>(Redis 5.0.9 :6379)")]
-        SubMgr["Subscription Manager<br/>(ric_submgr)"]
-        E2Term["E2 Termination<br/>(ric_e2term :36421/SCTP)"]
+
+    %% =====================================================
+    %% NEAR-RT RIC
+    %% =====================================================
+
+    subgraph VM2["VM-2 — O-RAN SC Near-RT RIC | 10.10.10.12"]
+        
+        A1Shim["A1 Compatibility Layer<br/>(Experimental Integration)"]
+
+        A1Med["O-RAN SC<br/>A1 Mediator"]
+
+        xApp["QoS-Aware Traffic-Steering xApp<br/>Near-RT Closed Loop<br/>(10 ms - 1 s domain)"]
+
+        SubMgr["Subscription Manager"]
+        E2Term["E2 Termination"]
+        E2Mgr["E2 Manager"]
+        RNIB[("DBaaS / RNIB")]
 
         A1Shim --> A1Med
-        A1Med -->|RMR 20010| xApp
-        xApp -->|RMR 20011 RTS| A1Med
-        xApp -->|RMR| SubMgr
-        E2Term -->|RMR 12001| E2Mgr
-        E2Mgr -->|SDL| DBaaS
-        SubMgr -->|RMR| E2Term
+        
+        A1Med -->|"A1 Policy via RMR"| xApp
+        xApp -->|"Policy Status"| A1Med
+
+        xApp -->|"E2 Subscription"| SubMgr
+        SubMgr --> E2Term
+
+        E2Term -->|"E2 Indication<br/>KPI / Measurement"| xApp
+        xApp -->|"E2 Control Request"| E2Term
+
+        E2Term --> E2Mgr
+        E2Mgr --> RNIB
     end
 
-    subgraph Core["VM-3: OAI 5G Core Multi-Slice (10.10.10.13)"]
-        AMF["oai-amf<br/>(:38412/SCTP)"]
-        SMF1["oai-smf-slice1"]
-        UPF1["oai-upf-slice1<br/>(192.168.70.142:2152)"]
-        SMF2["oai-smf-slice2"]
-        UPF2["oai-upf-slice2<br/>(192.168.70.143:2152)"]
-        NFs["NRF / UDM / UDR / AUSF / NSSF"]
-        MySQL[("MySQL Database<br/>(oai_db2.sql)")]
+
+    %% =====================================================
+    %% OAI RAN
+    %% =====================================================
+
+    subgraph VM4["VM-4 — OAI 5G RAN | 10.10.10.14"]
+
+        subgraph CU["OAI Central Unit"]
+            CUCP["CU-CP<br/>RRC / PDCP-C"]
+            CUUP["CU-UP<br/>SDAP / PDCP-U"]
+
+            CUCP <-->|E1 logical split| CUUP
+        end
+
+        DU1["OAI DU-1<br/>Cell-1<br/>RLC / MAC / PHY"]
+        DU2["OAI DU-2<br/>Cell-2<br/>RLC / MAC / PHY"]
+
+        E2Agent["OAI / FlexRIC E2 Agent<br/>E2AP + E2 Service Models<br/>KPM / RC"]
+
+        CUCP <-->|F1-C| DU1
+        CUUP <-->|F1-U| DU1
+
+        CUCP <-->|F1-C| DU2
+        CUUP <-->|F1-U| DU2
+
+        E2Agent --- CU
+        E2Agent --- DU1
+        E2Agent --- DU2
     end
 
-    subgraph RAN["VM-4: OAI 5G RAN Split CU/DU (10.10.10.14)"]
-        CU["gNodeB Centralized Unit (CU)<br/>RRC / PDCP / SDAP"]
-        E2Agent["FlexRIC E2 Agent<br/>(KPM, RC, Slice, MAC, RLC, PDCP)"]
-        DU1["Distributed Unit 1 (DU-1)<br/>Cell-1 (PCI: 1, :4043)"]
-        DU2["Distributed Unit 2 (DU-2)<br/>Cell-2 (PCI: 2, :4044)"]
 
-        CU --- E2Agent
-        CU -->|F1-C/U 127.0.0.4| DU1
-        CU -->|F1-C/U 127.0.0.5| DU2
+    %% =====================================================
+    %% UE / RADIO EMULATION
+    %% =====================================================
+
+    subgraph VM5["VM-5 — OAI nrUE Emulator | 10.10.10.15"]
+
+        RFsim["RF Simulator<br/>(Radio Channel Emulation)"]
+
+        UE1["nrUE-1<br/>eMBB"]
+        UE2["nrUE-2<br/>URLLC-like"]
+        UE3["nrUE-3<br/>mMTC"]
+
+        Mobility["Mobility / Handover<br/>Scenario Controller"]
+
+        RFsim --- UE1
+        RFsim --- UE2
+        RFsim --- UE3
+
+        Mobility --> RFsim
     end
 
-    subgraph UE["VM-5: OAI nrUE Emulator (10.10.10.15)"]
-        UE1["nrUE Instance 1<br/>(Slice 1: eMBB)"]
-        UE2["nrUE Instance 2<br/>(Slice 2: Low-Latency)"]
-        UEMulti["Multi-UE Mobility Daemon"]
+
+    %% =====================================================
+    %% 5G CORE
+    %% =====================================================
+
+    subgraph VM3["VM-3 — OAI 5G Core | 10.10.10.13"]
+
+        AMF["AMF"]
+
+        NSSF["NSSF"]
+        NRF["NRF"]
+        AUSF["AUSF"]
+        UDM["UDM / UDR"]
+
+        SMF1["SMF — Slice 1"]
+        UPF1["UPF — Slice 1<br/>eMBB"]
+
+        SMF2["SMF — Slice 2"]
+        UPF2["UPF — Slice 2<br/>URLLC-like"]
+
+        SMF3["SMF / Policy Mapping<br/>Slice 3 — mMTC"]
+
+        AMF --- NSSF
+        AMF --- NRF
+        AMF --- AUSF
+        AMF --- UDM
+
+        SMF1 --> UPF1
+        SMF2 --> UPF2
     end
 
-    subgraph Monitoring["VM-6: Telemetry & Monitoring (10.10.10.16)"]
-        Prometheus["Prometheus TSDB"]
-        Grafana["Grafana Dashboards"]
-        DataLogger["Experiment Data Logger<br/>(KPI CSV / Database)"]
+
+    %% =====================================================
+    %% MONITORING
+    %% =====================================================
+
+    subgraph VM6["VM-6 — Monitoring & Experimentation | 10.10.10.16"]
+
+        Prom["Prometheus"]
+        Grafana["Grafana"]
+
+        Logger["Experiment Data Logger<br/>Latency / Jitter / Throughput<br/>Loss / PRB / SLA"]
+
+        Prom --> Grafana
+        Prom --> Logger
     end
 
-    %% Inter-VM Network Connections
-    A1PMS ==>|A1 Interface / HTTP| A1Shim
-    E2Agent ==>|E2 Interface / SCTP :36421| E2Term
-    CU ==>|N2 NG-AP / SCTP :38412| AMF
-    CU ==>|N3 GTP-U / UDP :2152| UPF1
-    CU ==>|N3 GTP-U / UDP :2152| UPF2
-    DU1 ==>|RFsim TCP :4043| UE1
-    DU2 ==>|RFsim TCP :4044| UE2
-    UE1 -.->|PDU Session 1: eMBB| UPF1
-    UE2 -.->|PDU Session 2: Low-Latency| UPF2
-    RAN -.->|Telemetry / Metrics| Prometheus
-    NearRT -.->|A1/E2 Decision Logs| DataLogger
+
+    %% =====================================================
+    %% STANDARD / EXPERIMENTAL INTERFACES
+    %% =====================================================
+
+    A1PMS ==>|"A1 Policy Interface"| A1Shim
+
+    E2Agent ==>|"E2 / E2AP over SCTP"| E2Term
+
+
+    %% =====================================================
+    %% RAN — CORE
+    %% =====================================================
+
+    CUCP ==>|"N2 / NGAP<br/>Control Plane"| AMF
+
+    CUUP ==>|"N3 / GTP-U<br/>User Plane"| UPF1
+
+    CUUP ==>|"N3 / GTP-U<br/>User Plane"| UPF2
+
+
+    %% =====================================================
+    %% RADIO EMULATION
+    %% =====================================================
+
+    DU1 ==>|"RFsim — Cell 1"| RFsim
+    DU2 ==>|"RFsim — Cell 2"| RFsim
+
+
+    %% =====================================================
+    %% TELEMETRY
+    %% =====================================================
+
+    VM4 -.->|"RAN KPI"| Prom
+    VM2 -.->|"RIC Decision / Policy Logs"| Logger
+    VM5 -.->|"UE QoS Measurements"| Logger
+    VM3 -.->|"Core / Slice Metrics"| Prom
 ```
 
 ---
@@ -92,48 +206,44 @@ graph TB
 
 The fundamental contribution of this thesis is the **coordination mechanism between two asynchronous control loops** operating at different timescales to resolve the trade-off between long-term QoS guarantee and immediate radio resource optimization:
 
-```text
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          TIER 1: STRATEGIC CONTROL                          │
-│                Non-RT RIC (rApp) — Timescale: > 1 second (Slow)             │
-│                                                                             │
-│  - Aggregates historical KPI/SLA violation trends from VM-6 Prometheus     │
-│  - Evaluates inter-slice resource sharing and operator policy intent        │
-│  - Dynamically synthesizes A1 Policy Types (e.g. Type 20008, QoS Targets)   │
-│  - Delivers declarative guidance & utility bounds to Near-RT RIC           │
-└──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │
-                                       │ A1 Interface (REST / JSON)
-                                       │ "Enforce Slice 2 Latency <= 15ms;
-                                       │  If Cell-1 PRB > 75%, steer eMBB UEs"
-                                       ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          TIER 2: TACTICAL CONTROL                           │
-│             Near-RT RIC (xApp) — Timescale: 10ms - 1000ms (Fast)            │
-│                                                                             │
-│  - Receives A1 policy constraints as boundary conditions                    │
-│  - Ingests real-time RAN telemetry via E2SM-KPM (PRB usage, CQI, RSRP)      │
-│  - Solves near-real-time optimization (DRL / Heuristic Traffic Steering)    │
-│  - Emits E2 Control Actions (E2SM-RC) without violating A1 policy bounds    │
-└──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │
-                                       │ E2 Interface (E2AP / SCTP)
-                                       │ E2SM-RC: Trigger Handover / Context Mod
-                                       ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       RADIO ACCESS & SLICING ACTUATION                      │
-│                  OAI 5G RAN (CU + DU-1 + DU-2) + OAI 5GC                    │
-│                                                                             │
-│  - Executes UE handover between Cell-1 (DU-1) and Cell-2 (DU-2)             │
-│  - Dynamically adjusts MAC PRB quota between Slice 1 and Slice 2            │
-│  - Preserves URLLC packet delivery while maximizing eMBB bulk throughput    │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+
+    Traffic["Historical Traffic<br/>Long-Term KPI"]
+
+    rApp["QoS-Aware rApp<br/>> 1 s"]
+
+    A1["A1 Policy<br/>QoS Constraints"]
+
+    xApp["Traffic-Steering xApp<br/>Near-RT"]
+
+    RAN["OAI CU / DU<br/>Multi-Cell RAN"]
+
+    UE["Multi-Slice UEs<br/>eMBB / URLLC-like / mMTC"]
+
+    KPI["KPI<br/>PRB / Load / Latency<br/>Throughput / Loss / Jitter"]
+
+    Traffic --> rApp
+
+    rApp -->|"Prediction + Policy"| A1
+
+    A1 --> xApp
+
+    xApp -->|"E2 Control"| RAN
+
+    RAN --> UE
+
+    UE --> KPI
+
+    KPI -->|"E2 KPM / Telemetry"| xApp
+
+    KPI -->|"Historical Aggregation"| rApp
 ```
 
 ### The Proposed Coordination Mechanism
-1. **Preventing xApp Myopia:** A standalone xApp optimizing purely on instantaneous radio channel states (CQI/RSRP) often causes ping-pong handovers or starves lower-priority slices. The rApp introduces **stability thresholds and slice QoS weights** via A1 to enforce global optimality.
-2. **Conflict-Free Hierarchical Decision Making:** The rApp sets the *policy space* (e.g., maximum allowed handover frequency, minimum guaranteed PRB ratio), while the xApp selects the *instantaneous actuation* within that space.
-3. **Closed-Loop Feedback:** The xApp returns A1 policy enforcement status (`ENFORCED` / `NOT_ENFORCED`) back to the rApp, completing the outer control loop.
+1. **Preventing xApp Myopia:** A standalone xApp optimizing purely on instantaneous radio channel states (CQI/RSRP) often causes ping-pong handovers or starves lower-priority slices. The rApp introduces **stability thresholds and slice QoS weights** via A1 to enforce global optimality over long horizons.
+2. **Conflict-Free Hierarchical Decision Making:** The rApp sets the *policy space* (e.g., maximum allowed handover frequency, minimum guaranteed PRB ratio), while the xApp selects the *instantaneous actuation* within that boundary.
+3. **Closed-Loop Feedback:** The xApp returns A1 policy enforcement status (`ENFORCED` / `NOT_ENFORCED`) back to the rApp, completing the outer multi-timescale control loop.
 
 ---
 
