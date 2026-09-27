@@ -353,19 +353,41 @@ docker compose \
 
 ---
 
-## 8. E2Mgr Fails Because DBaaS Is Not Ready
+## 8. E2Mgr / SubMgr Fails Because DBaaS Is Not Ready or Not Resolved
 
 ### Symptom
 
-E2Mgr logs may show:
+E2Mgr or SubMgr logs may show:
 
 ```text
 dial tcp 10.0.2.12:6379: connect: connection refused
 ```
 
+or:
+
+```text
+dial tcp [::1]:6379: connect: connection refused
+```
+
+and SubMgr may report:
+
+```text
+SDL: ReadAllSubscriptionsFromSdl(), GetAll(). Error while reading E2 subscriptions keys from DBAAS dial tcp [::1]:6379: connect: connection refused
+```
+
 ### Cause
 
-E2Mgr starts before DBaaS is ready.
+1. E2Mgr or SubMgr starts before DBaaS is ready, or
+2. `DBAAS_SERVICE_HOST` is not explicitly passed to `e2mgr` and `submgr` in `docker-compose.yml`, causing the O-RAN SC SDL library to fall back to `localhost` (`[::1]`).
+
+### Fix
+
+Ensure the `environment:` section of `e2mgr`, `submgr`, and `appmgr` in `docker-compose.yml` includes:
+
+```yaml
+- DBAAS_SERVICE_HOST=${DBAAS_IP}
+- DBAAS_SERVICE_PORT=${DBAAS_PORT}
+```
 
 ### Validated Startup Order
 
@@ -704,7 +726,12 @@ The smoke-test xApp uses:
 RMR return-to-sender (RTS)
 ```
 
-for the `20011` response.
+for the `20011` response via `ricxappframe`. Note that the method expects `new_payload`, not `payload`:
+
+```python
+self.rmr_rts(sbuf, new_payload=ack_body, new_mtype=20011)
+self.rmr_free(sbuf)
+```
 
 Check status:
 
@@ -1200,6 +1227,286 @@ A1 Mediator
       │
       ▼
 ENFORCED
+---
+
+# VM-3 & VM-4 — Core to RAN Networking
+
+## 23. VM-4 Cannot Reach VM-3 5GC Containers (100% Packet Loss on 192.168.70.x)
+
+### Symptom
+On VM-4 (`10.10.10.14`), `ping 10.10.10.13` (VM-3 host) succeeds with 0% packet loss, but `ping 192.168.70.138` (AMF container) fails with 100% packet loss:
+
+```text
+PING 192.168.70.138 (192.168.70.138) 56(84) bytes of data.
+--- 192.168.70.138 ping statistics ---
+2 packets transmitted, 0 received, 100% packet loss, time 1004ms
+```
+
+### Cause
+Three factors can block external routed traffic between VM-4 and the VM-3 5GC containers:
+1. **Missing Static Route on VM-4:** If `192.168.70.0/24 via 10.10.10.13` is not present in VM-4's routing table (`ip route show`), VM-4 falls back to its default gateway (`10.10.10.1 dev enp0s3`), which drops the packets (0 packets reach VM-3).
+2. **Accidental Static Route on VM-3 Host:** If `ip route add 192.168.70.0/24 via 10.10.10.13` was mistakenly executed on VM-3 itself, a duplicate conflicting route (`192.168.70.0/24 via 10.10.10.13 dev enp0s3`) is created that takes precedence over `192.168.70.0/24 dev demo-oai`. This loops traffic to `enp0s3` causing `Destination Host Unreachable`.
+3. **Docker `FORWARD` Policy & Bridge NAT:** Docker sets the default policy of the `FORWARD` iptables chain to `DROP`. Unless explicitly permitted in `DOCKER-USER` and masqueraded on `demo-oai`, Docker drops packets arriving from outside the host aimed at container IP addresses.
+
+### Solution
+
+#### On VM-4 (`oai-ran`):
+Ensure the static route to VM-3 5GC is present:
+```bash
+sudo ip route add 192.168.70.0/24 via 10.10.10.13 dev enp0s3
+ip route show | grep 192.168.70
+```
+
+#### On VM-3 (`oai-5gc`):
+
+```bash
+# 1. Remove the accidental static route on VM-3 itself if present
+sudo ip route del 192.168.70.0/24 via 10.10.10.13 dev enp0s3 2>/dev/null || true
+sudo rm -f /etc/network/interfaces.d/5gc-route
+
+# 2. Allow routed forwarding in Docker's DOCKER-USER filter chain
+sudo iptables -P FORWARD ACCEPT
+sudo iptables -I DOCKER-USER -s 10.10.10.0/24 -d 192.168.70.0/24 -j ACCEPT
+sudo iptables -I DOCKER-USER -s 192.168.70.0/24 -d 10.10.10.0/24 -j ACCEPT
+
+# 3. Add MASQUERADE on demo-oai interface so container receives local-bridge source IP
+sudo iptables -t nat -I POSTROUTING -o demo-oai -j MASQUERADE
+```
+
+---
+
+# VM-4 — OAI RAN
+
+## 24. Git Clone Failed with RPC failed; curl 92 HTTP/2 stream CANCEL / early EOF
+
+### Symptom
+When cloning the official `openairinterface5g` repository:
+
+```text
+error: RPC failed; curl 92 HTTP/2 stream 0 was not closed cleanly: CANCEL (err 8)
+error: RPC failed; curl 56 GnuTLS recv error (-9): Error decoding the received TLS packet.
+error: 5 bytes of body are still expected
+fetch-pack: unexpected disconnect while reading sideband packet
+fatal: early EOF
+fatal: fetch-pack: invalid index-pack output
+```
+
+### Cause
+Ubuntu's default `git` package is linked against `libcurl-gnutls`. GnuTLS has known issues decoding compressed TLS sideband packets on large git pack transfers when network latency or MTU fragmentation occurs.
+
+### Solution
+1. Use tarball download via `wget` (~25 MB):
+   ```bash
+   cd /opt/oran/ran
+   wget -c https://github.com/duranta-project/openairinterface5g/archive/refs/heads/develop.tar.gz -O oai-develop.tar.gz
+   mkdir -p openairinterface5g
+   tar -xzf oai-develop.tar.gz -C openairinterface5g --strip-components=1
+   ```
+2. Or use shallow git clone with buffer optimizations:
+   ```bash
+   git config --global core.compression 0
+   git config --global http.postBuffer 524288000
+   git config --global http.version HTTP/1.1
+   git clone --depth 1 -b develop https://github.com/OPENAIRINTERFACE/openairinterface5g.git
+   ```
+
+---
+
+## 25. FlexRIC Tarball Download Fails with HTTP 429 Too Many Requests
+
+### Symptom
+When downloading the FlexRIC archive from GitLab EURECOM:
+
+```text
+--2026-09-27 10:11:07--  https://gitlab.eurecom.fr/mosaic5g/flexric/-/archive/master/flexric-master.tar.gz
+Resolving gitlab.eurecom.fr (gitlab.eurecom.fr)... 193.55.113.249
+Connecting to gitlab.eurecom.fr (gitlab.eurecom.fr)|193.55.113.249|:443... connected.
+HTTP request sent, awaiting response... 429 Too Many Requests
+2026-09-27 10:11:07 ERROR 429: Too Many Requests.
+gzip: stdin: unexpected end of file
+tar: Child returned status 1
+```
+
+### Cause
+GitLab EURECOM has an automated rate-limiting policy on dynamic on-the-fly archive generation (`/-/archive/master/...tar.gz`) to protect server CPU resources, returning HTTP 429 for archive generation requests.
+
+### Solution
+Do not download the archive tarball. Use a shallow `git clone` directly from the Git repository endpoint, which is lightweight (~8.5 MB) and not subject to the archive generator rate limit:
+
+```bash
+cd /opt/oran/ran
+rm -rf openairinterface5g/openair2/E2AP/flexric
+git clone --depth 1 https://gitlab.eurecom.fr/mosaic5g/flexric.git openairinterface5g/openair2/E2AP/flexric
+```
+
+---
+
+## 26. SIMDE Installation Fails with Git Timeout (curl 28) during `./build_oai -I`
+
+### Symptom
+During the `./build_oai -I` dependency installation step:
+
+```text
+Installing SIMDE from source without test cases (header files only)
+Cloning into '/tmp/simde'...
+remote: Enumerating objects: 12918, done.
+remote: Counting objects: 100% (579/579), done.
+remote: Compressing objects: 100% (304/304), done.
+error: RPC failed; curl 28 Operation too slow. Less than 1000 bytes/sec transferred the last 600 seconds
+error: 487 bytes of body are still expected
+fetch-pack: unexpected disconnect while reading sideband packet
+fatal: early EOF
+fatal: fetch-pack: invalid index-pack output
+/opt/oran/ran/openairinterface5g/cmake_targets/tools/build_helper: line 492: cd: /tmp/simde: No such file or directory
+fatal: not a git repository (or any of the parent directories): .git
+cp: cannot stat '../simde': No such file or directory
+BUILD SHOULD BE SUCCESSFUL
+```
+
+### Cause
+OAI's `cmake_targets/tools/build_helper` attempts to clone the full repository of `simde-no-tests` without `--depth 1`. On networks with higher latency or packet filtering, the un-shallow transfer times out after 600 seconds (`curl 28 Operation too slow`). Although the script concludes with `BUILD SHOULD BE SUCCESSFUL`, the header files in `/usr/include/simde` are missing, which breaks the subsequent `nr-softmodem` build.
+
+### Solution
+SIMDe (SIMD Everywhere) is a **header-only** library. Either install the distro package or perform a shallow clone manually:
+
+#### Option 1: Install official package (instant)
+```bash
+sudo apt update && sudo apt install -y libsimde-dev
+```
+
+#### Option 2: Shallow clone manual copy
+```bash
+sudo rm -rf /tmp/simde
+git clone --depth 1 https://github.com/simd-everywhere/simde-no-tests.git /tmp/simde
+sudo cp -r /tmp/simde/simde /usr/include/
+```
+
+Verify the header installation:
+```bash
+ls -d /usr/include/simde
+# Expected: /usr/include/simde
+```
+
+---
+
+## 27. GCC 11 Internal Compiler Error (Segmentation fault) on FlexRIC `kpm_sm` `_Generic` Macro
+
+### Symptom
+When compiling FlexRIC Service Models with `gcc-11` (Ubuntu 22.04 default compiler) under `-O2`:
+
+```text
+FAILED: openair2/E2AP/flexric/src/sm/kpm_sm/kpm_sm_v02.03/CMakeFiles/kpm_sm.dir/kpm_sm_ric.c.o 
+during RTL pass: expand
+/opt/oran/ran/openairinterface5g/openair2/E2AP/flexric/src/sm/kpm_sm/kpm_sm_v02.03/dec/kpm_dec_generic.h:38:33: internal compiler error: Segmentation fault
+   38 | #define kpm_dec_func_def(T,U,V) _Generic ((T), \
+```
+
+### Cause
+GCC 11.4 (Ubuntu 22.04 default) has a known upstream bug in the RTL `expand` pass that segfaults when evaluating functions that return large ASN.1-generated structures under optimization (`-O2` / `-funroll-loops`). This bug is fixed upstream in **GCC 12.3+**.
+
+### Solution
+Install and activate **GCC 12** via `update-alternatives`:
+
+```bash
+# 1. Install GCC 12 & G++ 12 from official Ubuntu repositories
+sudo apt update && sudo apt install -y gcc-12 g++-12
+
+# 2. Configure GCC 12 as default system compiler
+sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 --slave /usr/bin/g++ g++ /usr/bin/g++-12
+sudo update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 100
+sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++ 100
+
+# Verify active compiler version (should report GCC 12.3.0)
+gcc --version
+```
+
+---
+
+---
+
+## 28. `redis: got 7 elements in COMMAND reply, wanted 6` on `ric_e2mgr` with `ric-plt-dbaas:0.6.4`
+
+### Symptom
+When starting the Near-RT RIC platform on VM-2, `ric_e2mgr` stops during startup with the error:
+
+```text
+#app.main - Configuration {logging.logLevel: debug, http.port: 3800, ...}
+Using config file: /opt/E2Manager/resources/configuration.yaml
+redis: got 7 elements in COMMAND reply, wanted 6
+```
+
+`e2mgr` terminates or aborts RNIB database connectivity, leading to cascading failures in E2 node association.
+
+### Cause
+`ric-plt-dbaas:0.6.4` is built on top of **Redis 6.2.14**. Starting in Redis 6.2, the response to the internal Redis `COMMAND` metadata command was expanded from 6 elements to 7 elements (introducing ACL category metadata). The older `go-redis` v7 client bundled within `ric-plt-e2mgr` hardcodes an assertion expecting exactly 6 elements.
+
+### Solution
+Downgrade the DBaaS container image in `/opt/oran/nearrt/oran-sc-ric/.env` to the official O-RAN SC release:
+```text
+DBAAS_VER=0.5.7
+```
+`ric-plt-dbaas:0.5.7` uses **Redis 5.0.9-alpine**, which returns exactly 6 elements for `COMMAND`, while preserving the exact same custom O-RAN Shared Data Layer (SDL) module (`/usr/local/libexec/redismodule/libredismodule.so`) and `sdlcli` binary.
+
+Pull and apply:
+```bash
+cd /opt/oran/nearrt/oran-sc-ric
+sed -i 's/DBAAS_VER=0.6.4/DBAAS_VER=0.5.7/g' .env
+sudo docker pull nexus3.o-ran-sc.org:10002/o-ran-sc/ric-plt-dbaas:0.5.7
+```
+
+---
+
+## 29. E2T Instance Prematurely Deleted by `e2mgr` Keepalive Timeout (4.5s)
+
+### Symptom
+E2Term decodes incoming SCTP packets from OAI CU (`ranName = gnb_208_095_00000e00`), but the CU logs report continuous timeout retries:
+
+```text
+[E2 AGENT]: E2 SETUP REQUEST timeout. Resending again (tx)
+```
+
+In `ric_rtmgr_sim` logs on VM-2:
+```text
+POST /ric/v1/handles/e2t  body: {"E2TAddress":"10.0.2.10:38000"}
+DELETE /ric/v1/handles/e2t  body: {"E2TAddress":"10.0.2.10:38000"}
+```
+And `curl http://10.0.2.11:3800/v1/e2t/list` returns an empty array `[]`.
+
+### Cause
+By default in `ric/configs/e2mgr.yaml`, `keepAliveResponseTimeoutMs` is set to `4500` (4.5 seconds) and `e2tInstanceDeletionTimeoutMs` is set to `15000`. If E2Term does not acknowledge keepalive requests within 4.5 seconds, E2Manager triggers `E2TShutdownManager.Shutdown()`, sending `DELETE /ric/v1/handles/e2t` to Route Manager and removing E2T from DBaaS. When CU initiates `E2SetupRequest`, E2Manager drops the message because E2T is already marked inactive/deleted.
+
+### Solution
+Relax the keepalive timeout in `ric/configs/e2mgr.yaml` so E2T remains permanently active, and configure `loglevel: 4` (DEBUG):
+
+```bash
+cd /opt/oran/nearrt/oran-sc-ric
+
+python3 - << 'EOF'
+with open("ric/configs/e2mgr.yaml", "r") as f:
+    content = f.read()
+
+content = content.replace("keepAliveResponseTimeoutMs: 4500", "keepAliveResponseTimeoutMs: 3600000")
+content = content.replace("keepAliveDelayMs: 1500", "keepAliveDelayMs: 3600000")
+content = content.replace("e2tInstanceDeletionTimeoutMs: 15000", "e2tInstanceDeletionTimeoutMs: 3600000")
+
+if "loglevel:" not in content:
+    content = "loglevel: 4\n" + content
+
+with open("ric/configs/e2mgr.yaml", "w") as f:
+    f.write(content)
+EOF
+
+sed -i 's/loglevel=info/loglevel=debug/g' ric/configs/e2term.conf
+```
+
+Restart services with DBaaS started first to avoid startup race conditions:
+```bash
+sudo docker compose stop e2term e2mgr rtmgr_sim dbaas
+sudo docker compose up -d dbaas rtmgr_sim
+sudo docker compose exec dbaas redis-cli ping
+sudo docker compose up -d e2mgr
+sleep 2
+sudo docker compose up -d e2term
 ```
 
 ---
@@ -1209,6 +1516,7 @@ ENFORCED
 - [VM-1 — Non-RT RIC](vm1-nonrt-ric.md)
 - [VM-2 — Near-RT RIC](vm2-nearrt-ric.md)
 - [A1 Integration](a1-integration.md)
+- [E2 Integration](e2-integration.md)
 - [System Architecture](architecture.md)
 
 ---

@@ -779,12 +779,14 @@ A1 policy type 20008          ✅
 A1 PMS → xApp delivery        ✅
 RMR 20010 / 20011             ✅
 
-VM-3 OAI 5GC                 ⏳
-VM-4 OAI RAN                 ⏳
-E2 integration               ⏳
-E2SM-KPM                     ⏳
-E2SM-RC                      ⏳
-VM-5 OAI nrUE                ⏳
+VM-3 OAI 5GC                 ✅
+VM-4 OAI RAN (CU + 2 DUs)    ✅
+E2 integration (E2AP/SCTP)   ✅
+E2SM-KPM (ID: 2)             ✅
+E2SM-RC (ID: 3)              ✅
+FlexRIC Service Models (8 SM)✅
+
+VM-5 OAI nrUE (Multi-UE)     ⏳ (Next Phase)
 F1 handover                  ⏳
 QoS / slicing                ⏳
 DRL integration              ⏳

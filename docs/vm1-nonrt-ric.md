@@ -57,7 +57,46 @@ A1 PMS `2.6.0` is listed by O-RAN SC as the H Release version.
 
 ---
 
-## 3. Directory Layout
+## 3. Theoretical & Architectural Rationale for Non-RT RIC Configurations
+
+### 3.1 Hierarchical Multi-Timescale Control Loop
+- **Standard:** **O-RAN Alliance Working Group 2 (WG2) A1 Interface Specification**.
+- **Control Timescales:**
+  - **Non-RT RIC (VM-1):** Operates on non-real-time timescales ($> 1\text{ second}$). In this thesis platform, the custom rApp formulates declarative high-level traffic steering guidance and slice QoS priorities based on long-term telemetry trends.
+  - **Near-RT RIC (VM-2):** Operates on near-real-time timescales ($10\text{ ms} - 1\text{ second}$). The xApp ingests policies delivered via A1 and executes sub-second radio resource optimization over E2.
+- **Role of A1 PMS:** A1 Policy Management Service maintains the canonical lifecycle and repository of active policy types, policy instances, and target Near-RT RIC statuses.
+
+### 3.2 O-RAN SC Adapter Selection (`OscA1Client`)
+- **Adapter Mechanism:** A1 PMS supports multiple backend adapter protocols (`StdA1ClientVersion1`, `StdA1ClientVersion2`, `OscA1Client`, `SdncOscA1Client`).
+- **Rationale for `OscA1Client`:** The O-RAN Software Community (OSC) Near-RT RIC A1 Mediator implements the OSC dialect of A1AP (RFC 6838 JSON media types and REST endpoints). Specifying:
+  ```json
+  "customAdapterClass": "org.onap.ccsdk.oran.a1policymanagementservice.clients.OscA1Client"
+  ```
+  instructs PMS to bypass generic A1 protocol discovery and directly use the validated OSC client, avoiding compatibility mismatches.
+
+### 3.3 Managed Elements Association (`managedElementIds`)
+- **Concept:** Under 3GPP TS 28.532 and O-RAN WG2 architecture, a Near-RT RIC controls specific Radio Network Functions (Managed Elements).
+- **Mapping:** In `application_configuration.json`, the logical identifiers:
+  ```json
+  "managedElementIds": ["oai-cu-cp", "oai-du-1", "oai-du-2"]
+  ```
+  bind the OAI gNB Centralized Unit and Distributed Units to `near-rt-ric-1`. When an rApp posts a policy targeting a specific cell or node, A1 PMS routes the policy to the Near-RT RIC responsible for those managed elements.
+
+---
+
+## 4. Parameter Customization Reference Guide
+
+| Parameter | Current Value | Classification | Customization Rules & Impact |
+|---|---|---|---|
+| `name` | `near-rt-ric-1` | `[CUSTOMIZABLE]` | Logical identifier for the target Near-RT RIC in PMS registry. |
+| `baseUrl` | `http://10.10.10.12:10001` | `[MANDATORY MATCH NEAR-RT]` | Endpoint of VM-2 A1 compatibility shim. |
+| `customAdapterClass` | `...OscA1Client` | `[FIXED / ARCHITECTURE]` | Client adapter required to communicate with OSC A1 Mediator. |
+| `managedElementIds` | `["oai-cu-cp", ...]` | `[CUSTOMIZABLE]` | Target RAN network function identifiers managed by this RIC. |
+| `A1_PMS_HTTP_PORT` | `8081` | `[FIXED / ARCHITECTURE]` | Northbound REST API port of A1 PMS container. |
+
+---
+
+## 5. Directory Layout
 
 Create the VM-1 working directories:
 
@@ -81,7 +120,7 @@ The resulting layout is:
 
 ---
 
-## 4. Docker Access
+## 6. Docker Access
 
 Verify Docker:
 
@@ -107,7 +146,7 @@ docker ps
 
 ---
 
-## 5. Create the Docker Network
+## 7. Create the Docker Network
 
 Create a dedicated Docker network for the Non-RT RIC components:
 
@@ -129,7 +168,7 @@ nonrtric-docker-net
 
 ---
 
-## 6. Pull the A1 PMS Image
+## 8. Pull the A1 PMS Image
 
 Pull the validated A1 PMS image:
 
@@ -152,7 +191,7 @@ Expected image tag:
 
 ---
 
-## 7. Verify Connectivity to VM-2
+## 9. Verify Connectivity to VM-2
 
 Before starting PMS, verify that VM-1 can reach the A1 compatibility endpoint on VM-2:
 
@@ -173,7 +212,7 @@ The compatibility endpoint on port `10001` is described in:
 
 ---
 
-## 8. Configure A1 PMS
+## 10. Configure A1 PMS
 
 Create:
 
@@ -221,7 +260,7 @@ The `managedElementIds` values are deployment identifiers and may be updated lat
 
 ---
 
-## 9. Prepare Persistent PMS Storage
+## 11. Prepare Persistent PMS Storage
 
 The PMS container runs using:
 
@@ -253,7 +292,7 @@ Could not write file: /var/policy-management-service/database/...
 
 ---
 
-## 10. Start A1 PMS
+## 12. Start A1 PMS
 
 Run:
 
@@ -283,7 +322,7 @@ policy-agent-container   Up   ...8081...8433...
 
 ---
 
-## 11. PMS Health Check
+## 13. PMS Health Check
 
 Check PMS status:
 
@@ -303,7 +342,7 @@ The validated deployment returns:
 
 ---
 
-## 12. Verify Near-RT RIC Synchronization
+## 14. Verify Near-RT RIC Synchronization
 
 Wait for PMS synchronization:
 
@@ -349,7 +388,7 @@ policytype_ids = ["20008"]
 
 ---
 
-## 13. Verify Persistent Policy-Type Storage
+## 15. Verify Persistent Policy-Type Storage
 
 Check the host-side PMS database:
 
@@ -370,7 +409,7 @@ On Ubuntu, UID `999` may be displayed using the host-side username associated wi
 
 ---
 
-## 14. Inspect the Live PMS OpenAPI Schema
+## 16. Inspect the Live PMS OpenAPI Schema
 
 The running PMS exposes an OpenAPI description.
 
@@ -401,7 +440,7 @@ policy_data
 
 ---
 
-## 15. Create a Test Policy through PMS
+## 17. Create a Test Policy through PMS
 
 Before running this test, ensure the A1-aware xApp on VM-2 is running.
 
@@ -438,7 +477,7 @@ HTTP/1.1 200 OK
 
 ---
 
-## 16. Query the Policy from PMS
+## 18. Query the Policy from PMS
 
 Retrieve the policy:
 
@@ -469,7 +508,7 @@ See:
 
 ---
 
-## 17. Useful Operational Commands
+## 19. Useful Operational Commands
 
 ### Show container status
 
@@ -510,7 +549,7 @@ docker start policy-agent-container
 
 ---
 
-## 18. Acceptance Criteria
+## 20. Acceptance Criteria
 
 VM-1 is considered correctly deployed when all of the following are true:
 
@@ -526,7 +565,7 @@ VM-1 is considered correctly deployed when all of the following are true:
 
 ---
 
-## 19. Troubleshooting
+## 21. Troubleshooting
 
 ### Docker permission denied
 
@@ -625,7 +664,7 @@ sudo chown -R 999:1000 /opt/oran/nonrt/a1pms/database
 
 ---
 
-## 20. Final VM-1 Data Path
+## 22. Final VM-1 Data Path
 
 ```text
 Custom rApp
