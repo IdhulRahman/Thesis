@@ -1,10 +1,11 @@
 # System Architecture
 
-This document describes the high-level architecture of the experimental platform used for:
+This document describes the high-level architecture of the cross-domain experimental platform used for:
 
-> **Development of a Multi-Timescale QoS-Aware Traffic Steering Mechanism for rApp and xApp Coordination in Multi-Slice O-RAN**
+> **Bottleneck-Aware Closed-Loop Traffic Steering via O-RAN RIC–NWDAF Coordination in Multi-Slice 5G Networks**  
+> *(Pengarahan Trafik Berbasis Identifikasi Bottleneck melalui Koordinasi O-RAN RIC–NWDAF dengan Kendali Closed-Loop pada Jaringan 5G Multi-Slice)*
 
-The platform is designed as a **software-only O-RAN testbed** using six virtual machines. The architecture separates long-timescale policy adaptation from near-real-time traffic steering so that both control loops can be evaluated independently and jointly.
+The platform is designed as a **software-only cross-domain testbed** using six virtual machines. The architecture unifies O-RAN radio control loops with 5G Core user-plane analytics (NWDAF / Core Adapter) so that bottleneck identification and traffic steering can be evaluated across multiple operational baselines and experimental failure modes.
 
 ---
 
@@ -12,32 +13,35 @@ The platform is designed as a **software-only O-RAN testbed** using six virtual 
 
 The platform is designed to support the following research goals:
 
-- coordination between an rApp and an xApp operating at different timescales;
-- QoS-aware traffic steering across multiple O-RAN slices;
-- dynamic policy delivery through A1;
-- near-real-time telemetry and control through E2;
-- software-only mobility and handover experiments;
-- repeatable experiments without SDR hardware;
-- logging of QoS, policy, steering, and control decisions for later analysis.
+- **Bottleneck Diagnosis:** Differentiating between RAN radio congestion, Core user-plane congestion (UPF/transport), and Joint congestion per network slice;
+- **Closed-Loop Action Selection:** Selecting matched control actions (RAN inter-cell handover via xApp, Core user-plane conditioning, or coordinated joint control) based on diagnosed bottleneck location;
+- **Comparative Baseline Evaluation:** Enabling empirical comparison across standard baseline modes: B0 (Static 3GPP), B1 (RAN-only), B2 (Core-only), B3 (Decoupled), B4 (Coordinated without diagnosis), and the Proposed System;
+- **Hierarchical Timescale Decoupling:** Long-timescale (~30s) bottleneck analysis and policy generation in the rApp, combined with near-real-time (<1s) radio actuation in the xApp;
+- **SLA Recovery Verification:** Verifying post-actuation SLA restoration ($V_s$ and latency percentiles) to prevent action churn;
+- **Hardware-Free Reproducibility:** Entirely software-based execution without physical SDR hardware or commercial UEs.
 
-The main research idea is:
+The cross-domain research paradigm is:
 
 ```text
-Long-timescale QoS adaptation
-            │
-            ▼
-           rApp
-            │
-            │ A1 policy
-            ▼
-           xApp
-            │
-            │ E2 control
-            ▼
-            RAN
-            │
-            ▼
-          UE(s)
+  5G Core Domain (VM-3)                 O-RAN Domain (VM-4 & VM-2)
+  [UPF-1 & UPF-2 Telemetry]             [E2SM-KPM & E2SM-SLICE]
+              │                                      │
+              └───────────────┬──────────────────────┘
+                              ▼
+               Non-RT RIC rApp (VM-1)
+               [Bottleneck Diagnosis Engine]
+               (NORMAL | RAN | CORE | JOINT)
+                              │
+               Action Selector & SLA Verifier
+                              │
+              ┌───────────────┴──────────────────────┐
+              ▼                                      ▼
+       Core Adapter (VM-3)                    A1 Policy to Near-RT
+   [User-Plane Conditioning]                  xApp in Near-RT RIC (VM-2)
+                                                     │
+                                                     ▼ E2SM-RC
+                                              OAI RAN CU/DUs (VM-4)
+                                              [Cell-1 <-> Cell-2 Handover]
 ```
 
 ---
@@ -53,51 +57,68 @@ Long-timescale QoS adaptation
 The platform uses the subnet:
 
 ```text
-10.10.10.0/24
+10.102.0.0/24
 ```
 
 | VM | Hostname | IP Address | Role |
 |---|---|---:|---|
-| VM-1 | `nonrt-ric` | `10.10.10.11` | Non-RT RIC, A1 PMS, rApp |
-| VM-2 | `near-rt-ric` | `10.10.10.12` | Near-RT RIC, A1 Mediator, xApp |
-| VM-3 | `oai-5gc` | `10.10.10.13` | OAI 5G Core |
-| VM-4 | `oai-ran` | `10.10.10.14` | OAI CU, two DUs/cells, E2 Agent |
-| VM-5 | `ue-emulator` | `10.10.10.15` | OAI nrUE |
-| VM-6 | `monitoring-data` | `10.10.10.16` | Monitoring, logging, experiment data |
+| VM-1 | `nonrt-ric` | `10.102.0.168` | Non-RT RIC, A1 PMS v2.6.0, Bottleneck-Aware rApp |
+| VM-2 | `near-rt-ric` | `10.102.0.66` | Near-RT RIC, A1 Mediator, xApp, E2Term, E2Mgr, DBaaS |
+| VM-3 | `oai-core` | `10.102.0.164` | OAI 5G Core Multi-Slice (v2.1.0) + Native OAI NWDAF (8 microservices) |
+| VM-4 | `oai-ran` | `10.102.0.167` | OAI CU, two DUs/cells (DU-1 :4043 / DU-2 :4044), E2 Agent (FlexRIC) |
+| VM-5 | `ue-emulator` | `10.102.0.165` | OAI nrUE multi-instance (RFsimulator client, `ue1` & `ue2` netns) |
+| VM-6 | `monitoring-data` | `10.102.0.67` | Prometheus TSDB, Grafana, Telemetry Collector |
 
 The IP assignments are static so that component configuration remains reproducible across experiment runs.
 
-## 4. Non-RT Control Layer
+### 3.1 Validated Golden Software Stack Specification
 
-VM-1 represents the Non-RT side of the control architecture.
+To ensure cross-domain compatibility, repeatability, and bug-free operation across all thesis experiments, the platform is standardized on the following **Golden Stack**:
 
-Main components:
+| Layer / Domain | Software Framework | Version / Branch | Deployment Mode & Image Source | Role in Thesis Platform |
+|---|---|---|---|---|
+| **5G Core Network NFs** | OpenAirInterface 5G Core (`oai-cn5g-fed`) | **`v2.1.0`** (3GPP Rel-16/17 SA) | Docker Compose (`oaisoftwarealliance/oai-*:v2.1.0`) | AMF, SMF-1/2/3, UPF-1/2, VPP-UPF-3, NRF-12/3, UDM, UDR, AUSF, NSSF |
+| **Core Analytics (NWDAF)** | OpenAirInterface NWDAF (`oai-cn5g-nwdaf`) | **`develop / v2.0.0`** (3GPP Rel-17) | 8 Docker microservices + Kong API Gateway (`:8080`) + MongoDB | Exposes `Nnwdaf_AnalyticsInfo` (`NETWORK_PERFORMANCE`) to rApp |
+| **Centralized Unit (CU)** | OpenAirInterface5G (`openairinterface5g`) | **`develop` branch** | Native C softmodem with FlexRIC submodule | CU-CP / CU-UP with E2 Agent (SCTP :36421 to VM-2) |
+| **Distributed Units (DU)** | OpenAirInterface5G (`openairinterface5g`) | **`develop` branch** | Native C softmodem (F1-U :2155/:2154, RFsim :4043/:4044) | DU-1 (Cell-1, PCI 1) and DU-2 (Cell-2, PCI 2) |
+| **Near-RT RIC** | O-RAN Software Community (O-RAN SC) | **Dawn Release** | Docker Compose (7 platform containers) | E2Term, E2Mgr, Subscription Manager, A1 Mediator, DBaaS Redis 5.0.9, Traffic Steering xApp |
+| **Non-RT RIC** | O-RAN SC Non-RT RIC | **A1 PMS v2.6.0** | Spring Boot / Java 17 container (:8081) | Manages A1 Policy Types (Type 20008) and synchronizes with A1 Mediator |
+| **User Equipment (UE)** | OpenAirInterface5G (`nr-uesoftmodem`) | **`develop` branch** | Native executable in Linux `ip netns` (`ue1` & `ue2`) | Emulates multi-slice UEs (Slice 1: SST 1 SD 1, Slice 2: SST 222 SD 123) |
+
+## 4. Non-RT Control Layer & Bottleneck Classifier
+
+VM-1 represents the Non-RT coordinator of the architecture.
+
+Main functional blocks inside the rApp:
 
 ```text
-Custom rApp
-    │
-    ▼
-A1 Policy Management Service
+┌────────────────────────────────────────────────────────┐
+│               rApp Coordinator (VM-1)                  │
+│                                                        │
+│  1. Cross-Domain Telemetry Aggregator                  │
+│     ├── Ingests E2SM-KPM / Prometheus RAN metrics      │
+│     └── Ingests NWDAF / Core Adapter Nnwdaf metrics    │
+│                                                        │
+│  2. Bottleneck Classification Engine                   │
+│     └── Rule-Based / Decision Tree Classifier          │
+│         States: NORMAL, RAN, CORE, JOINT, UNCERTAIN    │
+│                                                        │
+│  3. Action Selector & A1 Policy Generator              │
+│     ├── Dispatches A1 Policy Type 20008 to xApp        │
+│     └── Emits Core shaping targets to Core Adapter     │
+│                                                        │
+│  4. Closed-Loop SLA Verifier                           │
+│     └── Compares pre- vs post-action window metrics    │
+└────────────────────────────────────────────────────────┘
 ```
 
-The rApp is responsible for long-timescale adaptation.
-
-Its planned role is to:
-
-- observe historical QoS and network behavior;
-- evaluate slice-level QoS conditions;
-- update long-term policy constraints;
-- send updated policy information through A1.
-
-The initial control period is approximately:
+The rApp operates on a periodic cycle:
 
 ```text
 ~30 seconds
 ```
 
-This value is an experimental starting point and can be adjusted during evaluation.
-
-The rApp does not directly perform per-second handover or steering decisions.
+This timescale matches standard 3GPP NWDAF reporting windows and avoids interfering with the Near-RT RIC's fast radio loop.
 
 ---
 
@@ -296,7 +317,7 @@ CU / DU
 VM-2 exposes:
 
 ```text
-10.10.10.12:36421/SCTP
+10.102.0.66:36421/SCTP
 ```
 
 for E2 connectivity.
@@ -606,74 +627,78 @@ stability mechanism
 
 ---
 
-## 17. Main Evaluation Objectives
+## 17. Main Evaluation Hypotheses & Baseline Modes
 
-The architecture supports evaluation of three main hypotheses.
+The architecture evaluates four concrete scientific hypotheses across five standard baselines:
 
-### H1
+### Hypotheses:
+- **H1 (Benefit of Coordination):** Bottleneck-aware coordination yields significantly lower SLA violation rates ($V_s$) than uncoordinated controllers under shifting bottleneck conditions.
+- **H2 (Benefit of Diagnosis):** Diagnosing bottleneck locations prior to actuation recovers SLAs faster ($T_{rec}$) than naive, fixed-order action heuristics (B4).
+- **H3 (Cross-Slice Isolation):** Coordination with slice-differentiated resource boundaries prevents priority slice recovery from starving subordinate slices.
+- **H4 (Telemetry Staleness Resilience):** Telemetry timestamp filtering prevents ineffective actuation when reports are delayed or out of sync.
 
-Coordinated rApp + xApp control reduces QoS violations compared with xApp-only control.
-
-### H2
-
-Policy constraints from the rApp improve QoS satisfaction compared with unconstrained DRL control.
-
-### H3
-
-Multi-timescale coordination improves steering stability and reduces ping-pong behavior while maintaining QoS.
+### Comparative Baseline Modes:
+1. **B0 (Static 3GPP Default):** Fixed PRBs, static UPF queues, standard RRC A3 handover (xApp and rApp control disabled).
+2. **B1 (RAN-Only Control):** Standalone xApp triggers steering based on radio metrics; blind to Core UPF congestion.
+3. **B2 (Core-Only Control):** Core adapter shapes UPF traffic based on NWDAF; blind to radio channel and cell loads.
+4. **B3 (Decoupled Controllers):** xApp and Core adapter operate independently without cross-domain coordination.
+5. **B4 (Coordinated without Diagnosis):** rApp coordinates both domains but applies a fixed, hardcoded action sequence.
+6. **Proposed System:** Bottleneck diagnosis $\rightarrow$ domain-matched action $\rightarrow$ closed-loop SLA verification.
 
 ---
 
 ## 18. Main Experiment Flow
 
-A complete experiment is expected to follow this sequence:
+A complete experimental cycle executes as follows:
 
 ```text
-1. Start OAI 5GC
+1. Start OAI 5GC & NWDAF / Core Adapter (VM-3)
         │
         ▼
-2. Start OAI CU + DU-1 + DU-2
+2. Start OAI Split RAN (CU + DU-1 + DU-2) (VM-4)
         │
         ▼
-3. Establish E2 connection to Near-RT RIC
+3. Establish E2AP association to Near-RT RIC (VM-2)
         │
         ▼
-4. Start OAI nrUE
+4. Attach OAI nrUE instances on Slice 1 & Slice 2 (VM-5)
         │
         ▼
-5. Generate traffic
+5. Inject controlled workload / congestion (RAN radio vs Core UPF)
         │
         ▼
-6. Collect E2 KPI
+6. Stream telemetry (E2SM-KPM from RAN + Nnwdaf from Core)
         │
         ▼
-7. xApp evaluates steering
+7. rApp classifies bottleneck location (NORMAL, RAN, CORE, JOINT)
         │
         ▼
-8. rApp periodically updates QoS policy
+8. rApp generates domain-matched action (A1 Policy to xApp and/or Core target)
         │
         ▼
-9. xApp applies policy-constrained action
+9. xApp executes inter-cell steering via E2SM-RC; Core adapter applies shaping
         │
         ▼
-10. Log QoS and mobility result
+10. rApp verifies SLA recovery; logs metrics ($V_s$, $T_{rec}$, churn) to VM-6 TSDB
 ```
 
 ---
 
 ## 19. Network Interfaces
 
-The main interfaces are:
+The complete cross-domain interface map:
 
-| Interface | From | To | Role |
-|---|---|---|---|
-| A1 | VM-1 | VM-2 | Long-timescale policy |
-| RMR | A1 Mediator | xApp | Internal Near-RT RIC messaging |
-| E2 | VM-2 | VM-4 | KPI and RAN control |
-| N2/N3 | VM-4 | VM-3 | RAN to 5GC |
-| F1 | CU | DUs | CU/DU split |
-| RFsim | VM-4 | VM-5 | Software-only radio simulation |
-| Monitoring | VM-1..5 | VM-6 | Experiment metrics and logs |
+| Interface | From | To | Protocol / Transport | Role |
+|---|---|---|---|---|
+| A1 | VM-1 | VM-2 | HTTP REST (Port 10001) | Policy guidance & SLA bounds |
+| Nnwdaf / Core Adapter | VM-1 | VM-3 | HTTP/2 REST (Port 8080) | Core slice load & delay telemetry |
+| RMR | A1 Mediator | xApp | TCP RMR (Port 4560) | Internal Near-RT RIC messaging |
+| E2 | VM-2 | VM-4 | E2AP over SCTP (Port 36421) | E2SM-KPM telemetry & E2SM-RC actuation |
+| N2 | VM-4 | VM-3 | NGAP over SCTP (Port 38412) | RAN to AMF control plane |
+| N3 | VM-4 | VM-3 | GTP-U over UDP (Port 2152) | Dual-UPF user plane routing |
+| F1 | CU | DUs | F1-C (38472/SCTP) & F1-U (2153-2155/UDP) | CU/DU disaggregation |
+| RFsim | VM-4 | VM-5 | TCP Sockets (:4043/:4044) | Software-only RF emulation |
+| Monitoring | All VMs | VM-6 | HTTP REST / Prometheus Pull | Experiment metrics & telemetry |
 
 ---
 
@@ -691,13 +716,14 @@ A1 policy type 20008          ✅
 A1 PMS → xApp delivery        ✅
 RMR 20010 / 20011             ✅
 
-VM-3 OAI 5GC                 ✅
+VM-3 OAI 5GC (13 Containers) ✅
 VM-4 OAI RAN (CU + 2 DUs)    ✅
 E2 integration (E2AP/SCTP)   ✅
 E2SM-KPM (ID: 2)             ✅
 E2SM-RC (ID: 3)              ✅
 FlexRIC Service Models (8 SM)✅
 
+Native NWDAF (oai-nwdaf)     ⏳
 VM-5 OAI nrUE (Multi-UE)     ⏳ (Next Phase)
 F1 handover                  ⏳
 QoS / slicing                ⏳

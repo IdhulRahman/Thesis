@@ -4,24 +4,24 @@ This document describes the deployment of **VM-4 (`oai-ran`)**, which hosts the 
 
 VM-4 interconnects three primary domains in the thesis platform:
 1. **Core Network (VM-3):** N2 (NG-AP / SCTP) to AMF and N3 (GTP-U / UDP) to multi-slice UPFs via routed Docker bridge subnet `192.168.70.0/24`.
-2. **Near-RT RIC (VM-2):** O-RAN E2 interface (E2AP over SCTP) to `ric_e2term` (`10.10.10.12:36421`).
+2. **Near-RT RIC (VM-2):** O-RAN E2 interface (E2AP over SCTP) to `ric_e2term` (`10.102.0.66:36421`).
 3. **UE Emulator (VM-5):** RFsimulator channel interface for software-only over-the-air communication.
 
 ```text
                ┌────────────────────────────────────────────────────────┐
-               │              VM-2 Near-RT RIC (10.10.10.12)            │
+               │              VM-2 Near-RT RIC (10.102.0.66)            │
                │                   ric_e2term :36421                    │
                └───────────────────────────▲────────────────────────────┘
                                            │
                                            │ E2 (E2AP / SCTP)
                                            │
 ┌──────────────────────────────────────────▼────────────────────────────┐
-│ VM-4 OAI RAN (10.10.10.14)                                            │
+│ VM-4 OAI RAN (10.102.0.167)                                            │
 │                                                                       │
 │   ┌───────────────────────────────────────────────────────────────┐   │
 │   │                 Centralized Unit (CU)                         │   │
 │   │  - RRC / PDCP / SDAP                                          │   │
-│   │  - Integrated OAI E2 Agent (points to 10.10.10.12:36421)      │   │
+│   │  - Integrated OAI E2 Agent (points to 10.102.0.66:36421)      │   │
 │   │  - N2 NG-AP (SCTP) & N3 GTP-U (UDP)                           │   │
 │   └───┬───────────────────────────────────────────────────────┬───┘   │
 │       │ F1-C (SCTP) / F1-U (GTP)      │ F1-C (SCTP) / F1-U (GTP)      │
@@ -34,7 +34,7 @@ VM-4 interconnects three primary domains in the thesis platform:
         │ rfsim :4043                       │ rfsim :4044
         ▼                                   ▼
 ┌───────────────────────────────────────────────────────────────────────┐
-│                    VM-5 OAI nrUE (10.10.10.15)                        │
+│                    VM-5 OAI nrUE (10.102.0.165)                        │
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -46,11 +46,11 @@ VM-4 interconnects three primary domains in the thesis platform:
 |---|---|---|
 | VM | VM-4 | Virtual Machine index |
 | Hostname | `oai-ran` | Host identifier |
-| IP address | `10.10.10.14` | Static IP on thesis research subnet |
-| Subnet | `10.10.10.0/24` | Main inter-VM communication network |
+| IP address | `10.102.0.167` | Static IP on thesis research subnet |
+| Subnet | `10.102.0.0/24` | Main inter-VM communication network |
 | Main role | 5G RAN (CU + 2 DUs/Cells + E2 Agent) | 3GPP Split CU-DU & O-RAN E2 Node |
 | Recommended resources | 8 vCPU, 16 GB RAM, 50 GB Disk | CPU cores allocated to softmodem threads |
-| Target RIC endpoint | `10.10.10.12:36421/SCTP` | VM-2 Near-RT RIC `ric_e2term` |
+| Target RIC endpoint | `10.102.0.66:36421/SCTP` | VM-2 Near-RT RIC `ric_e2term` |
 | Target Core AMF | `192.168.70.138:38412/SCTP` | VM-3 AMF via route `192.168.70.0/24` |
 | Target Core UPF-1 | `192.168.70.142:2152/UDP` | Slice 1 eMBB user-plane gateway |
 | Target Core UPF-2 | `192.168.70.143:2152/UDP` | Slice 2 Low-Latency user-plane gateway |
@@ -96,8 +96,8 @@ The parameter values selected for VM-4 are grounded in 3GPP Release 16/17 and O-
 - **Rationale:** Because CU, DU-1, and DU-2 execute as separate Linux processes on the same host (VM-4), binding all three processes to `127.0.0.1:2153` triggers a socket binding collision (`bind: Address already in use`). 
 - **Solution:** Loopback IP aliasing and port differentiation:
   - CU listens on `127.0.0.1:2153`.
-  - DU-1 binds F1 to `127.0.0.4:2153`.
-  - DU-2 binds F1 to `127.0.0.5:2154`.
+  - DU-1 binds F1 to `127.0.0.1:2155` (`local_n_portd = 2155`).
+  - DU-2 binds F1 to `127.0.0.1:2154` (`local_n_portd = 2154`).
 
 ### 2.6 RFsimulator (rfsim) Channel Emulation
 - **Mechanism:** OAI RFsimulator bypasses SDR hardware (USRP) and creates an in-memory/socket RF channel using TCP sockets.
@@ -130,10 +130,10 @@ Use this guide when adapting configuration parameters for custom experiments:
 | `physCellId` | `1` (DU-1), `2` (DU-2) | `[CUSTOMIZABLE]` | Physical Cell ID (0–1007). Must remain distinct between cells in same coverage area. |
 | `nr_cellid` | `12345678L`, `11111111L`| `[CUSTOMIZABLE]` | 36-bit NR Cell Identity. Must remain distinct for handover and RIC steering identification. |
 | `serverport` (rfsim) | `4043` (DU-1), `4044` (DU-2) | `[CUSTOMIZABLE]` | RFsim TCP server port. Must match UE connection argument on VM-5. |
-| `amf_ip_address` | `10.10.10.13` | `[CUSTOMIZABLE]` | VM-3 Host IP where AMF port 38412 is published. |
-| `GNB_IPV4_ADDRESS_FOR_NG_AMF` | `10.10.10.14` | `[CUSTOMIZABLE]` | VM-4 local interface IP for N2 SCTP traffic. |
-| `GNB_IPV4_ADDRESS_FOR_NGU` | `10.10.10.14` | `[CUSTOMIZABLE]` | VM-4 local interface IP for N3 GTP-U traffic to UPF. |
-| `near_ric_ip_addr` | `10.10.10.12` | `[CUSTOMIZABLE]` | VM-2 Near-RT RIC IP where E2Term port 36421 is reachable. |
+| `amf_ip_address` | `192.168.70.138` | `[CUSTOMIZABLE]` | AMF container IP reachable via static route `192.168.70.0/24 via 10.102.0.164` (or `10.102.0.164` if host port forwarding). |
+| `GNB_IPV4_ADDRESS_FOR_NG_AMF` | `10.102.0.167` | `[CUSTOMIZABLE]` | VM-4 local interface IP for N2 SCTP traffic. |
+| `GNB_IPV4_ADDRESS_FOR_NGU` | `10.102.0.167` | `[CUSTOMIZABLE]` | VM-4 local interface IP for N3 GTP-U traffic to UPF. |
+| `near_ric_ip_addr` | `10.102.0.66` | `[CUSTOMIZABLE]` | VM-2 Near-RT RIC IP where E2Term port 36421 is reachable. |
 | `local_s_portd` / `remote_s_portd` | `2153` | `[FIXED / ARCHITECTURE]` | F1-U GTP-U UDP port. Kept at 2153 per 3GPP/OAI default. |
 | `GNB_PORT_FOR_S1U` | `2152` | `[FIXED / ARCHITECTURE]` | 3GPP standard N3 GTP-U port (UDP 2152). |
 | `sm_dir` | `/usr/local/lib/flexric/`| `[FIXED / ARCHITECTURE]` | Path where compiled Service Model `.so` plugins are installed. |
@@ -183,23 +183,23 @@ echo "sctp" | sudo tee -a /etc/modules-load.d/sctp.conf
 ```
 
 ### Step 2: Configure Static Route to VM-3 5GC Bridge Subnet
-VM-4 must reach the OAI 5GC containers (`192.168.70.0/24`) hosted on VM-3 (`10.10.10.13`):
+VM-4 must reach the OAI 5GC containers (`192.168.70.0/24`) hosted on VM-3 (`10.102.0.164`):
 
 ```bash
-# Add route immediately (interface is auto-selected based on gateway 10.10.10.13)
-sudo ip route add 192.168.70.0/24 via 10.10.10.13
+# Add route immediately (interface is auto-selected based on gateway 10.102.0.164)
+sudo ip route add 192.168.70.0/24 via 10.102.0.164
 
 # Persist route across reboots
-echo "up ip route add 192.168.70.0/24 via 10.10.10.13" | sudo tee -a /etc/network/interfaces.d/5gc-route || true
+echo "up ip route add 192.168.70.0/24 via 10.102.0.164" | sudo tee -a /etc/network/interfaces.d/5gc-route || true
 ```
 
 ### Step 3: Test Inter-VM Reachability
 ```bash
 # Test reachability to VM-2 Near-RT RIC
-ping -c 2 10.10.10.12
+ping -c 2 10.102.0.66
 
 # Test reachability to VM-3 5GC Host
-ping -c 2 10.10.10.13
+ping -c 2 10.102.0.164
 
 # Test routed reachability to VM-3 AMF Container
 ping -c 2 192.168.70.138
@@ -264,6 +264,19 @@ cd /opt/oran/ran/openairinterface5g/cmake_targets
 > ```
 
 ### Step 3: Build gNB Softmodem with E2 Agent and RFsimulator
+
+> [!WARNING]
+> **GCC 11 Internal Compiler Error with FlexRIC `kpm_sm`:**  
+> The default `gcc-11` on Ubuntu 22.04 crashes with a segmentation fault (`internal compiler error: Segmentation fault in kpm_dec_generic.h`) when compiling the KPM Service Model due to an RTL expansion bug with C11 `_Generic`.  
+> Upgrade to `gcc-12` before building the Service Models (see [Troubleshooting Case 27](troubleshooting.md#27-gcc-11-internal-compiler-error-segmentation-fault-on-flexric-kpm_sm-_generic-macro)):
+> ```bash
+> sudo apt update && sudo apt install -y gcc-12 g++-12
+> sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 --slave /usr/bin/g++ g++ /usr/bin/g++-12
+> sudo update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 100
+> sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++ 100
+> gcc --version
+> ```
+
 Compile `nr-softmodem` with O-RAN E2 Agent support (`--build-e2`) and RFsimulator (`-w SIMU`):
 
 ```bash
@@ -333,7 +346,7 @@ gNBs =
 
     # [FIXED / ARCHITECTURE] 3GPP F1 transport configuration
     tr_s_preference  = "f1";
-    local_s_address  = "127.0.0.1";       # [FIXED] CU F1 listening IP
+    local_s_address  = "127.0.0.3";       # [FIXED] CU F1 listening IP
     remote_s_address = "0.0.0.0";         # [FIXED] Accept F1 from any DU
     local_s_portd    = 2153;              # [FIXED] F1-U listening UDP port
     remote_s_portd   = 2153;
@@ -344,14 +357,14 @@ gNBs =
         SCTP_OUTSTREAMS = 2;
     };
 
-    # [CUSTOMIZABLE] AMF IPv4 endpoint (published on VM-3 host port 38412)
-    amf_ip_address = ({ ipv4 = "10.10.10.13"; });
+    # [CUSTOMIZABLE] AMF IPv4 endpoint (direct container IP via route 192.168.70.0/24 or host IP 10.102.0.164)
+    amf_ip_address = ({ ipv4 = "192.168.70.138"; });
 
     # [CUSTOMIZABLE] Network interfaces for N2 (AMF) and N3 (UPF)
     NETWORK_INTERFACES =
     {
-        GNB_IPV4_ADDRESS_FOR_NG_AMF = "10.10.10.14";  # [CUSTOMIZABLE] VM-4 IP for N2
-        GNB_IPV4_ADDRESS_FOR_NGU    = "10.10.10.14";  # [CUSTOMIZABLE] VM-4 IP for N3
+        GNB_IPV4_ADDRESS_FOR_NG_AMF = "10.102.0.167";  # [CUSTOMIZABLE] VM-4 IP for N2
+        GNB_IPV4_ADDRESS_FOR_NGU    = "10.102.0.167";  # [CUSTOMIZABLE] VM-4 IP for N3
         GNB_PORT_FOR_S1U            = 2152;           # [FIXED] 3GPP standard N3 port
     };
  }
@@ -376,7 +389,7 @@ log_config :
 
 # [MANDATORY MATCH RIC] O-RAN E2 Agent pointing to VM-2 Near-RT RIC
 e2_agent = {
-  near_ric_ip_addr = "10.10.10.12";              # [CUSTOMIZABLE] VM-2 Near-RT RIC IP
+  near_ric_ip_addr = "10.102.0.66";              # [CUSTOMIZABLE] VM-2 Near-RT RIC IP
   sm_dir = "/usr/local/lib/flexric/";            # [FIXED] Service Model directory
 };
 ```
@@ -420,9 +433,9 @@ gNBs =
 
     # [FIXED / ARCHITECTURE] 3GPP F1 transport configuration
     tr_s_preference  = "f1";
-    local_n_address  = "127.0.0.1";       # [FIXED] Local DU F1 IP
-    remote_n_address = "127.0.0.1";       # [FIXED] Remote CU F1 IP
-    local_n_portd    = 2153;              # [FIXED] Local DU F1-U UDP port
+    local_n_address  = "127.0.0.4";       # [FIXED] Local DU-1 F1 IP
+    remote_n_address = "127.0.0.3";       # [FIXED] Remote CU F1 IP
+    local_n_portd    = 2153;              # [FIXED] Standard F1-U port (differentiated by IP alias)
     remote_n_portd   = 2153;              # [FIXED] Remote CU F1-U UDP port
  }
 );
@@ -505,8 +518,8 @@ du1 = du1.replace('physCellId                                                   
 du1 = du1.replace('tracking_area_code  =  1;', 'tracking_area_code  =  0xa000;')
 du1 = du1.replace('plmn_list = ({ mcc = 208; mnc = 99; mnc_length = 2; snssaiList = ({ sst = 1 }, { sst = 2 }, { sst = 3 } ) });',
                   'plmn_list = ({ mcc = 208; mnc = 95; mnc_length = 2; snssaiList = ({ sst = 1, sd = 0x000001 }, { sst = 222, sd = 0x00007B }) });')
-du1 = du1.replace('local_n_address = "192.168.71.171";', 'local_n_address = "127.0.0.1";')
-du1 = du1.replace('remote_n_address = "192.168.71.150";', 'remote_n_address = "127.0.0.1";')
+du1 = du1.replace('local_n_address = "192.168.71.171";', 'local_n_address = "127.0.0.4";')
+du1 = du1.replace('remote_n_address = "192.168.71.150";', 'remote_n_address = "127.0.0.3";')
 du1 = du1.replace('local_n_portd   = 2153;', 'local_n_portd   = 2153;')
 du1 = du1.replace('remote_n_portd  = 2153;', 'remote_n_portd  = 2153;')
 du1 = du1.replace('serverport = 4043;', 'serverport = 4043;')
@@ -522,9 +535,9 @@ du2 = du2.replace('physCellId                                                   
 du2 = du2.replace('tracking_area_code  =  1;', 'tracking_area_code  =  0xa000;')
 du2 = du2.replace('plmn_list = ({ mcc = 208; mnc = 99; mnc_length = 2; snssaiList = ({ sst = 1 }, { sst = 2 }, { sst = 3 } ) });',
                   'plmn_list = ({ mcc = 208; mnc = 95; mnc_length = 2; snssaiList = ({ sst = 1, sd = 0x000001 }, { sst = 222, sd = 0x00007B }) });')
-du2 = du2.replace('local_n_address = "192.168.71.171";', 'local_n_address = "127.0.0.1";')
-du2 = du2.replace('remote_n_address = "192.168.71.150";', 'remote_n_address = "127.0.0.1";')
-du2 = du2.replace('local_n_portd   = 2153;', 'local_n_portd   = 2154;')
+du2 = du2.replace('local_n_address = "192.168.71.171";', 'local_n_address = "127.0.0.5";')
+du2 = du2.replace('remote_n_address = "192.168.71.150";', 'remote_n_address = "127.0.0.3";')
+du2 = du2.replace('local_n_portd   = 2153;', 'local_n_portd   = 2153;')
 du2 = du2.replace('remote_n_portd  = 2153;', 'remote_n_portd  = 2153;')
 du2 = du2.replace('serverport = 4043;', 'serverport = 4044;')
 
@@ -543,7 +556,10 @@ Start the components in sequence:
 ### Step 1: Start Centralized Unit (CU)
 ```bash
 cd /opt/oran/ran/openairinterface5g/cmake_targets/ran_build/build
-sudo ./nr-softmodem -O /opt/oran/ran/conf/cu_gnb.conf 2>&1 | tee /opt/oran/ran/cu.log
+sudo ./nr-softmodem -O /opt/oran/ran/conf/cu_gnb.conf \
+  --e2_agent.near_ric_ip_addr 10.102.0.66 \
+  --e2_agent.sm_dir /usr/local/lib/flexric/ \
+  2>&1 | tee /opt/oran/ran/cu.log
 ```
 
 ### Step 2: Start Distributed Unit 1 (DU-1 / Cell-1)
@@ -557,6 +573,74 @@ sudo ./nr-softmodem -O /opt/oran/ran/conf/du_gnb1.conf --rfsim 2>&1 | tee /opt/o
 cd /opt/oran/ran/openairinterface5g/cmake_targets/ran_build/build
 sudo ./nr-softmodem -O /opt/oran/ran/conf/du_gnb2.conf --rfsim 2>&1 | tee /opt/oran/ran/du2.log
 ```
+
+---
+
+### 9.1 Automated Background Daemon Scripts (`start_ran.sh` & `stop_ran.sh`)
+
+To run the split RAN components cleanly in the background without maintaining multiple open SSH sessions, use the automated management scripts:
+
+#### 1. Launcher Script (`/opt/oran/ran/start_ran.sh`)
+```bash
+cat << 'EOF' > /opt/oran/ran/start_ran.sh
+#!/bin/bash
+BIN_DIR="/opt/oran/ran/openairinterface5g/cmake_targets/ran_build/build"
+CONF_DIR="/opt/oran/ran/conf"
+LOG_DIR="/opt/oran/ran"
+
+echo "=== Stopping previous RAN processes (if any) ==="
+sudo pkill -9 nr-softmodem 2>/dev/null
+sleep 2
+
+echo "=== 1. Starting CU in background ==="
+cd "$BIN_DIR"
+nohup sudo ./nr-softmodem -O "$CONF_DIR/cu_gnb.conf" \
+  --e2_agent.near_ric_ip_addr 10.102.0.66 \
+  --e2_agent.sm_dir /usr/local/lib/flexric/ \
+  > "$LOG_DIR/cu.log" 2>&1 &
+
+echo "Waiting for CU to establish N2 (AMF) and E2 (Near-RT RIC)..."
+sleep 4
+
+echo "=== 2. Starting DU-1 (Cell-1, Port 4043) in background ==="
+nohup sudo ./nr-softmodem -O "$CONF_DIR/du_gnb1.conf" --rfsim \
+  > "$LOG_DIR/du1.log" 2>&1 &
+sleep 2
+
+echo "=== 3. Starting DU-2 (Cell-2, Port 4044) in background ==="
+nohup sudo ./nr-softmodem -O "$CONF_DIR/du_gnb2.conf" --rfsim \
+  > "$LOG_DIR/du2.log" 2>&1 &
+sleep 2
+
+echo ""
+echo "=== RAN Process Status ==="
+ps aux | grep "[n]r-softmodem"
+echo ""
+echo "=== Cell In-Service Verification ==="
+grep -E "is in service|associated AMF" "$LOG_DIR/cu.log"
+echo "OAI Split RAN successfully started in background."
+EOF
+
+chmod +x /opt/oran/ran/start_ran.sh
+```
+
+#### 2. Stopper Script (`/opt/oran/ran/stop_ran.sh`)
+```bash
+cat << 'EOF' > /opt/oran/ran/stop_ran.sh
+#!/bin/bash
+echo "Stopping all OAI RAN processes (CU, DU-1, DU-2)..."
+sudo pkill -9 nr-softmodem
+sleep 1
+echo "All RAN processes stopped."
+EOF
+
+chmod +x /opt/oran/ran/stop_ran.sh
+```
+
+Usage commands:
+- **Start All RAN:** `/opt/oran/ran/start_ran.sh`
+- **Stop All RAN:** `/opt/oran/ran/stop_ran.sh`
+- **Tail Live Logs:** `tail -f /opt/oran/ran/cu.log` or `tail -f /opt/oran/ran/du1.log`
 
 ---
 
@@ -589,7 +673,7 @@ All acceptance criteria have been verified on VM-4:
    ```
 
 4. **E2 Connection to Near-RT RIC Established [VALIDATED]:**
-   Querying the Near-RT RIC E2 inventory on VM-2 (`10.10.10.12`):
+   Querying the Near-RT RIC E2 inventory on VM-2 (`10.102.0.66`):
    ```bash
    curl -s http://10.0.2.11:3800/v1/e2t/list | jq .
    # Output:
@@ -658,11 +742,43 @@ sudo ./nr-softmodem -O /opt/oran/ran/conf/du_gnb2.conf --rfsim 2>&1 | tee /opt/o
 
 ---
 
+## 12. RAN Fault Injection & Baseline Handover Modes
+
+VM-4 hosts the dual-cell radio environment (DU-1 on PCI 1 and DU-2 on PCI 2) used to simulate radio congestion and evaluate inter-cell traffic steering.
+
+### 12.1 Radio Bottleneck Injection Procedure
+To simulate a pure RAN radio bottleneck during baseline experiments:
+
+```bash
+# Inject 80 Mbps UDP saturation load on Cell-1 (DU-1 port 4043)
+# This forces DU-1 PRB utilization to exceed 90% while Cell-2 remains idle (<15%)
+iperf3 -u -c 12.1.1.2 -b 80M -t 120
+```
+
+*Verification:* In Near-RT RIC telemetry (E2SM-KPM / Prometheus), observe:
+- `cell1_prb_utilization` > 0.90
+- `cell2_prb_utilization` < 0.15
+- Slice 1 packet delay at MAC layer increases significantly.
+
+### 12.2 Handover Execution Modes per Baseline
+
+| Baseline ID | Handover Mechanism | Control Entity | E2SM-RC Involvement |
+|---|---|---|---|
+| **B0** | Standard 3GPP RRC A3 Event | Internal OAI CU RRC logic | Disabled (RIC does not issue E2 control). Handover triggers only if RSRP delta exceeds `handover_margin`. |
+| **B1** | Dynamic Radio Handover | Near-RT RIC xApp | Enabled. xApp issues E2SM-RC Handover to Cell-2 when Cell-1 PRB > 80%. |
+| **B2** | Prohibited | N/A | Disabled. UEs remain anchored on Cell-1. |
+| **B3** | Uncoordinated Handover | Independent xApp | Enabled. Disregards Core congestion state. |
+| **B4** | Fixed Priority Handover | rApp-directed xApp | Enabled. Triggered as primary step regardless of bottleneck origin. |
+| **Proposed** | Bottleneck-Aware Handover | rApp-constrained xApp | **Selectively Enabled.** Executed only when `RAN_BOTTLENECK` is diagnosed. Inhibited during `CORE_BOTTLENECK`. |
+
+---
+
 ## References
 - 3GPP TS 23.501: System architecture for the 5G System (Stage 2)
 - 3GPP TS 38.413: NG-RAN; NG Application Protocol (NGAP)
 - 3GPP TS 38.470 / TS 38.473: NG-RAN; F1 general aspects, principles, and F1AP
 - 3GPP TS 38.211: NR; Physical channels and modulation (PCI)
-- O-RAN WG3: E2 Application Protocol (E2AP) v02.03
+- O-RAN WG3: E2 Application Protocol (E2AP) v02.03 & E2SM-RC v01.03
 - OpenAirInterface 5G RAN Repository: https://gitlab.eurecom.fr/oai/openairinterface5g
+
 

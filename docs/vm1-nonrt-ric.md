@@ -25,8 +25,8 @@ The custom rApp will be added later. At the current implementation stage, VM-1 h
 |---|---|
 | VM | VM-1 |
 | Hostname | `nonrt-ric` |
-| IP address | `10.10.10.11` |
-| Subnet | `10.10.10.0/24` |
+| IP address | `10.102.0.168` |
+| Subnet | `10.102.0.0/24` |
 | Main role | Non-RT RIC |
 | Main component | O-RAN SC A1 Policy Management Service |
 | Container runtime | Docker |
@@ -36,7 +36,7 @@ The Near-RT RIC is deployed separately on:
 ```text
 VM-2
 Hostname : near-rt-ric
-IP       : 10.10.10.12
+IP       : 10.102.0.66
 ```
 
 ---
@@ -89,7 +89,7 @@ A1 PMS `2.6.0` is listed by O-RAN SC as the H Release version.
 | Parameter | Current Value | Classification | Customization Rules & Impact |
 |---|---|---|---|
 | `name` | `near-rt-ric-1` | `[CUSTOMIZABLE]` | Logical identifier for the target Near-RT RIC in PMS registry. |
-| `baseUrl` | `http://10.10.10.12:10001` | `[MANDATORY MATCH NEAR-RT]` | Endpoint of VM-2 A1 compatibility shim. |
+| `baseUrl` | `http://10.102.0.66:10001` | `[MANDATORY MATCH NEAR-RT]` | Endpoint of VM-2 A1 compatibility shim. |
 | `customAdapterClass` | `...OscA1Client` | `[FIXED / ARCHITECTURE]` | Client adapter required to communicate with OSC A1 Mediator. |
 | `managedElementIds` | `["oai-cu-cp", ...]` | `[CUSTOMIZABLE]` | Target RAN network function identifiers managed by this RIC. |
 | `A1_PMS_HTTP_PORT` | `8081` | `[FIXED / ARCHITECTURE]` | Northbound REST API port of A1 PMS container. |
@@ -197,7 +197,7 @@ Before starting PMS, verify that VM-1 can reach the A1 compatibility endpoint on
 
 ```bash
 curl -i \
-  http://10.10.10.12:10001/a1-p/healthcheck
+  http://10.102.0.66:10001/a1-p/healthcheck
 ```
 
 Expected:
@@ -228,7 +228,7 @@ Use the following configuration:
     "ric": [
       {
         "name": "near-rt-ric-1",
-        "baseUrl": "http://10.10.10.12:10001",
+        "baseUrl": "http://10.102.0.66:10001",
         "customAdapterClass": "org.onap.ccsdk.oran.a1policymanagementservice.clients.OscA1Client",
         "managedElementIds": [
           "oai-cu-cp",
@@ -590,7 +590,7 @@ Check:
 
 ```bash
 curl -i \
-  http://10.10.10.12:10001/a1-p/healthcheck
+  http://10.102.0.66:10001/a1-p/healthcheck
 ```
 
 Then inspect:
@@ -602,7 +602,7 @@ docker logs --since=5m policy-agent-container
 The final deployment should use:
 
 ```text
-baseUrl            = http://10.10.10.12:10001
+baseUrl            = http://10.102.0.66:10001
 customAdapterClass = ...OscA1Client
 ```
 
@@ -664,31 +664,51 @@ sudo chown -R 999:1000 /opt/oran/nonrt/a1pms/database
 
 ---
 
-## 22. Final VM-1 Data Path
+## 22. Final VM-1 Cross-Domain Data Path
 
 ```text
-Custom rApp
-    │
-    │ policy request
-    ▼
-A1 PMS :8081
-    │
-    │ OscA1Client
-    ▼
-10.10.10.12:10001
-    │
-    ▼
-A1 compatibility shim
-    │
-    ▼
-A1 Mediator
-    │
-    │ RMR 20010
-    ▼
-xApp
+VM-3 (5GC / NWDAF)             VM-6 (Prometheus TSDB / RAN KPM)
+        │ Nnwdaf HTTP/2                        │ HTTP Metrics Pull
+        └───────────────┬──────────────────────┘
+                        ▼
+            Custom rApp Coordinator
+          [Bottleneck Classification]
+          (NORMAL | RAN | CORE | JOINT)
+                        │
+                 Action Selector
+                        │ policy request
+                        ▼
+                  A1 PMS :8081
+                        │
+                  OscA1Client
+                        ▼
+                10.102.0.66:10001
+                        │
+               A1 compatibility shim
+                        │
+                    A1 Mediator
+                        │
+                    RMR 20010
+                        ▼
+                      xApp
 ```
 
-VM-1 is therefore the entry point for long-timescale QoS policy control in the experimental platform.
+VM-1 serves as the central coordination hub: ingesting Core analytics (NWDAF) and RAN telemetry, classifying the bottleneck location, and enforcing long-timescale policy guidance via A1 PMS.
+
+---
+
+## 23. VM-1 Baseline Configuration & Operational Modes
+
+To execute the five thesis evaluation baselines and the Proposed System, configure the rApp on VM-1 as follows:
+
+| Baseline ID | Mode Name | rApp Operational State & Behavior | A1 Policy Payload Dispatched |
+|---|---|---|---|
+| **B0** | Static Default | **Disabled / Inactive.** No active policy instances created in PMS. | None (`DELETE` all policy instances via PMS `:8081`). |
+| **B1** | RAN-Only Control | **Static Thresholds.** Ingests only RAN metrics; NWDAF consumer is disabled. | Dispatches static dummy threshold (`{"threshold": 80}`) without bottleneck metadata. |
+| **B2** | Core-Only Control | **Disabled / Inactive.** Core adaptation is handled strictly within VM-3. | None. |
+| **B3** | Decoupled | **Disabled / Inactive.** Near-RT xApp and Core adapter act uncoordinated. | None. |
+| **B4** | Coordinated (Fixed Heuristic) | **Fixed Action Sequence.** Ingests both NWDAF and RAN metrics, but bypasses the classifier. Always prioritizes handover first, then Core shaping after timeout. | Dispatches unclassified handover authorization regardless of where the congestion originated. |
+| **Proposed** | Bottleneck-Aware Closed-Loop | **Full Classification & Matched Action.** Evaluates Rule-Based / Decision Tree classifier; dispatches targeted A1 policy + verifies SLA recovery in next window. | Dispatches targeted policy: `{"bottleneck_location": "RAN"|"CORE"|"JOINT", "target_cell": 2, "handover_allowed": true/false}`. |
 
 ---
 
@@ -702,6 +722,10 @@ Official references used for this deployment:
 - O-RAN SC — A1 Policy Management Service documentation  
   https://docs.o-ran-sc.org/projects/o-ran-sc-nonrtric-plt-a1policymanagementservice/
 
+- O-RAN Alliance WG2 — Non-RT RIC Architecture v03.00 & A1 Interface Specification v03.01
+
+- 3GPP TS 23.288 — Architecture for 5G System Network Data Analytics Function (NWDAF)
+
 - Docker — Bind mounts  
   https://docs.docker.com/engine/storage/bind-mounts/
 
@@ -711,3 +735,4 @@ Official references used for this deployment:
 For the cross-VM A1 compatibility and RMR path, see:
 
 [docs/a1-integration.md](a1-integration.md)
+

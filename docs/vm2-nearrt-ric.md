@@ -36,13 +36,13 @@ At the current implementation stage, both the **A1 policy path** (from A1 PMS on
 |---|---|---|
 | VM | VM-2 | Virtual Machine index |
 | Hostname | `near-rt-ric` | Host identifier |
-| IP address | `10.10.10.12` | Static IP on thesis research subnet |
-| Subnet | `10.10.10.0/24` | Main inter-VM communication network |
+| IP address | `10.102.0.66` | Static IP on thesis research subnet |
+| Subnet | `10.102.0.0/24` | Main inter-VM communication network |
 | Main role | Near-RT RIC | O-RAN Near-Real-Time RIC control plane |
 | Container runtime | Docker | Minimal O-RAN SC containers |
-| A1 external endpoint | `10.10.10.12:10000/TCP` | Native A1 Mediator endpoint |
-| A1 compatibility endpoint | `10.10.10.12:10001/TCP` | A1 Compatibility Shim for Non-RT RIC |
-| E2 external endpoint | `10.10.10.12:36421/SCTP` | O-RAN E2Term SCTP listening port |
+| A1 external endpoint | `10.102.0.66:10000/TCP` | Native A1 Mediator endpoint |
+| A1 compatibility endpoint | `10.102.0.66:10001/TCP` | A1 Compatibility Shim for Non-RT RIC |
+| E2 external endpoint | `10.102.0.66:36421/SCTP` | O-RAN E2Term SCTP listening port |
 
 ---
 
@@ -228,27 +228,49 @@ XAPP_PY_RUNNER_IP=10.0.2.20
 
 ---
 
-## 8. Expose the E2 SCTP Port & Tune E2Manager Keepalive
+## 8. Configure Docker Compose (SCTP Port & DBaaS Environment) & Tune E2Manager
 
-Edit:
+To ensure all RIC platform components resolve DBaaS correctly (preventing `Failed to connect to Redis` panics) and allow external RAN nodes (VM-4) to establish SCTP associations, run this automated patching script:
 
 ```bash
-nano /opt/oran/nearrt/oran-sc-ric/docker-compose.yml
-```
+cd /opt/oran/nearrt/oran-sc-ric
 
-For the E2Term service, expose:
+python3 - << 'EOF'
+compose_file = "docker-compose.yml"
+with open(compose_file, "r") as f:
+    lines = f.readlines()
 
-```yaml
-ports:
-  - "36421:36421/sctp"
-```
+new_lines = []
+target_services = ["rtmgr_sim", "submgr", "e2term", "e2mgr"]
+current_service = None
+env_injected = set()
 
-Also, under the `e2mgr`, `submgr`, and `appmgr` services in `environment:`, ensure `DBAAS_SERVICE_HOST` and `DBAAS_SERVICE_PORT` are configured so SDL resolves DBaaS correctly:
+for i, line in enumerate(lines):
+    # 1. Uncomment E2Term external SCTP port mapping
+    if '#ports:' in line:
+        line = '    ports:\n'
+    elif '#  - "36421:36421/sctp"' in line:
+        line = '      - "36421:36421/sctp"\n'
+        
+    new_lines.append(line)
+    
+    # 2. Track target services to inject DBAAS environment variables
+    for srv in target_services:
+        if line.strip().startswith(f"{srv}:") or line.strip().startswith(f"container_name: ric_{srv}"):
+            current_service = srv
+            break
+    
+    if current_service and line.strip() == "environment:" and current_service not in env_injected:
+        new_lines.append("      - DBAAS_SERVICE_HOST=${DBAAS_IP}\n")
+        new_lines.append("      - DBAAS_SERVICE_PORT=${DBAAS_PORT}\n")
+        env_injected.add(current_service)
+        current_service = None
 
-```yaml
-environment:
-  - DBAAS_SERVICE_HOST=${DBAAS_IP}
-  - DBAAS_SERVICE_PORT=${DBAAS_PORT}
+with open(compose_file, "w") as f:
+    f.writelines(new_lines)
+
+print("Configured docker-compose.yml with DBAAS environment and E2Term SCTP port.")
+EOF
 ```
 
 ### Tune E2Manager Keepalive and Log Level
@@ -545,7 +567,7 @@ Check from another VM using:
 
 ```bash
 curl -i \
-  http://10.10.10.12:10000/A1-P/v2/healthcheck
+  http://10.102.0.66:10000/A1-P/v2/healthcheck
 ```
 
 Expected:
@@ -570,7 +592,7 @@ Use:
 ```json
 {
   "name": "tsapolicy",
-  "description": "tsa parameters",
+  "description": "Bottleneck-aware traffic steering policy parameters",
   "policy_type_id": 20008,
   "create_schema": {
     "$schema": "http://json-schema.org/draft-07/schema#",
@@ -579,6 +601,27 @@ Use:
       "threshold": {
         "type": "integer",
         "default": 0
+      },
+      "bottleneck_location": {
+        "type": "string",
+        "enum": ["NORMAL", "RAN", "CORE", "JOINT", "UNCERTAIN"],
+        "default": "NORMAL"
+      },
+      "target_cell_preference": {
+        "type": "integer",
+        "default": 1
+      },
+      "handover_allowed": {
+        "type": "boolean",
+        "default": true
+      },
+      "slice_id": {
+        "type": "object",
+        "properties": {
+          "sst": { "type": "integer" },
+          "sd": { "type": "integer" }
+        },
+        "required": ["sst"]
       }
     },
     "additionalProperties": false
@@ -720,6 +763,42 @@ Expected:
 ```
 
 > This shim is an implementation compatibility layer, not part of the research contribution.
+
+### 17.1 Golden State Verification Checklist
+
+Run these four validation commands on VM-2 to confirm that the Near-RT RIC platform is completely operational:
+
+```bash
+# 1. Verify E2Term SCTP listening socket on host port 36421
+ss -l --sctp | grep 36421 || sudo netstat -l --sctp | grep 36421
+# Expected output:
+# LISTEN 0      4096         0.0.0.0:36421      0.0.0.0:*
+
+# 2. Verify A1 Policy Type 20008 registration via A1 Compatibility Port 10001
+curl -s http://127.0.0.1:10001/a1-p/policytypes | jq .
+# Expected output:
+# [
+#   20008
+# ]
+
+# 3. Verify A1 healthcheck endpoint
+curl -i http://127.0.0.1:10001/a1-p/healthcheck
+# Expected output:
+# HTTP/1.1 200 OK
+
+# 4. Verify all 8 platform and mediation containers are UP
+sudo docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+# Expected containers (all status 'Up'):
+# - a1-compat          (0.0.0.0:10001->8080/tcp)
+# - ric_a1mediator     (0.0.0.0:10000->10000/tcp)
+# - ric_e2term         (0.0.0.0:36421->36421/sctp, 38000/tcp)
+# - python_xapp_runner
+# - ric_rtmgr_sim
+# - ric_submgr
+# - ric_appmgr
+# - ric_e2mgr          (3800/tcp)
+# - ric_dbaas          (6379/tcp)
+```
 
 ---
 
@@ -968,10 +1047,10 @@ This path has been validated with a policy created through A1 PMS on VM-1 and en
 The Near-RT RIC exposes E2 through:
 
 ```text
-10.10.10.12:36421/SCTP
+10.102.0.66:36421/SCTP
 ```
 
-This endpoint terminates O-RAN E2AP traffic from the OAI gNB CU on VM-4 (`10.10.10.14`).
+This endpoint terminates O-RAN E2AP traffic from the OAI gNB CU on VM-4 (`10.102.0.167`).
 
 Current E2Term port mapping:
 
@@ -1011,7 +1090,7 @@ The E2 connection from VM-4 (`oai-ran`) to VM-2 (`near-rt-ric`) has been fully e
        "nbId": "00000e00",
        "plmnId": "02F859"
      },
-     "ip": "10.10.10.14",
+     "ip": "10.102.0.167",
      "port": 36421,
      "ranName": "gnb_208_095_00000e00"
    }
@@ -1248,7 +1327,7 @@ newgrp docker
 VM-1 A1 PMS
       │
       ▼
-10.10.10.12:10001
+10.102.0.66:10001
 A1 compatibility shim
       │
       ▼
@@ -1268,7 +1347,7 @@ VM-4 OAI RAN
       │
       │ SCTP / E2
       ▼
-10.10.10.12:36421
+10.102.0.66:36421
       │
       ▼
 E2Term
@@ -1278,10 +1357,29 @@ VM-2 therefore forms the central Near-RT control platform for the traffic-steeri
 
 ---
 
+---
+
+## 31. xApp Baseline Operational Modes on VM-2
+
+The Near-RT RIC xApp executes the near-real-time control loop ($10\text{ ms} - 1\text{ s}$). Depending on the evaluated baseline mode, the xApp operates under distinct behavioral rules:
+
+| Baseline ID | Mode Name | xApp Execution Mode | Actuation Decision Logic |
+|---|---|---|---|
+| **B0** | Static 3GPP Default | **Monitor-Only.** Subscribes to E2SM-KPM; ignores E2SM-RC. | No RIC steering. Handover left entirely to gNB internal RRC A3 event. |
+| **B1** | RAN-Only Control | **Autonomous Radio Steering.** Evaluates PRB and CQI per cell. | If $PRB_{cell1}^{slice1} > 80\%$, issues E2SM-RC Handover to Cell-2. Blind to Core UPF state. |
+| **B2** | Core-Only Control | **Monitor-Only.** Steering disabled. | Handover prohibited. UEs remain on initial cell. |
+| **B3** | Decoupled | **Autonomous Radio Steering.** Operates independently. | Aggressively steers UEs based on radio load, creating potential conflicts with Core rate-shaping. |
+| **B4** | Coordinated (Fixed Heuristic) | **Command-Driven Steering.** | Always attempts inter-cell handover when instructed by rApp, regardless of Core state. |
+| **Proposed** | Bottleneck-Aware Closed-Loop | **Constraint-Enforced Steering.** Parses A1 `bottleneck_location`. | • IF `RAN`: Execute E2SM-RC handover from Cell-1 to Cell-2.<br>• IF `CORE`: **Inhibit handover** (prevents futile ping-pong and protects Core UPF). |
+
+---
+
 ## References
 
 Official references used for this deployment:
 
+- O-RAN Alliance WG3 — E2 Application Protocol (E2AP) v02.03 & E2SM-RC v01.03
+- O-RAN Alliance WG2 — A1 Interface: Application Protocol v03.01
 - srsRAN — Minimal O-RAN SC RIC deployment  
   https://github.com/srsran/oran-sc-ric
 
@@ -1303,3 +1401,4 @@ Official references used for this deployment:
 For cross-VM A1 integration details, see:
 
 [docs/a1-integration.md](a1-integration.md)
+

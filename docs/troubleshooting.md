@@ -132,7 +132,7 @@ The PMS configuration must use:
 ```json
 {
   "name": "near-rt-ric-1",
-  "baseUrl": "http://10.10.10.12:10001",
+  "baseUrl": "http://10.102.0.66:10001",
   "customAdapterClass": "org.onap.ccsdk.oran.a1policymanagementservice.clients.OscA1Client"
 }
 ```
@@ -144,7 +144,7 @@ PMS
  │
  │ OscA1Client
  ▼
-10.10.10.12:10001
+10.102.0.66:10001
  │
  ▼
 A1 compatibility shim
@@ -207,7 +207,7 @@ org.onap.ccsdk.oran.a1policymanagementservice.clients.OscA1Client
 and:
 
 ```text
-baseUrl = http://10.10.10.12:10001
+baseUrl = http://10.102.0.66:10001
 ```
 
 The compatibility shim only maps URI paths. It does not rewrite the policy JSON.
@@ -507,7 +507,7 @@ works.
 Use the compatibility shim on:
 
 ```text
-10.10.10.12:10001
+10.102.0.66:10001
 ```
 
 Examples:
@@ -1126,7 +1126,7 @@ Port             : 8081
 RIC ID           : near-rt-ric-1
 RIC state        : AVAILABLE
 Policy type      : 20008
-A1 target        : http://10.10.10.12:10001
+A1 target        : http://10.102.0.66:10001
 Client           : OscA1Client
 ```
 
@@ -1150,13 +1150,13 @@ A1 Mediator commit:
 09a757b4fd63198d8690d50b52bfd04552d47f1f
 
 A1 API:
-10.10.10.12:10000
+10.102.0.66:10000
 
 A1 compatibility API:
-10.10.10.12:10001
+10.102.0.66:10001
 
 E2:
-10.10.10.12:36421/SCTP
+10.102.0.66:36421/SCTP
 
 Python xApp RMR:
 4560
@@ -1234,7 +1234,7 @@ ENFORCED
 ## 23. VM-4 Cannot Reach VM-3 5GC Containers (100% Packet Loss on 192.168.70.x)
 
 ### Symptom
-On VM-4 (`10.10.10.14`), `ping 10.10.10.13` (VM-3 host) succeeds with 0% packet loss, but `ping 192.168.70.138` (AMF container) fails with 100% packet loss:
+On VM-4 (`10.102.0.167`), `ping 10.102.0.164` (VM-3 host) succeeds with 0% packet loss, but `ping 192.168.70.138` (AMF container) fails with 100% packet loss:
 
 ```text
 PING 192.168.70.138 (192.168.70.138) 56(84) bytes of data.
@@ -1243,34 +1243,47 @@ PING 192.168.70.138 (192.168.70.138) 56(84) bytes of data.
 ```
 
 ### Cause
-Three factors can block external routed traffic between VM-4 and the VM-3 5GC containers:
-1. **Missing Static Route on VM-4:** If `192.168.70.0/24 via 10.10.10.13` is not present in VM-4's routing table (`ip route show`), VM-4 falls back to its default gateway (`10.10.10.1 dev enp0s3`), which drops the packets (0 packets reach VM-3).
-2. **Accidental Static Route on VM-3 Host:** If `ip route add 192.168.70.0/24 via 10.10.10.13` was mistakenly executed on VM-3 itself, a duplicate conflicting route (`192.168.70.0/24 via 10.10.10.13 dev enp0s3`) is created that takes precedence over `192.168.70.0/24 dev demo-oai`. This loops traffic to `enp0s3` causing `Destination Host Unreachable`.
-3. **Docker `FORWARD` Policy & Bridge NAT:** Docker sets the default policy of the `FORWARD` iptables chain to `DROP`. Unless explicitly permitted in `DOCKER-USER` and masqueraded on `demo-oai`, Docker drops packets arriving from outside the host aimed at container IP addresses.
+Four distinct factors can block external routed traffic between VM-4 and the VM-3 5GC containers:
+1. **Missing Static Route on VM-4:** If `192.168.70.0/24 via 10.102.0.164` is not present in VM-4's routing table (`ip route show`), VM-4 falls back to its default gateway, dropping the packets before reaching VM-3.
+2. **Accidental Static Route on VM-3 Host:** If `ip route add 192.168.70.0/24 via 10.102.0.164` was mistakenly executed on VM-3 itself, a duplicate conflicting route (`192.168.70.0/24 via 10.102.0.164 dev ens33`) is created that takes precedence over `192.168.70.0/24 dev demo-oai`. This loops traffic back to `ens33` causing `Destination Host Unreachable`.
+3. **Docker `FORWARD` Filter Chain & Bridge Policy:** Docker defaults the `FORWARD` iptables chain policy to `DROP`. Unless explicitly accepted at rule position 1 of `FORWARD` or permitted in `DOCKER-USER`, Docker drops routed ingress packets between `ens33` and `demo-oai`.
+4. **Docker `raw` Table PREROUTING Anti-Spoofing Rule (Root Cause for Zero FORWARD Packets):** When creating user-defined bridge networks, Docker daemon installs anti-spoofing packet filtering rules in the netfilter `raw` table:
+   ```text
+   -A PREROUTING -d 192.168.70.138/32 ! -i demo-oai -j DROP
+   -A PREROUTING -d 192.168.70.142/32 ! -i demo-oai -j DROP
+   -A PREROUTING -d 192.168.70.143/32 ! -i demo-oai -j DROP
+   ```
+   Because routed packets from VM-4 arrive via physical NIC `ens33` (`! -i demo-oai`), the Linux kernel silently drops the packets in the `raw` table **before the packets ever reach the routing decision or the `FORWARD` filter chain** (causing `FORWARD` packet counters to show `pkts = 0` and `tcpdump -i any` to show packets on `ens33` but never on `demo-oai`).
 
 ### Solution
 
 #### On VM-4 (`oai-ran`):
 Ensure the static route to VM-3 5GC is present:
 ```bash
-sudo ip route add 192.168.70.0/24 via 10.10.10.13 dev enp0s3
+sudo ip route add 192.168.70.0/24 via 10.102.0.164
 ip route show | grep 192.168.70
 ```
 
 #### On VM-3 (`oai-5gc`):
 
 ```bash
-# 1. Remove the accidental static route on VM-3 itself if present
-sudo ip route del 192.168.70.0/24 via 10.10.10.13 dev enp0s3 2>/dev/null || true
-sudo rm -f /etc/network/interfaces.d/5gc-route
+# 1. Bypass Docker raw table PREROUTING anti-spoofing drop rule
+sudo iptables -t raw -I PREROUTING 1 -i ens33 -d 192.168.70.0/24 -j ACCEPT
 
-# 2. Allow routed forwarding in Docker's DOCKER-USER filter chain
-sudo iptables -P FORWARD ACCEPT
-sudo iptables -I DOCKER-USER -s 10.10.10.0/24 -d 192.168.70.0/24 -j ACCEPT
-sudo iptables -I DOCKER-USER -s 192.168.70.0/24 -d 10.10.10.0/24 -j ACCEPT
+# 2. Allow routed forwarding across ens33 and demo-oai
+sudo sysctl -w net.ipv4.ip_forward=1
+sudo sysctl -w net.ipv4.conf.all.forwarding=1
+sudo sysctl -w net.ipv4.conf.ens33.forwarding=1
+echo 1 | sudo tee /proc/sys/net/ipv4/conf/demo-oai/forwarding 2>/dev/null || true
 
-# 3. Add MASQUERADE on demo-oai interface so container receives local-bridge source IP
+sudo iptables -I FORWARD 1 -i ens33 -o demo-oai -j ACCEPT
+sudo iptables -I FORWARD 2 -i demo-oai -o ens33 -j ACCEPT
+
+# 3. Add MASQUERADE on demo-oai so container returns traffic to host gateway
 sudo iptables -t nat -I POSTROUTING -o demo-oai -j MASQUERADE
+
+# 4. Remove any accidental static route on VM-3 itself if present
+sudo ip route del 192.168.70.0/24 via 10.102.0.164 2>/dev/null || true
 ```
 
 ---
@@ -1508,6 +1521,657 @@ sudo docker compose up -d e2mgr
 sleep 2
 sudo docker compose up -d e2term
 ```
+
+---
+
+## 30. F1-U GTP-U Socket Bind Collision on VM-4 (`bind: Address already in use: 127.0.0.1 2153`)
+
+### Symptom
+When starting DU-1 (`du_gnb1.conf`) after CU (`cu_gnb.conf`) is already active on VM-4:
+
+```text
+[GTPU]   Initializing UDP for local address 127.0.0.1 with port 2153
+[GTPU]   bind: Address already in use
+[GTPU]   failed to bind socket: 127.0.0.1 2153 
+[GTPU]   can't create GTP-U instance
+
+Assertion (gtpInst > 0) failed!
+In F1AP_DU_task() /opt/oran/ran/openairinterface5g/openair2/F1AP/f1ap_du_task.c:121
+cannot create DU F1-U GTP module
+```
+
+### Cause
+CU (`cu_gnb.conf`), DU-1 (`du_gnb1.conf`), and DU-2 (`du_gnb2.conf`) run as separate Linux processes on the same host (VM-4) using the local loopback interface (`127.0.0.1`).  
+Because CU binds to `127.0.0.1:2153` (`local_s_portd = 2153`), DU-1 cannot bind to the exact same UDP port on `127.0.0.1` (`local_n_portd = 2153`).  
+DU-2 does not experience this error because it uses port `2154` (`local_n_portd = 2154`).
+
+### Solution
+Differentiate the F1-U listening UDP ports across all three nodes:
+- **CU:** listens on `127.0.0.1:2153` (`local_s_portd = 2153`)
+- **DU-1:** binds to `127.0.0.1:2155` (`local_n_portd = 2155`, sending to CU at `remote_n_portd = 2153`)
+- **DU-2:** binds to `127.0.0.1:2154` (`local_n_portd = 2154`, sending to CU at `remote_n_portd = 2153`)
+
+Update `/opt/oran/ran/conf/du_gnb1.conf`:
+```bash
+sed -i 's/local_n_portd.*=.*2153/local_n_portd   = 2155/g' /opt/oran/ran/conf/du_gnb1.conf
+```
+
+Verify the setting:
+```bash
+grep -E "local_n_portd|remote_n_portd" /opt/oran/ran/conf/du_gnb1.conf
+# Output:
+# local_n_portd   = 2155;
+# remote_n_portd  = 2153;
+```
+
+---
+
+## 31. Docker Compose Network Collision & Undefined Network during NWDAF Merge
+
+### Symptom
+When merging `docker-compose-nwdaf-cn-http1.yaml` into `docker-compose-slicing-basic-nrf.yaml` on VM-3:
+1. `service "oai-nwdaf-engine" refers to undefined network nwdaf_net: invalid compose project`
+2. `failed to parse ... yaml: construct errors: line 1: line 486: mapping key "public_net" already defined at line 463`
+
+### Cause
+- NWDAF microservice definitions in `docker-compose-nwdaf-cn-http1.yaml` use the network key `nwdaf_net:` (with underscore `_`). If the network definition block defines it as `nwdaf-net:` (with hyphen `-`), Docker Compose cannot resolve the reference.
+- Both `docker-compose-slicing-basic-nrf.yaml` and `docker-compose-nwdaf-cn-http1.yaml` define `public_net:` under their respective `networks:` blocks. Concatenating both files creates a duplicate mapping key error in YAML parser.
+
+### Solution
+In `docker-compose-slicing-basic-nrf.yaml`, retain the existing `public_net:` block and append **only** `nwdaf_net:`:
+
+```yaml
+networks:
+    public_net:
+        name: demo-oai-public-net
+        ipam:
+            config:
+                - subnet: 192.168.70.0/24
+    nwdaf_net:
+        name: oai-nwdaf-net
+        ipam:
+            config:
+                - subnet: 192.168.74.0/24
+```
+
+Validate YAML syntax before launching:
+```bash
+sudo docker compose -f docker-compose-slicing-basic-nrf.yaml config > /dev/null && echo "YAML SYNTAX VALID"
+```
+
+---
+
+## 32. MySQL 8.0 Subscriber Initialization Failure on OAI v2.1.0 Schema (`ERROR 1054` & `ERROR 3140`)
+
+### Symptom
+When initializing the MySQL subscriber database (`mysql:8.0`) with custom or legacy provisioning scripts:
+1. `ERROR 1054 (42S22) at line 429: Unknown column 'vectorAlgorithm' in 'field list'`
+2. `ERROR 3140 (22032) at line 429: Invalid JSON text: "The document root must not be followed by other values." at position 1 in value for column 'AuthenticationSubscription.sequenceNumber'`
+
+The `mysql` container exits immediately with code `1`.
+
+### Cause
+In OAI 5GC `v2.1.0`, the MySQL database schema in `database/oai_db2.sql` changed from legacy versions:
+- In `AuthenticationSubscription`, the algorithm column is named `algorithmId` (not `vectorAlgorithm`).
+- The column `sequenceNumber` is defined as `JSON DEFAULT NULL` in MySQL 8.0, requiring strict JSON string formatting:
+  `'{"sqn": "000000000020", "sqnScheme": "NON_TIME_BASED", "lastIndexes": {"ausf": 0}}'`
+  Inserting a raw hex/binary string like `'000000000000'` fails JSON validation.
+- In `SessionManagementSubscriptionData`, the columns are `(ueid, servingPlmnid, singleNssai, dnnConfigurations)` where `singleNssai` is a JSON string: `'{"sst": 1, "sd": "000001"}'` or `'{"sst": 222, "sd": "00007B"}'`.
+
+### Solution
+1. Remove failed container and its anonymous volume:
+   ```bash
+   sudo docker rm -f -v mysql
+   ```
+2. Insert records matching the exact OAI v2.1.0 schema:
+   ```sql
+   INSERT INTO `AuthenticationSubscription` (`ueid`, `authenticationMethod`, `encPermanentKey`, `protectionParameterId`, `sequenceNumber`, `authenticationManagementField`, `algorithmId`, `encOpcKey`, `encTopcKey`, `vectorGenerationInHss`, `n5gcAuthMethod`, `rgAuthenticationInd`, `supi`)
+   VALUES ('208950000000031', '5G_AKA', '0C0A34601D4F07677303652C0462535B', '0C0A34601D4F07677303652C0462535B', '{\"sqn\": \"000000000020\", \"sqnScheme\": \"NON_TIME_BASED\", \"lastIndexes\": {\"ausf\": 0}}', '8000', 'milenage', '63bfa50ee6523365ff14c1f45f88737d', NULL, NULL, NULL, NULL, '208950000000031')
+   ON DUPLICATE KEY UPDATE `ueid` = `ueid`;
+
+   INSERT INTO `SessionManagementSubscriptionData` (`ueid`, `servingPlmnid`, `singleNssai`, `dnnConfigurations`)
+   VALUES ('208950000000031', '20895', '{\"sst\": 1, \"sd\": \"000001\"}', '{\"default\":{\"pduSessionTypes\":{ \"defaultSessionType\": \"IPV4\"},\"sscModes\": {\"defaultSscMode\": \"SSC_MODE_1\"},\"5gQosProfile\": {\"5qi\": 6,\"arp\":{\"priorityLevel\": 1,\"preemptCap\": \"NOT_PREEMPT\",\"preemptVuln\":\"NOT_PREEMPTABLE\"},\"priorityLevel\":1},\"sessionAmbr\":{\"uplink\":\"100Mbps\", \"downlink\":\"100Mbps\"}}}')
+   ON DUPLICATE KEY UPDATE `ueid` = `ueid`;
+   ```
+3. Restart MySQL: `sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d mysql`.
+
+---
+
+## 33. Kong API Gateway 404 Not Found on Physical Host IP (`http://10.102.0.164:8080`)
+
+### Symptom
+Sending standard `Nnwdaf_AnalyticsInfo` queries to Kong via physical host IP returns `HTTP/1.1 404 Not Found`, while direct queries to `http://127.0.0.1:6059` return HTTP 200 or 400.
+
+### Cause
+The default declarative config `/opt/oran/5gc/oai-cn5g-nwdaf/docker-compose/conf/kong.yml` restricts routing with `hosts: - oai-nwdaf-nbi-gateway`.  
+HTTP clients (such as Python `requests` or `curl`) calling `http://10.102.0.164:8080/...` send the header `Host: 10.102.0.164:8080`. Kong does not match this host header and rejects the request with a 404.
+
+### Solution
+Remove the restrictive `hosts:` filter from `kong.yml` so that Kong routes purely by URL path:
+
+```yaml
+_format_version: '1.1'
+_transform: true
+
+services:
+- name: oai-nwdaf-nbi-analytics
+  url: http://192.168.74.151:8080/nnwdaf-analyticsinfo/v1/analytics
+  routes:
+    - name: oai-nwdaf-nbi-analytics-route
+      paths:
+      - /nnwdaf-analyticsinfo/v1/analytics
+
+- name: oai-nwdaf-nbi-events
+  url: http://192.168.74.152:8080/nnwdaf-eventssubscription/v1
+  routes:
+    - name: oai-nwdaf-nbi-events-route
+      paths:
+      - /nnwdaf-eventssubscription/v1
+
+- name: oai-nwdaf-nbi-ml
+  url: http://192.168.74.153:8080/nnwdaf-mlmodelprovision/v1
+  routes:
+    - name: oai-nwdaf-nbi-ml-route
+      paths:
+      - /nnwdaf-mlmodelprovision/v1
+```
+
+Restart Kong:
+```bash
+sudo docker restart oai-nwdaf-nbi-gateway
+```
+
+---
+
+## 34. Transient Docker Hub Timeout during Large Image Pulls (`net/http: timeout awaiting response headers`)
+
+### Symptom
+During `docker compose pull` or `docker compose up -d` on VM-3:
+```text
+failed to copy: httpReadSeeker: failed open: failed to do request: Get "https://registry-1.docker.io/v2/oaisoftwarealliance/oai-amf/blobs/...": net/http: timeout awaiting response headers
+```
+
+### Cause
+Transient network latency or Docker Hub rate limiting while downloading multi-hundred-megabyte layers (`oai-amf`, `oai-upf-vpp`, `mysql`).
+
+### Solution
+Docker natively caches already-downloaded layers. Simply re-execute:
+```bash
+sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d
+```
+Docker will resume from cached layers and download only remaining uncompleted blobs without re-downloading finished images.
+
+---
+
+## 35. Near-RT RIC E2Mgr / SubMgr Container Exit on Startup due to Missing DBaaS Environment Variables
+
+### Symptom
+On VM-2 (`near-rt-ric`), after launching the RIC platform with `docker compose up -d`, `ric_e2mgr` or `ric_submgr` exits immediately with status `Exited (1)` or `Exited (2)`.
+Viewing the logs:
+```bash
+sudo docker logs ric_e2mgr
+```
+Shows errors such as:
+```text
+{"ts":...,"crit":"ERROR","id":"e2mgr","mdc":{"PID":1},"msg":"Failed to connect to Redis"}
+panic: dial tcp: lookup service-ricplt-dbaas-tcp.ricplt: no such host
+```
+Or connection refused attempting to dial `127.0.0.1:6379`.
+
+### Cause
+In the minimal `oran-sc-ric` Docker Compose deployment, services such as `e2mgr`, `submgr`, and `rtmgr_sim` use the Shared Data Layer (`libsdl-go` / `libsdl-cpp`). By default, SDL attempts to resolve the standard Kubernetes service name `service-ricplt-dbaas-tcp.ricplt` or `localhost:6379` unless overridden by explicit environment variables:
+- `DBAAS_SERVICE_HOST`
+- `DBAAS_SERVICE_PORT`
+
+Although `.env` defines `DBAAS_IP=10.0.2.12` and `DBAAS_PORT=6379`, the default `docker-compose.yml` does not declare `DBAAS_SERVICE_HOST` or `DBAAS_SERVICE_PORT` inside the `environment:` blocks for `rtmgr_sim`, `submgr`, `e2mgr`, and `e2term`. Consequently, these containers fail to reach the DBaaS Redis container.
+
+### Solution
+Inject `DBAAS_SERVICE_HOST=${DBAAS_IP}` and `DBAAS_SERVICE_PORT=${DBAAS_PORT}` into the `environment:` blocks for all RIC services in `/opt/oran/nearrt/oran-sc-ric/docker-compose.yml`.
+
+Run this automated Python patch script on VM-2:
+```bash
+cd /opt/oran/nearrt/oran-sc-ric
+
+python3 - << 'EOF'
+compose_file = "docker-compose.yml"
+with open(compose_file, "r") as f:
+    lines = f.readlines()
+
+new_lines = []
+target_services = ["rtmgr_sim", "submgr", "e2term", "e2mgr"]
+current_service = None
+env_injected = set()
+
+for i, line in enumerate(lines):
+    new_lines.append(line)
+    for srv in target_services:
+        if line.strip().startswith(f"{srv}:") or line.strip().startswith(f"container_name: ric_{srv}"):
+            current_service = srv
+            break
+    
+    if current_service and line.strip() == "environment:" and current_service not in env_injected:
+        new_lines.append("      - DBAAS_SERVICE_HOST=${DBAAS_IP}\n")
+        new_lines.append("      - DBAAS_SERVICE_PORT=${DBAAS_PORT}\n")
+        env_injected.add(current_service)
+        current_service = None
+
+with open(compose_file, "w") as f:
+    f.writelines(new_lines)
+
+print("Injected DBAAS environment variables into docker-compose.yml successfully.")
+EOF
+```
+
+Restart the affected containers:
+```bash
+sudo docker compose stop e2mgr submgr rtmgr_sim
+sudo docker compose up -d e2mgr submgr rtmgr_sim
+```
+
+---
+
+## 36. E2Term SCTP Port 36421 Inaccessible from External RAN Node (`Connection refused`)
+
+### Symptom
+When VM-4 (`oai-ran`) starts CU (`cu_gnb.conf`) and initiates an E2 connection toward Near-RT RIC (`10.102.0.66:36421`):
+```text
+[E2AP] Failed to connect to Near-RT RIC at 10.102.0.66:36421 (Connection refused)
+[E2AP] Reconnecting in 5 seconds...
+```
+Checking SCTP listening sockets on VM-2:
+```bash
+ss -l --sctp | grep 36421
+# Returns no output
+```
+
+### Cause
+In `oran-sc-ric/docker-compose.yml`, the `ports:` mapping for `e2term` is commented out by default:
+```yaml
+  e2term:
+    container_name: ric_e2term
+    hostname: e2term
+    image: nexus3.o-ran-sc.org:10002/o-ran-sc/ric-plt-e2:${E2TERM_VER}
+    #Uncomment ports to use the RIC from outside the docker network.
+    #ports:
+    #  - "36421:36421/sctp"
+```
+Because the port is not published to the host, external SCTP packets arriving at VM-2's physical network interface (`10.102.0.66:36421`) are rejected at the host kernel.
+
+### Solution
+Uncomment the `ports:` definition under `e2term` in `/opt/oran/nearrt/oran-sc-ric/docker-compose.yml`:
+
+```bash
+cd /opt/oran/nearrt/oran-sc-ric
+
+python3 - << 'EOF'
+with open("docker-compose.yml", "r") as f:
+    content = f.read()
+
+content = content.replace(
+    '    #ports:\n    #  - "36421:36421/sctp"',
+    '    ports:\n      - "36421:36421/sctp"'
+)
+
+with open("docker-compose.yml", "w") as f:
+    f.write(content)
+
+print("Exposed E2Term SCTP port 36421 on host.")
+EOF
+
+sudo docker compose up -d e2term
+```
+
+```bash
+ss -l --sctp | grep 36421
+# Expected output:
+# LISTEN 0      4096         0.0.0.0:36421      0.0.0.0:*
+```
+
+---
+
+## 37. Packet Drop / Ping Timeout from RAN (VM-4) to 5GC Docker Subnet (`192.168.70.0/24`) via Host VM-3
+
+### Symptom
+When testing reachability from VM-4 (`oai-ran` — `10.102.0.167`) to the 5G Core AMF container (`192.168.70.138`) or UPF containers:
+```bash
+ping -c 2 192.168.70.138
+# Output:
+# 2 packets transmitted, 0 received, 100% packet loss, time 1020ms
+```
+However, ping from VM-4 to the physical host VM-3 (`10.102.0.164`) succeeds with 0% packet loss.
+
+### Cause
+By default on Ubuntu and Docker:
+1. **Docker FORWARD Chain Rejection:** Docker inserts a default `-j DROP` rule at the bottom of the `FORWARD` filter chain. Forwarded IP packets arriving on external host interfaces (e.g. `ens33`) destined for internal container bridge networks (`192.168.70.0/24`) are discarded.
+2. **Reverse Path Filtering (`rp_filter`):** The Linux kernel performs strict reverse-path checks. Because the source address belongs to `10.102.0.0/24` and enters an interface with a different local subnet routing, the kernel flags it as a martian/spoofed packet and drops it silently.
+3. **UFW / Firewall Rules:** Active firewall configurations reject forwarded inter-subnet packets by default.
+
+### Solution
+Apply the following routing and forwarding configuration on **VM-3 (`10.102.0.164`)**:
+
+```bash
+# 1. Disable UFW if active
+sudo ufw disable 2>/dev/null || true
+
+# 2. Enable kernel forwarding and disable reverse-path filtering across all interfaces
+sudo sysctl -w net.ipv4.ip_forward=1
+sudo sysctl -w net.ipv4.conf.all.rp_filter=0
+sudo sysctl -w net.ipv4.conf.default.rp_filter=0
+for f in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 | sudo tee $f > /dev/null; done
+
+# 3. Allow packet forwarding in DOCKER-USER and FORWARD iptables chains
+sudo iptables -I DOCKER-USER 1 -j ACCEPT
+sudo iptables -I FORWARD 1 -j ACCEPT
+
+# 4. Enable bidirectional NAT masquerading for the container bridge network
+sudo iptables -t nat -I POSTROUTING 1 -d 192.168.70.0/24 -j MASQUERADE
+sudo iptables -t nat -I POSTROUTING 2 -s 192.168.70.0/24 -j MASQUERADE
+```
+
+On **VM-4 (`10.102.0.167`)**, ensure the static route exists:
+```bash
+sudo ip route replace 192.168.70.0/24 via 10.102.0.164
+ping -c 2 192.168.70.138
+# Expected: 2 packets transmitted, 2 received, 0% packet loss
+```
+
+---
+
+## 38. OAI gNB CU E2 Agent Inactive / Disabled (`E2 agent is DISABLED`)
+
+### Symptom
+When starting OAI CU softmodem with `sudo ./nr-softmodem -O /opt/oran/ran/conf/cu_gnb.conf`, CU connects to 5GC AMF via N2, but no E2 connection is initiated toward Near-RT RIC (`ric_e2term`).  
+Alternatively, the logs show:
+```text
+E2 agent is DISABLED (for activation, define .e2_agent.{near_ric_ip_addr,sm_dir} parameters)
+```
+And `ric_e2term` on VM-2 does not receive any SCTP connection.
+
+### Cause
+In the OpenAirInterface `develop` branch, the E2 agent argument parser (`openair2/E2AP/e2_agent_arg.c`) checks parameter readiness using `config_isparamset()`. If the configuration file structure uses nested syntax or if the config loader initializes before the main RRC context is populated, `config_isparamset()` may evaluate to false, keeping `oai_args.enabled = false` and disabling the E2 agent thread.
+
+### Solution
+Pass the E2 agent parameters explicitly via command-line arguments when launching `nr-softmodem`:
+
+```bash
+cd /opt/oran/ran/openairinterface5g/cmake_targets/ran_build/build
+
+sudo ./nr-softmodem -O /opt/oran/ran/conf/cu_gnb.conf \
+  --e2_agent.near_ric_ip_addr 10.102.0.66 \
+  --e2_agent.sm_dir /usr/local/lib/flexric/ \
+  2>&1 | tee /opt/oran/ran/cu.log
+```
+
+Expected output verifying active E2 initialization:
+```text
+After RCconfig_NR_E2agent /usr/local/lib/flexric/ 10.102.0.66
+[E2 NODE]: mcc = 208 mnc = 95 mnc_digit = 2 nb_id = 3584
+[E2 NODE]: Args 10.102.0.66 /usr/local/lib/flexric/
+```
+
+And in `ric_e2mgr` logs on VM-2:
+```bash
+#RanConnectStatusChangeManager.ChangeStatus - RAN name: gnb_208_095_00000e00, currentStatus: UNKNOWN_CONNECTION_STATUS, nextStatus: CONNECTED
+```
+
+---
+
+## 39. OAI nrUE Softmodem Immediate Abort on Deprecated Command-Line Option `--sa`
+
+### Symptom
+When starting `nr-uesoftmodem` with the flag `--sa`:
+```text
+[CONFIG] unknown option: --sa
+[ENB_APP] [CONFIG] 1 unknown option(s) in command line starting with  (section ALLSECTIONS)
+[NR_PHY] called by: config_check_unknown_cmdlineopt() Exiting OAI softmodem: exit_fun
+[NR_PHY] UE main thread is ending
+```
+The softmodem performs radio cell detection, RACH, and RRC connection, but immediately aborts and exits.
+
+### Cause
+In the OpenAirInterface `develop` branch, Standalone (SA) mode has been set as the default operation mode for `nr-uesoftmodem`. The `--sa` command-line flag was deprecated and removed from the active parameter definition list. The strict option validator in `config_cmdline.c` treats `--sa` as an unknown command-line option and forcefully terminates the softmodem.
+
+### Solution
+Remove the `--sa` flag from the command line invocation. `nr-uesoftmodem` automatically defaults to Standalone mode:
+
+```bash
+cd /opt/oran/ue/openairinterface5g/cmake_targets/ran_build/build
+
+sudo ./nr-uesoftmodem \
+  -r 106 \
+  --numerology 1 \
+  --band 78 \
+  -C 3619200000 \
+  --rfsim \
+  --rfsimulator.serveraddr 10.102.0.167 \
+  --rfsimulator.serverport 4043 \
+  -O /opt/oran/ue/conf/ue_slice1.conf
+```
+
+---
+
+## 40. PDU Session Establishment Stuck / Ignored: Mismatch in 5GC Slicing YAML Configurations
+
+### Symptom
+On VM-5, `nr-uesoftmodem` successfully connects to gNB DU/CU via RFsimulator, executes 4-Step RACH, passes 5G-AKA authentication, and reaches `5GMM-REGISTERED` state on AMF.  
+However, when the UE sends `NAS_UPLINK_DATA_REQ (PduSessionEstablishRequest)` with `NSSAI 1.1 DNN default`:
+```text
+[NAS]    requested PDU session ID 10 type 1 NSSAI 1.1 DNN default
+[NAS]    Send NAS_UPLINK_DATA_REQ message(PduSessionEstablishRequest)
+```
+The UE hangs waiting indefinitely for `PduSessionEstablishAccept`, and no TUN interface (`oaitun_ue1`) is created.
+
+On VM-3 (`oai-core`), `oai-smf-slice1` logs show no PDU session requests received, only NRF and PFCP heartbeats:
+```text
+[smf_n4 ] [info] PFCP HEARTBEAT PROCEDURE starting
+[smf_sbi] [debug] Send NF Update to NRF (HTTP version 2)
+```
+
+In `oai-amf` logs, AMF queries NSSF for network slice selection:
+```text
+[amf_sbi] [debug] Send Network Slice Information Retrieval, URI http://oai-nssf:8080/nnssf-nsselection/v1/network-slice-information?nf-type=AMF&...&slice-info-request-for-pdu-session={"roamingIndication":"NON_ROAMING","sNssai":{"sd":"000001","sst":1}}
+```
+And NSSF responds with SMF candidates supporting only default tutorial slices:
+```json
+{"nfInstances":[{"nfInstanceName":"OAI-SMF","sNssais":[{"sd":"000080","sst":128}]},{"nfInstanceName":"OAI-SMF","sNssais":[{"sd":"FFFFFF","sst":1}]}]}
+```
+Because neither SMF supports the requested S-NSSAI `[SST: 1, SD: 000001]`, AMF cannot route the PDU session creation context, dropping the session setup.
+
+Additionally, AMF logs periodic warnings:
+```text
+[amf_sbi] [info] Send HTTP message to 
+[amf_sbi] [info] Cannot get response when calling
+[amf_app] [warning] NF Instance Registration, got issue when registering to NRF, try again ...
+```
+caused by a missing `nfs.nrf` endpoint definition in `conf/slicing_base_config.yaml`.
+
+### Cause
+In OpenAirInterface `cn5g-fed` v2.1.0, container services in `docker-compose-slicing-basic-nrf.yaml` mount YAML files from `./conf/`:
+- `oai-smf-slice1`, `oai-upf-slice1`, `oai-nrf-slice12` mount `conf/slicing_slice1_config.yaml`
+- `oai-smf-slice2`, `oai-upf-slice2` mount `conf/slicing_slice2_config.yaml`
+- `oai-nssf` mounts `conf/nssf_slice_config.yaml`
+- `oai-amf` mounts `conf/slicing_base_config.yaml`
+
+By default, OAI upstream ships these files preconfigured for tutorial slice parameters (`SST: 128, SD: 000080` for Slice 1, `SST: 1, SD: none` for Slice 2). If these YAML files are not aligned with the thesis architecture (`SST: 1, SD: 1` eMBB, `SST: 222, SD: 123` URLLC), NSSF and NRF will not recognize the SMF instances as candidates for the requested S-NSSAI.
+
+### Solution
+On VM-3 (`oai-core`), update the configuration files to match the thesis multi-slice architecture:
+
+1. Update `conf/slicing_slice1_config.yaml`:
+   - Set `snssais`: `sst: 1`, `sd: 000001`
+   - Set `dnn`: `default`, subnet `12.1.1.0/24`
+2. Update `conf/slicing_slice2_config.yaml`:
+   - Set `snssais`: `sst: 222`, `sd: 00007B`
+   - Set `dnn`: `lowlatency`, subnet `12.1.2.0/24`
+3. Update `conf/nssf_slice_config.yaml`:
+   - Map `sst: 1, sd: '000001'` to `nsiId: '11'` (NRF `192.168.70.136`).
+   - Map `sst: 222, sd: '00007B'` to `nsiId: '12'` (NRF `192.168.70.136`).
+   - **Critical:** Preserve mandatory sections `taInfoList` (PLMN 208/95, TAC 40960) and `amfInfoList`, otherwise NSSF fails on startup with `[nssf_app] [error] Error parsing section : taInfoList`.
+4. In `conf/slicing_base_config.yaml`:
+   - Add `nrf: host: oai-nrf-slice12` under `nfs:` so AMF successfully registers its NF profile.
+5. In `docker-compose-slicing-basic-nrf.yaml`:
+   - Update `oai_ext_dn` routes to `12.1.1.0/24 via 192.168.70.142` and `12.1.2.0/24 via 192.168.70.143`.
+6. Apply compose changes and restart containers to reload mounted configs:
+   ```bash
+   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d
+   sudo docker restart oai-nrf-slice12 oai-nssf oai-amf oai-smf-slice1 oai-smf-slice2 oai-upf-slice1 oai-upf-slice2
+   ```
+
+---
+
+## 41. User-Plane Packet Drop on F1-U: Stale TEID Mapping in gNB CU (`no tunnel mapping, drop`)
+
+### Symptom
+On VM-5, `nr-uesoftmodem` successfully establishes a PDU session, and `oaitun_ue1` is configured with IP `12.1.1.2`. On VM-3, `oai-upf-slice1` confirms active PDR/FAR rules for `12.1.1.2`.  
+However, pinging from UE (`ping -I oaitun_ue1 -c 4 192.168.70.145`) or gateway `12.1.1.1` results in 100% packet loss.
+
+On VM-4 (`oai-ran`), `cu.log` repeatedly floods with GTP-U drop messages from DU-1:
+```text
+[GTPU]   [81] GTP Error Indication TEID-I 0x99b867eb: no tunnel mapping, drop
+[GTPU]   [81] Sent GTP Error Indication TEID-I 0x99b867eb to 127.0.0.1:2153
+[GTPU]   [81] Received a incoming packet on unknown TEID (0x99b867eb) Dropping!
+[GTPU]   [81] GTP Error Indication TEID-I 0x99b867eb GTP-U Peer Address 127.0.0.1 UDP-from 127.0.0.1
+```
+
+### Cause
+In OAI Split-RAN (CU + DU), the user plane uses F1-U (GTP-U over local port `2153/2152`) to transport data radio bearer (DRB) packets between DU and CU.  
+When an nrUE instance is aborted abruptly (e.g. via `Ctrl+C`) or when prior connection attempts failed during 5GC debugging, DU and CU retain orphaned F1-U bearer mappings. When the UE reconnects and initiates user plane traffic, DU forwards packets using a stale or out-of-sync TEID that CU no longer maps to an active N3 GTP-U session, causing CU to drop all uplink traffic.
+
+### Solution
+Restart the RAN components on **VM-4** to clear all orphaned GTP-U and F1-U context tables, then relaunch the UE:
+
+1. On **VM-4 (`oai-ran`)**, restart the clean background daemons:
+   ```bash
+   sudo /opt/oran/ran/start_ran.sh
+   ```
+2. Verify CU and DU are running fresh:
+   ```bash
+   pgrep nr-softmodem
+   tail -n 15 /opt/oran/ran/cu.log | grep -i "associated"
+   ```
+3. On **VM-5 (`ue-emulator`)**, restart UE 1:
+   ```bash
+   cd /opt/oran/ue/openairinterface5g/cmake_targets/ran_build/build
+   sudo ./nr-uesoftmodem \
+     -r 106 \
+     --numerology 1 \
+     --band 78 \
+     -C 3619200000 \
+     --rfsim \
+     --rfsimulator.serveraddr 10.102.0.167 \
+     --rfsimulator.serverport 4043 \
+     -O /opt/oran/ue/conf/ue_slice1.conf
+   ```
+4. Verify user plane ping from VM-5:
+   ```bash
+   ping -I oaitun_ue1 -c 4 192.168.70.145
+   ping -I oaitun_ue1 -c 4 12.1.1.1
+   ```
+
+---
+
+## 42. F1-U Downlink Self-Loop Drop when CU and DU Bind to `127.0.0.1` (`Sent GTP Error Indication ... to 127.0.0.1:2153: no tunnel mapping, drop`)
+
+### Symptom
+When UE on VM-5 pings an external Data Network (`192.168.70.145`) or UPF gateway (`12.1.1.1`):
+- `tcpdump` on VM-3 confirms that the ICMP echo request reaches UPF-1, EXT-DN replies with ICMP echo reply, and UPF-1 encapsulates the reply into N3 GTP-U and sends it back to gNB CU (`10.102.0.167:2152`).
+- However, the UE on VM-5 experiences 100% packet loss.
+- On VM-4 (`oai-ran`), `cu.log` logs:
+  ```text
+  [GTPU]   [81] Sent GTP Error Indication TEID-I 0x... to 127.0.0.1:2153
+  [GTPU]   [81] Received a incoming packet on unknown TEID (0x...) Dropping!
+  [GTPU]   [81] GTP Error Indication TEID-I 0x... GTP-U Peer Address 127.0.0.1 UDP-from 127.0.0.1
+  [GTPU]   [81] GTP Error Indication TEID-I 0x...: no tunnel mapping, drop
+  ```
+
+### Cause
+In `cu_gnb.conf`, `local_s_address` is set to `127.0.0.1` and `local_s_portd` is `2153`. Because `remote_s_portd` is also configured as `2153`, when CU prepares to send downlink F1-U packets to DU-1, it sends them to destination `127.0.0.1:2153`.  
+Because CU itself is listening on `127.0.0.1:2153`, CU receives its own downlink packet on its F1-U listening socket. It attempts to treat the packet as an uplink packet from DU, fails to find an uplink tunnel mapping for the downlink TEID, and forcefully drops it. DU-1 never receives the packet.
+
+### Solution
+Use loopback aliases within the standard Linux `127.0.0.0/8` subnet to give CU and each DU distinct IP addresses on port `2153`:
+- **CU (`cu_gnb.conf`):** `local_s_address = "127.0.0.3";`
+- **DU-1 (`du_gnb1.conf`):** `local_n_address = "127.0.0.4"; remote_n_address = "127.0.0.3"; local_n_portd = 2153; remote_n_portd = 2153;`
+- **DU-2 (`du_gnb2.conf`):** `local_n_address = "127.0.0.5"; remote_n_address = "127.0.0.3"; local_n_portd = 2153; remote_n_portd = 2153;`
+
+Apply the fix on VM-4:
+```bash
+python3 - << 'EOF'
+# 1. Update cu_gnb.conf
+with open("/opt/oran/ran/conf/cu_gnb.conf", "r") as f:
+    cu = f.read()
+cu = cu.replace('local_s_address  = "127.0.0.1";', 'local_s_address  = "127.0.0.3";')
+cu = cu.replace('local_s_address = "127.0.0.1";', 'local_s_address = "127.0.0.3";')
+with open("/opt/oran/ran/conf/cu_gnb.conf", "w") as f:
+    f.write(cu)
+
+# 2. Update du_gnb1.conf
+with open("/opt/oran/ran/conf/du_gnb1.conf", "r") as f:
+    du1 = f.read()
+du1 = du1.replace('local_n_address = "127.0.0.1";', 'local_n_address = "127.0.0.4";')
+du1 = du1.replace('remote_n_address = "127.0.0.1";', 'remote_n_address = "127.0.0.3";')
+du1 = du1.replace('local_n_portd   = 2155;', 'local_n_portd   = 2153;')
+du1 = du1.replace('local_n_portd = 2155;', 'local_n_portd = 2153;')
+with open("/opt/oran/ran/conf/du_gnb1.conf", "w") as f:
+    f.write(du1)
+
+# 3. Update du_gnb2.conf
+with open("/opt/oran/ran/conf/du_gnb2.conf", "r") as f:
+    du2 = f.read()
+du2 = du2.replace('local_n_address = "127.0.0.1";', 'local_n_address = "127.0.0.5";')
+du2 = du2.replace('remote_n_address = "127.0.0.1";', 'remote_n_address = "127.0.0.3";')
+du2 = du2.replace('local_n_portd   = 2154;', 'local_n_portd   = 2153;')
+du2 = du2.replace('local_n_portd = 2154;', 'local_n_portd = 2153;')
+with open("/opt/oran/ran/conf/du_gnb2.conf", "w") as f:
+    f.write(du2)
+
+print("Loopback aliases configured successfully.")
+EOF
+
+sudo /opt/oran/ran/start_ran.sh
+```
+
+---
+
+## 43. PDU Session Establishment Reject (5GSM Cause 0x21: Service Option Not Subscribed) for Slice 2
+
+### Symptom
+UE requests PDU session establishment for Slice 2 (`NSSAI: SST 222, SD 00007B`, DNN `lowlatency`), but the Core Network immediately returns `FGS_PDU_SESSION_ESTABLISHMENT_REJ`:
+```text
+[NAS] requested PDU session ID 10 type 1 NSSAI 222.123 DNN lowlatency
+[NAS] Send NAS_UPLINK_DATA_REQ message(PduSessionEstablishRequest)
+[NAS] Received NAS_DOWNLINK_DATA_IND type FGS_PDU_SESSION_ESTABLISHMENT_REJ with length 21
+[NAS] Received PDU Session Establishment reject
+```
+In `oai-amf` logs:
+```text
+[amf_server] Received N1 SM: 2e 0a 01 c3 21 f1
+```
+Here `c3` corresponds to `PDU SESSION ESTABLISHMENT REJECT` and `21` corresponds to 3GPP 5GSM Cause `#33 (0x21)`: **Service option not subscribed**.
+
+### Cause
+In the 5GC database (`oai_db.SessionManagementSubscriptionData`), subscriber profiles for `singleNssai = '{"sd": "00007B", "sst": 222}'` were provisioned with `dnnConfigurations` containing only `"default"`. Because the DNN `"lowlatency"` was missing from the subscription data, `oai-smf-slice2` rejected the PDU session establishment request.
+
+### Solution
+1. Execute the following SQL statement in the MySQL container on VM-3 (`oai-core`) to append `lowlatency` configurations to `dnnConfigurations` for all subscribers:
+   ```bash
+   sudo docker exec -i mysql mysql -u root -plinux oai_db -e "
+   UPDATE SessionManagementSubscriptionData 
+   SET dnnConfigurations = JSON_SET(
+     dnnConfigurations,
+     '$.lowlatency', JSON_EXTRACT(dnnConfigurations, '$.default')
+   );
+   "
+   ```
+2. Verify that both `"default"` and `"lowlatency"` are present:
+   ```bash
+   sudo docker exec -i mysql mysql -u root -plinux oai_db -e \
+     "SELECT ueid, singleNssai, JSON_KEYS(dnnConfigurations) FROM SessionManagementSubscriptionData WHERE ueid = '208950000000032';"
+   ```
+3. Restart `oai-smf-slice2` to reload subscription contexts:
+   ```bash
+   sudo docker restart oai-smf-slice2
+   ```
 
 ---
 

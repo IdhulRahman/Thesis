@@ -47,9 +47,9 @@ with the example policy:
 
 | Component | VM | Address / Interface |
 |---|---|---|
-| A1 Policy Management Service | VM-1 | `10.10.10.11:8081` |
-| A1 Compatibility Shim | VM-2 | `10.10.10.12:10001` |
-| A1 Mediator | VM-2 | `10.10.10.12:10000` |
+| A1 Policy Management Service | VM-1 | `10.102.0.168:8081` |
+| A1 Compatibility Shim | VM-2 | `10.102.0.66:10001` |
+| A1 Mediator | VM-2 | `10.102.0.66:10000` |
 | Python xApp Runtime | VM-2 | RMR `4560` |
 | DBaaS | VM-2 | Docker network `10.0.2.12:6379` |
 
@@ -262,7 +262,7 @@ Validated configuration:
     "ric": [
       {
         "name": "near-rt-ric-1",
-        "baseUrl": "http://10.10.10.12:10001",
+        "baseUrl": "http://10.102.0.66:10001",
         "customAdapterClass": "org.onap.ccsdk.oran.a1policymanagementservice.clients.OscA1Client",
         "managedElementIds": [
           "oai-cu-cp",
@@ -285,14 +285,14 @@ jq . \
 The important configuration is:
 
 ```text
-baseUrl            = http://10.10.10.12:10001
+baseUrl            = http://10.102.0.66:10001
 customAdapterClass = ...OscA1Client
 ```
 
 Do not use the direct A1 Mediator URL in the validated configuration:
 
 ```text
-http://10.10.10.12:10000/
+http://10.102.0.66:10000/
 ```
 
 because that caused PMS to select the incompatible parser path during synchronization.
@@ -943,7 +943,7 @@ verify that the PMS configuration uses:
 
 ```text
 customAdapterClass = ...OscA1Client
-baseUrl            = http://10.10.10.12:10001
+baseUrl            = http://10.102.0.66:10001
 ```
 
 ---
@@ -954,7 +954,7 @@ Verify the compatibility endpoint:
 
 ```bash
 curl -s \
-  http://10.10.10.12:10001/a1-p/policytypes \
+  http://10.102.0.66:10001/a1-p/policytypes \
   | jq
 ```
 
@@ -1119,10 +1119,96 @@ The final proposed mechanism will replace the simple static threshold semantics 
 
 ---
 
+## 14. A1 Policy Schema Evolution for Bottleneck-Aware Steering
+
+To support empirical evaluation across the baselines without breaking backward compatibility with the existing O-RAN SC A1 Mediator setup, Policy Type `20008` is structured to support both simple and bottleneck-aware payloads.
+
+### 14.1 Baseline vs. Proposed Payload Comparison
+
+#### Baseline Modes (B1 & B4) Payload
+Uses the minimal integer threshold schema:
+```json
+{
+  "threshold": 80
+}
+```
+
+#### Proposed System (Bottleneck-Aware) Payload
+Extends the schema with domain diagnosis metadata:
+```json
+{
+  "threshold": 80,
+  "bottleneck_location": "RAN",
+  "target_cell_preference": 2,
+  "handover_allowed": true,
+  "slice_id": {
+    "sst": 1,
+    "sd": 1
+  }
+}
+```
+
+When `bottleneck_location` is `CORE`, the rApp sets:
+```json
+{
+  "threshold": 80,
+  "bottleneck_location": "CORE",
+  "handover_allowed": false
+}
+```
+### 14.2 Unified Policy Type 20008 JSON Schema
+
+To allow A1 Mediator to validate both baseline minimal payloads and proposed metadata payloads without raising schema validation errors (`400 Bad Request: additional properties not allowed`), the registered schema in `/opt/oran/nearrt/a1/policies/ts-policy-type-20008.json` on VM-2 defines:
+
+```json
+{
+  "name": "tsapolicy",
+  "description": "Bottleneck-aware traffic steering policy parameters",
+  "policy_type_id": 20008,
+  "create_schema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "threshold": {
+        "type": "integer",
+        "default": 0
+      },
+      "bottleneck_location": {
+        "type": "string",
+        "enum": ["NORMAL", "RAN", "CORE", "JOINT", "UNCERTAIN"],
+        "default": "NORMAL"
+      },
+      "target_cell_preference": {
+        "type": "integer",
+        "default": 1
+      },
+      "handover_allowed": {
+        "type": "boolean",
+        "default": true
+      },
+      "slice_id": {
+        "type": "object",
+        "properties": {
+          "sst": { "type": "integer" },
+          "sd": { "type": "integer" }
+        },
+        "required": ["sst"]
+      }
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+Because `bottleneck_location`, `target_cell_preference`, `handover_allowed`, and `slice_id` are explicitly declared with defaults, A1 Mediator accepts payloads with or without these fields.
+
+---
+
 ## References
 
 Official references:
 
+- O-RAN Alliance WG2 — A1 Interface: Application Protocol v03.01 & Type Definitions
 - O-RAN SC — A1 Policy Management Service  
   https://docs.o-ran-sc.org/projects/o-ran-sc-nonrtric-plt-a1policymanagementservice/
 
@@ -1145,3 +1231,5 @@ Related deployment guides:
 
 - [VM-1 — Non-RT RIC](vm1-nonrt-ric.md)
 - [VM-2 — Near-RT RIC](vm2-nearrt-ric.md)
+- [Baseline & Methodology Guide](bottleneck-methodology.md)
+
