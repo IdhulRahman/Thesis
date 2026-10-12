@@ -547,7 +547,7 @@ def main():
     parser.add_argument("--run-id", help="Independent experiment/run ID, e.g. PILOT_001")
     parser.add_argument("--output-dir", default="./upf-telemetry", help="Parent directory of timestamped run archives")
     parser.add_argument("--interval", type=positive, default=1.0, help="Target sampling period in seconds, research choice")
-    parser.add_argument("--command-timeout", type=positive, default=1.0)
+    parser.add_argument("--command-timeout", type=positive, default=2.5)
     parser.add_argument("--http-timeout", type=positive, default=1.0)
     parser.add_argument("--max-gap", type=positive, help="Rebaseline after this many seconds without a valid read (default: 5 x interval)")
     parser.add_argument("--url", default="http://10.102.0.67:9100/report", help="Custom VM-6 report endpoint; not an NWDAF API")
