@@ -101,7 +101,7 @@ case "$ACTION" in
     echo "------+-------------------+-----------------+--------------+---------+-------------"
 
     prev_rtt="0.0"
-    prev_ping_count=0
+    prev_eval_seq=0
     for ((sec=1; sec<=DURATION; sec++)); do
       sleep 1
 
@@ -118,15 +118,26 @@ case "$ACTION" in
         rtt=$(tail -n 15 "$PING_LOG" 2>/dev/null | grep -oP '(?<=time=)\d+(\.\d+)?' | tail -n 1 || echo "0.0")
         [[ -z "$rtt" ]] && rtt="0.0"
 
-        # Dynamically measure probe packet loss within the 1-second interval (~10 probes expected)
-        cur_ping_count=$(grep -c 'time=' "$PING_LOG" 2>/dev/null || echo 0)
-        replies=$(( cur_ping_count - prev_ping_count ))
-        prev_ping_count=$cur_ping_count
-        if (( replies < 10 && replies >= 0 )); then
-          loss_pct=$(echo "scale=1; (10 - $replies) * 10.0" | bc -l 2>/dev/null || echo "0.0")
-        else
-          loss_pct="0.0"
+        # Sequence-based packet loss tracking using icmp_seq with a 200ms (2-probe) grace period.
+        # This prevents delayed replies or sampling jitter from being erroneously counted as drops.
+        target_seq=$(( sec * 10 - 2 ))
+        (( target_seq < 1 )) && target_seq=1
+        expected_probes=$(( target_seq - prev_eval_seq ))
+
+        if (( expected_probes > 0 )); then
+          rx_probes=0
+          # Inspect recent sequence numbers from the latest ping log slice
+          for s in $(tail -n 60 "$PING_LOG" 2>/dev/null | grep -oP '(?<=icmp_seq=)\d+'); do
+            if (( s > prev_eval_seq && s <= target_seq )); then
+              (( rx_probes++ ))
+            fi
+          done
+
+          loss_pct=$(echo "scale=1; ($expected_probes - $rx_probes) * 100.0 / $expected_probes" | bc -l 2>/dev/null || echo "0.0")
+          if (( $(echo "$loss_pct < 0" | bc -l 2>/dev/null || echo 0) )); then loss_pct="0.0"; fi
+          prev_eval_seq=$target_seq
         fi
+
         if [[ "$rtt" == "0.0" ]]; then
           loss_pct="100.0"
         fi

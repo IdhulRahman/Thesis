@@ -107,7 +107,7 @@ def extract_telemetry():
                     raw_data["e2e_slice2_rtt_ms"] = val_str
                 elif name == "e2e_slice2_packet_loss_pct":
                     raw_data["e2e_slice2_loss_pct"] = val_str
-                elif name == "nwdaf_slice_load_level":
+                elif name in ("nwdaf_slice_load_level", "estimated_slice_load_level"):
                     s = labels.get("snssai", "")
                     if s in ("01000001", "1"):
                         raw_data["nwdaf_load_embb"] = val_str

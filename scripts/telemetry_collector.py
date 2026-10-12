@@ -22,32 +22,44 @@ METRICS_LOCK = threading.Lock()
 metrics_store = {
     # Domain 4: End-to-End UE Metrics (VM-5)
     "e2e_slice1_throughput_mbps": 0.0,
-    "e2e_slice1_jitter_ms": 0.0,
+    "e2e_slice1_jitter_ms": float("nan"),
     "e2e_slice2_latency_rtt_ms": 0.0,
     "e2e_slice2_packet_loss_pct": 0.0,
 
     # Domain 1: 5G Core & NWDAF (VM-3)
     "nwdaf_slice_load_level": {
-        "01000001": 5.0,     # eMBB (SST 1, SD 1)
-        "de00007b": 5.0      # URLLC (SST 222, SD 123)
+        "01000001": float("nan"),     # eMBB (SST 1, SD 1)
+        "de00007b": float("nan")      # URLLC (SST 222, SD 123)
+    },
+    "estimated_slice_load_level": {
+        "01000001": float("nan"),     # Empirical load estimate (Tx / Quota * 100%)
+        "de00007b": float("nan")
     },
     "upf_queue_backlog_bytes": {
-        "01000001": 0.0,
-        "de00007b": 0.0
+        "01000001": float("nan"),
+        "de00007b": float("nan")
     },
     "upf_packet_drops": {
-        "01000001": 0.0,
-        "de00007b": 0.0
+        "01000001": float("nan"),     # Rate: packets/sec
+        "de00007b": float("nan")
+    },
+    "upf_packet_drops_delta": {
+        "01000001": float("nan"),     # Delta: packets
+        "de00007b": float("nan")
+    },
+    "upf_packet_drops_per_sec": {
+        "01000001": float("nan"),     # Explicit rate: packets/sec
+        "de00007b": float("nan")
     },
     "upf_bytes_sent": {
-        "01000001": 0.0,
-        "de00007b": 0.0
+        "01000001": float("nan"),
+        "de00007b": float("nan")
     },
 
     # Domain 2: Split RAN Radio Metrics (VM-4)
     "ran_cell_prb_utilization": {
-        "1": 10.0,           # Cell-1 (DU-1 :4043)
-        "2": 10.0            # Cell-2 (DU-2 :4044)
+        "1": float("nan"),           # Cell-1 (DU-1 :4043)
+        "2": float("nan")            # Cell-2 (DU-2 :4044)
     },
     "ran_cell_mcs": {
         "1": float("nan"),
@@ -66,8 +78,8 @@ metrics_store = {
         "2": float("nan")
     },
     "ran_cell_ulsch_errors": {
-        "1": 0.0,
-        "2": 0.0
+        "1": float("nan"),
+        "2": float("nan")
     },
 
     # Domain 3: RIC Intelligence (VM-1 / VM-2)
@@ -79,92 +91,128 @@ metrics_store = {
 
 last_report_ue1 = 0.0
 last_report_ue2 = 0.0
+last_report_core = 0.0
+last_report_ran = 0.0
 last_nwdaf_poll_time = 0.0
 
 
+def fmt_val(v, fmt=".2f"):
+    return f"{v:{fmt}}" if (v is not None and not math.isnan(v)) else "NaN"
+
 
 def format_prometheus_metrics():
-    global last_report_ue1, last_report_ue2
+    global last_report_ue1, last_report_ue2, last_report_core, last_report_ran
     lines = []
     now = time.time()
     with METRICS_LOCK:
         # Auto-reset stale UE metrics if trafgen stopped pushing (> 3.5 seconds)
         if last_report_ue1 > 0.0 and (now - last_report_ue1 > 3.5):
             metrics_store["e2e_slice1_throughput_mbps"] = 0.0
-            metrics_store["e2e_slice1_jitter_ms"] = 0.0
+            metrics_store["e2e_slice1_jitter_ms"] = float("nan")
         if last_report_ue2 > 0.0 and (now - last_report_ue2 > 3.5):
             metrics_store["e2e_slice2_latency_rtt_ms"] = 0.0
             metrics_store["e2e_slice2_packet_loss_pct"] = 0.0
 
+        # Auto-reset stale Core metrics if core_adapter stopped pushing (> 3.5 seconds)
+        if last_report_core > 0.0 and (now - last_report_core > 3.5):
+            for snssai in ("01000001", "de00007b"):
+                metrics_store["upf_queue_backlog_bytes"][snssai] = float("nan")
+                metrics_store["upf_packet_drops"][snssai] = float("nan")
+                metrics_store["upf_packet_drops_delta"][snssai] = float("nan")
+                metrics_store["upf_packet_drops_per_sec"][snssai] = float("nan")
+                metrics_store["estimated_slice_load_level"][snssai] = float("nan")
+                metrics_store["nwdaf_slice_load_level"][snssai] = float("nan")
+
+        # Auto-reset stale RAN metrics if ran_adapter stopped pushing (> 3.5 seconds)
+        if last_report_ran > 0.0 and (now - last_report_ran > 3.5):
+            for cid in ("1", "2"):
+                metrics_store["ran_cell_prb_utilization"][cid] = float("nan")
+                metrics_store["ran_cell_mcs"][cid] = float("nan")
+                metrics_store["ran_cell_bler"][cid] = float("nan")
+                metrics_store["ran_cell_snr_db"][cid] = float("nan")
+                metrics_store["ran_cell_rssi_dbm"][cid] = float("nan")
+                metrics_store["ran_cell_ulsch_errors"][cid] = float("nan")
+
         lines.append("# HELP e2e_slice1_throughput_mbps End-to-end throughput for Slice 1 (eMBB) in Mbps")
         lines.append("# TYPE e2e_slice1_throughput_mbps gauge")
-        lines.append(f"e2e_slice1_throughput_mbps {metrics_store['e2e_slice1_throughput_mbps']:.2f}")
+        lines.append(f"e2e_slice1_throughput_mbps {fmt_val(metrics_store['e2e_slice1_throughput_mbps'])}")
 
         lines.append("# HELP e2e_slice1_jitter_ms End-to-end jitter for Slice 1 (eMBB) in ms")
         lines.append("# TYPE e2e_slice1_jitter_ms gauge")
-        lines.append(f"e2e_slice1_jitter_ms {metrics_store['e2e_slice1_jitter_ms']:.3f}")
+        lines.append(f"e2e_slice1_jitter_ms {fmt_val(metrics_store['e2e_slice1_jitter_ms'], '.3f')}")
 
         lines.append("# HELP e2e_slice2_latency_rtt_ms End-to-end precision RTT latency for Slice 2 (URLLC) in ms")
         lines.append("# TYPE e2e_slice2_latency_rtt_ms gauge")
-        lines.append(f"e2e_slice2_latency_rtt_ms {metrics_store['e2e_slice2_latency_rtt_ms']:.2f}")
+        lines.append(f"e2e_slice2_latency_rtt_ms {fmt_val(metrics_store['e2e_slice2_latency_rtt_ms'])}")
 
         lines.append("# HELP e2e_slice2_packet_loss_pct End-to-end packet loss percentage for Slice 2 (URLLC)")
         lines.append("# TYPE e2e_slice2_packet_loss_pct gauge")
-        lines.append(f"e2e_slice2_packet_loss_pct {metrics_store['e2e_slice2_packet_loss_pct']:.2f}")
+        lines.append(f"e2e_slice2_packet_loss_pct {fmt_val(metrics_store['e2e_slice2_packet_loss_pct'])}")
 
         lines.append("# HELP nwdaf_slice_load_level NWDAF reported slice load level percentage")
         lines.append("# TYPE nwdaf_slice_load_level gauge")
         for snssai, val in metrics_store["nwdaf_slice_load_level"].items():
-            lines.append(f'nwdaf_slice_load_level{{snssai="{snssai}"}} {val:.2f}')
+            lines.append(f'nwdaf_slice_load_level{{snssai="{snssai}"}} {fmt_val(val)}')
+
+        lines.append("# HELP estimated_slice_load_level Estimated slice load percentage derived from UPF interface Tx throughput")
+        lines.append("# TYPE estimated_slice_load_level gauge")
+        for snssai, val in metrics_store["estimated_slice_load_level"].items():
+            lines.append(f'estimated_slice_load_level{{snssai="{snssai}"}} {fmt_val(val)}')
 
         lines.append("# HELP upf_queue_backlog_bytes UPF egress kernel queue backlog bytes")
         lines.append("# TYPE upf_queue_backlog_bytes gauge")
         for snssai, val in metrics_store["upf_queue_backlog_bytes"].items():
-            lines.append(f'upf_queue_backlog_bytes{{snssai="{snssai}"}} {val:.2f}')
+            lines.append(f'upf_queue_backlog_bytes{{snssai="{snssai}"}} {fmt_val(val)}')
 
-        lines.append("# HELP upf_packet_drops UPF kernel queue packet drops delta")
+        lines.append("# HELP upf_packet_drops UPF kernel queue packet drops rate (packets/sec)")
         lines.append("# TYPE upf_packet_drops gauge")
         for snssai, val in metrics_store["upf_packet_drops"].items():
-            lines.append(f'upf_packet_drops{{snssai="{snssai}"}} {val:.2f}')
+            lines.append(f'upf_packet_drops{{snssai="{snssai}"}} {fmt_val(val)}')
+
+        lines.append("# HELP upf_packet_drops_delta UPF kernel queue packet drops delta count")
+        lines.append("# TYPE upf_packet_drops_delta gauge")
+        for snssai, val in metrics_store["upf_packet_drops_delta"].items():
+            lines.append(f'upf_packet_drops_delta{{snssai="{snssai}"}} {fmt_val(val, ".0f")}')
+
+        lines.append("# HELP upf_packet_drops_per_sec UPF kernel queue packet drops per second")
+        lines.append("# TYPE upf_packet_drops_per_sec gauge")
+        for snssai, val in metrics_store["upf_packet_drops_per_sec"].items():
+            lines.append(f'upf_packet_drops_per_sec{{snssai="{snssai}"}} {fmt_val(val)}')
 
         lines.append("# HELP upf_bytes_sent UPF egress total sent bytes")
         lines.append("# TYPE upf_bytes_sent counter")
         for snssai, val in metrics_store["upf_bytes_sent"].items():
-            lines.append(f'upf_bytes_sent{{snssai="{snssai}"}} {val:.0f}')
+            lines.append(f'upf_bytes_sent{{snssai="{snssai}"}} {fmt_val(val, ".0f")}')
 
         lines.append("# HELP ran_cell_prb_utilization RAN PRB resource block utilization percentage")
         lines.append("# TYPE ran_cell_prb_utilization gauge")
         for cell, val in metrics_store["ran_cell_prb_utilization"].items():
-            lines.append(f'ran_cell_prb_utilization{{cell_id="{cell}"}} {val:.2f}')
+            lines.append(f'ran_cell_prb_utilization{{cell_id="{cell}"}} {fmt_val(val)}')
 
         lines.append("# HELP ran_cell_mcs RAN Modulation and Coding Scheme (MCS)")
         lines.append("# TYPE ran_cell_mcs gauge")
         for cell, val in metrics_store["ran_cell_mcs"].items():
-            val_str = f"{val:.1f}" if (val is not None and not math.isnan(val)) else "NaN"
-            lines.append(f'ran_cell_mcs{{cell_id="{cell}"}} {val_str}')
+            lines.append(f'ran_cell_mcs{{cell_id="{cell}"}} {fmt_val(val, ".1f")}')
 
         lines.append("# HELP ran_cell_bler RAN Block Error Rate (BLER)")
         lines.append("# TYPE ran_cell_bler gauge")
         for cell, val in metrics_store["ran_cell_bler"].items():
-            val_str = f"{val:.4f}" if (val is not None and not math.isnan(val)) else "NaN"
-            lines.append(f'ran_cell_bler{{cell_id="{cell}"}} {val_str}')
+            lines.append(f'ran_cell_bler{{cell_id="{cell}"}} {fmt_val(val, ".4f")}')
 
         lines.append("# HELP ran_cell_snr_db RAN Signal to Noise Ratio in dB")
         lines.append("# TYPE ran_cell_snr_db gauge")
         for cell, val in metrics_store["ran_cell_snr_db"].items():
-            val_str = f"{val:.2f}" if (val is not None and not math.isnan(val)) else "NaN"
-            lines.append(f'ran_cell_snr_db{{cell_id="{cell}"}} {val_str}')
+            lines.append(f'ran_cell_snr_db{{cell_id="{cell}"}} {fmt_val(val)}')
 
         lines.append("# HELP ran_cell_rssi_dbm RAN Received Signal Strength Indicator in dBm")
         lines.append("# TYPE ran_cell_rssi_dbm gauge")
         for cell, val in metrics_store["ran_cell_rssi_dbm"].items():
-            val_str = f"{val:.2f}" if (val is not None and not math.isnan(val)) else "NaN"
-            lines.append(f'ran_cell_rssi_dbm{{cell_id="{cell}"}} {val_str}')
+            lines.append(f'ran_cell_rssi_dbm{{cell_id="{cell}"}} {fmt_val(val)}')
 
         lines.append("# HELP ran_cell_ulsch_errors Cumulative MAC layer ULSCH transmission errors")
         lines.append("# TYPE ran_cell_ulsch_errors gauge")
         for cell, val in metrics_store["ran_cell_ulsch_errors"].items():
-            lines.append(f'ran_cell_ulsch_errors{{cell_id="{cell}"}} {val:.0f}')
+            lines.append(f'ran_cell_ulsch_errors{{cell_id="{cell}"}} {fmt_val(val, ".0f")}')
 
         lines.append("# HELP rapp_diagnosed_bottleneck Bottleneck classification (0=NORMAL, 1=RAN, 2=CORE, 3=JOINT)")
         lines.append("# TYPE rapp_diagnosed_bottleneck gauge")
@@ -211,7 +259,7 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
                 body = self.rfile.read(length).decode("utf-8")
                 payload = json.loads(body)
 
-                global last_report_ue1, last_report_ue2
+                global last_report_ue1, last_report_ue2, last_report_core, last_report_ran
                 with METRICS_LOCK:
                     if "slice" in payload:
                         slice_id = str(payload["slice"])
@@ -238,86 +286,102 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
                                 last_report_ue2 = time.time()
                             metrics_store[key] = float(payload[key])
 
+                    # RAN Telemetry Ingestion
+                    if "ran_cell_prb_utilization" in payload or "ran_cell_radio_stats" in payload:
+                        last_report_ran = time.time()
+
                     if "ran_cell_prb_utilization" in payload and isinstance(payload["ran_cell_prb_utilization"], dict):
                         for cell, val in payload["ran_cell_prb_utilization"].items():
-                            metrics_store["ran_cell_prb_utilization"][str(cell)] = float(val)
+                            metrics_store["ran_cell_prb_utilization"][str(cell)] = float(val) if val is not None else float("nan")
 
                     if "ran_cell_radio_stats" in payload and isinstance(payload["ran_cell_radio_stats"], dict):
                         for cell, stats in payload["ran_cell_radio_stats"].items():
                             cid = str(cell)
                             if isinstance(stats, dict):
-                                for k, m_dict in (("mcs", "ran_cell_mcs"), ("bler", "ran_cell_bler"),
-                                                  ("snr_db", "ran_cell_snr_db"), ("rssi_dbm", "ran_cell_rssi_dbm")):
-                                    val = stats.get(k)
-                                    metrics_store[m_dict][cid] = float(val) if val is not None else float("nan")
-                                if "ulsch_errors" in stats and stats["ulsch_errors"] is not None:
-                                    metrics_store["ran_cell_ulsch_errors"][cid] = float(stats["ulsch_errors"])
+                                is_valid = stats.get("valid", True)
+                                if not is_valid:
+                                    metrics_store["ran_cell_prb_utilization"][cid] = float("nan")
+                                    metrics_store["ran_cell_mcs"][cid] = float("nan")
+                                    metrics_store["ran_cell_bler"][cid] = float("nan")
+                                    metrics_store["ran_cell_snr_db"][cid] = float("nan")
+                                    metrics_store["ran_cell_rssi_dbm"][cid] = float("nan")
+                                    metrics_store["ran_cell_ulsch_errors"][cid] = float("nan")
+                                else:
+                                    for k, m_dict in (("mcs", "ran_cell_mcs"), ("bler", "ran_cell_bler"),
+                                                      ("snr_db", "ran_cell_snr_db"), ("rssi_dbm", "ran_cell_rssi_dbm")):
+                                        val = stats.get(k)
+                                        metrics_store[m_dict][cid] = float(val) if val is not None else float("nan")
+                                    err_val = stats.get("ulsch_errors")
+                                    metrics_store["ran_cell_ulsch_errors"][cid] = float(err_val) if err_val is not None else float("nan")
+                                    if stats.get("prb_pct") is not None:
+                                        metrics_store["ran_cell_prb_utilization"][cid] = float(stats["prb_pct"])
 
-                    # Core & UPF telemetry handling (safe against null / None values from core_adapter.py v9)
-                    core_metric_keys = [
+                    # Core & UPF Telemetry Ingestion (safe against null / None values from core_adapter.py v9)
+                    core_metric_keys = (
                         "upf_interface_tx_mbps", "upf_interface_rx_mbps",
                         "upf_tx_bytes_total", "upf_rx_bytes_total",
                         "upf_qdisc_backlog_bytes", "upf_queue_backlog_bytes",
                         "upf_qdisc_drops_delta", "upf_packet_drops", "upf_qdisc_drops_per_sec"
-                    ]
+                    )
+                    if any(k in payload for k in core_metric_keys):
+                        last_report_core = time.time()
+
                     for m_key in core_metric_keys:
                         if m_key in payload and isinstance(payload[m_key], dict):
                             if m_key not in metrics_store:
                                 metrics_store[m_key] = {}
                             for snssai, val in payload[m_key].items():
-                                if val is not None:
-                                    try:
-                                        metrics_store[m_key][str(snssai)] = float(val)
-                                    except (ValueError, TypeError):
-                                        pass
+                                try:
+                                    metrics_store[m_key][str(snssai)] = float(val) if val is not None else float("nan")
+                                except (ValueError, TypeError):
+                                    pass
 
                     # Synchronize aliases for Prometheus /metrics format
                     if "upf_qdisc_backlog_bytes" in payload and isinstance(payload["upf_qdisc_backlog_bytes"], dict):
                         for snssai, val in payload["upf_qdisc_backlog_bytes"].items():
-                            if val is not None:
-                                try:
-                                    metrics_store["upf_queue_backlog_bytes"][str(snssai)] = float(val)
-                                except (ValueError, TypeError):
-                                    pass
+                            try:
+                                metrics_store["upf_queue_backlog_bytes"][str(snssai)] = float(val) if val is not None else float("nan")
+                            except (ValueError, TypeError):
+                                pass
+
+                    # Strictly decouple drop rate (packets/sec) and drop delta (packets)
+                    if "upf_qdisc_drops_per_sec" in payload and isinstance(payload["upf_qdisc_drops_per_sec"], dict):
+                        for snssai, val in payload["upf_qdisc_drops_per_sec"].items():
+                            try:
+                                rate_val = float(val) if val is not None else float("nan")
+                                metrics_store["upf_packet_drops"][str(snssai)] = rate_val
+                                metrics_store["upf_packet_drops_per_sec"][str(snssai)] = rate_val
+                            except (ValueError, TypeError):
+                                pass
+
                     if "upf_qdisc_drops_delta" in payload and isinstance(payload["upf_qdisc_drops_delta"], dict):
                         for snssai, val in payload["upf_qdisc_drops_delta"].items():
-                            if val is not None:
-                                try:
-                                    metrics_store["upf_packet_drops"][str(snssai)] = float(val)
-                                except (ValueError, TypeError):
-                                    pass
-                    elif "upf_qdisc_drops_per_sec" in payload and isinstance(payload["upf_qdisc_drops_per_sec"], dict):
-                        for snssai, val in payload["upf_qdisc_drops_per_sec"].items():
-                            if val is not None:
-                                try:
-                                    metrics_store["upf_packet_drops"][str(snssai)] = float(val)
-                                except (ValueError, TypeError):
-                                    pass
+                            try:
+                                metrics_store["upf_packet_drops_delta"][str(snssai)] = float(val) if val is not None else float("nan")
+                            except (ValueError, TypeError):
+                                pass
+
                     if "upf_tx_bytes_total" in payload and isinstance(payload["upf_tx_bytes_total"], dict):
                         for snssai, val in payload["upf_tx_bytes_total"].items():
-                            if val is not None:
-                                try:
-                                    metrics_store["upf_bytes_sent"][str(snssai)] = float(val)
-                                except (ValueError, TypeError):
-                                    pass
+                            try:
+                                metrics_store["upf_bytes_sent"][str(snssai)] = float(val) if val is not None else float("nan")
+                            except (ValueError, TypeError):
+                                pass
 
-                    # Dynamic estimation of NWDAF slice load if external Nnwdaf is unavailable
+                    # Dynamic estimation of slice load derived from UPF Tx throughput
                     if "upf_interface_tx_mbps" in payload and isinstance(payload["upf_interface_tx_mbps"], dict):
+                        tx1 = payload["upf_interface_tx_mbps"].get("01000001")
+                        load1 = round(min(100.0, max(5.0, (float(tx1) / 25.0) * 100.0)), 2) if tx1 is not None else float("nan")
+                        metrics_store["estimated_slice_load_level"]["01000001"] = load1
+
+                        tx2 = payload["upf_interface_tx_mbps"].get("de00007b")
+                        load2 = round(min(100.0, max(5.0, (float(tx2) / 5.0) * 100.0)), 2) if tx2 is not None else float("nan")
+                        metrics_store["estimated_slice_load_level"]["de00007b"] = load2
+
+                        # Mirror to nwdaf_slice_load_level if external Nnwdaf daemon is not responding (> 5s)
                         if (time.time() - last_nwdaf_poll_time) > 5.0:
-                            # Slice 1 (eMBB): capacity ~25 Mbps
-                            tx1 = payload["upf_interface_tx_mbps"].get("01000001")
-                            if tx1 is not None:
-                                try:
-                                    metrics_store["nwdaf_slice_load_level"]["01000001"] = round(min(100.0, max(5.0, (float(tx1) / 25.0) * 100.0)), 2)
-                                except (ValueError, TypeError):
-                                    pass
-                            # Slice 2 (URLLC): capacity ~5 Mbps
-                            tx2 = payload["upf_interface_tx_mbps"].get("de00007b")
-                            if tx2 is not None:
-                                try:
-                                    metrics_store["nwdaf_slice_load_level"]["de00007b"] = round(min(100.0, max(5.0, (float(tx2) / 5.0) * 100.0)), 2)
-                                except (ValueError, TypeError):
-                                    pass
+                            metrics_store["nwdaf_slice_load_level"]["01000001"] = load1
+                            metrics_store["nwdaf_slice_load_level"]["de00007b"] = load2
 
                 response = json.dumps({"status": "SUCCESS"}).encode("utf-8")
                 self.send_response(200)
