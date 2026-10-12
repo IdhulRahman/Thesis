@@ -79,3 +79,15 @@ For the scope of **Closed-Loop Traffic Steering via O-RAN RIC–NWDAF Coordinati
   Triggering an inter-cell handover is **completely futile** because both cells terminate in the congested UPF. The proper actuation is **Core QoS rate-shaping or slice admission adaptation**.
 * **When Bottleneck is Joint:**
   Both controllers must coordinate to execute radio offloading alongside Core user-plane backpressure mitigation.
+
+---
+
+## Related Documentation
+
+- [Bottleneck Methodology & Baseline Specifications](bottleneck-methodology.md)
+- [System Technical Snapshot (Formal Reference)](thesis-system-technical-snapshot.md)
+- [System Architecture](architecture.md)
+- [VM Deployment Guides](vm/README.md)
+- [Integration Guides](integration/README.md)
+- [Troubleshooting Manual](troubleshooting.md)
+

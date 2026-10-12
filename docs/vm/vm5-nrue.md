@@ -15,7 +15,7 @@ VM-5 emulates multi-slice, multi-instance 5G Standalone (SA) user equipments in 
 │   │   - S-NSSAI: [SST: 1, SD: 1]   │   │   - S-NSSAI: [SST: 222,SD: 123]│   │
 │   │   - DNN: default               │   │   - DNN: lowlatency            │   │
 │   │   - Interface: oaitun_ue1      │   │   - Interface: oaitun_ue1      │   │
-│   │   - IP: 12.1.1.2/24            │   │   - IP: 12.1.2.2/24            │   │
+│   │   - IP: 12.1.1.2/24            │   │   - IP: 12.2.1.2/24            │   │
 │   └───────────────┬────────────────┘   └───────────────┬────────────────┘   │
 └───────────────────┼────────────────────────────────────┼────────────────────┘
                     │ RFsim TCP :4043                    │ RFsim TCP :4044

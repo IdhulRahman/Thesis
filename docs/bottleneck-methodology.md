@@ -208,3 +208,14 @@ where $C = \{\text{NORMAL}, \text{RAN}, \text{CORE}, \text{JOINT}\}$, and $P_c, 
 The total number of policy alterations or handover actuations executed per minute:
 $$C_{act} = \frac{N_{act}}{T_{\text{minutes}}}$$
 A lower churn rate indicates a stable, non-oscillating control loop.
+
+---
+
+## Related Documentation
+
+- [Regulatory Bottleneck Taxonomy](bottleneck-list-regulator.md)
+- [System Architecture](architecture.md)
+- [System Technical Snapshot](thesis-system-technical-snapshot.md)
+- [VM Deployment Guides](vm/README.md)
+- [Integration Guides](integration/README.md)
+- [Troubleshooting Manual](troubleshooting.md)

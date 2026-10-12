@@ -277,19 +277,26 @@ Thesis/
 ├── docs/
 │   ├── architecture.md                # In-depth architectural design, layers, and interfaces
 │   ├── bottleneck-methodology.md      # Baseline matrix (B0-B4), failure injection, and metrics
-│   ├── Goals_Paper/                   # Draft papers, literature alignment & comparative study frameworks
-│   │   └── paper-draft-model-comparison.md # rApp sequential forecasting comparative paper framework
-│   ├── vm1-nonrt-ric.md               # Step-by-step deployment guide for VM-1 (Non-RT RIC)
-│   ├── vm2-nearrt-ric.md              # Step-by-step deployment guide for VM-2 (Near-RT RIC)
-│   ├── vm3-oai-5gc.md                 # Deployment & slicing guide for VM-3 (OAI 5GC)
-│   ├── vm4-oai-ran.md                 # Build & deployment guide for VM-4 (OAI Split RAN)
-│   ├── vm5-nrue.md                    # Build & multi-UE deployment guide for VM-5 (OAI nrUE)
-│   ├── vm6-monitoring.md              # Observability, Prometheus TSDB & Grafana deployment guide for VM-6
-│   ├── a1-integration.md              # Complete A1 integration guide (VM-1 to VM-2)
-│   ├── e2-integration.md              # Complete E2 integration guide (VM-4 to VM-2)
 │   ├── thesis-system-technical-snapshot.md # Formal technical snapshot & telemetry provenance reference
 │   ├── bottleneck-list-regulator.md   # 3GPP Rel-17 & ETSI regulatory bottleneck taxonomy reference
-│   └── troubleshooting.md             # Solutions for 29+ validated operational failure modes
+│   ├── troubleshooting.md             # Solutions for 29+ validated operational failure modes
+│   ├── vm/                            # VM-by-VM deployment & operations guides
+│   │   ├── README.md                  # VM index & bring-up order
+│   │   ├── vm1-nonrt-ric.md           # Step-by-step deployment guide for VM-1 (Non-RT RIC)
+│   │   ├── vm2-nearrt-ric.md          # Step-by-step deployment guide for VM-2 (Near-RT RIC)
+│   │   ├── vm3-oai-5gc.md             # Deployment & slicing guide for VM-3 (OAI 5GC)
+│   │   ├── vm4-oai-ran.md             # Build & deployment guide for VM-4 (OAI Split RAN)
+│   │   ├── vm5-nrue.md                # Build & multi-UE deployment guide for VM-5 (OAI nrUE)
+│   │   └── vm6-monitoring.md          # Observability, Prometheus TSDB & Grafana guide for VM-6
+│   ├── integration/                   # Inter-VM protocol integration guides
+│   │   ├── README.md                  # Integration index & interface overview
+│   │   ├── a1-integration.md          # Complete A1 integration guide (VM-1 to VM-2)
+│   │   └── e2-integration.md          # Complete E2 integration guide (VM-4 to VM-2)
+│   ├── Goals_Paper/                   # Draft papers, literature alignment & comparative study frameworks
+│   │   └── paper-draft-model-comparison.md # rApp sequential forecasting comparative paper framework
+│   ├── Diagram/                       # Mermaid sources & rendered PNGs for all system diagrams
+│   ├── Paper/                         # Full paper drafts
+│   └── Proposal/                      # Research proposal documents
 ├── scripts/                           # Centralized multi-VM scripts repository
 │   └── README.md                      # Automation and telemetry daemon documentation
 └── configs/                           # Deployment manifests and configuration files
@@ -301,16 +308,16 @@ Thesis/
 - **Architecture Specification:** [docs/architecture.md](docs/architecture.md)
 - **Baseline & Methodology Guide:** [docs/bottleneck-methodology.md](docs/bottleneck-methodology.md)
 - **Model Comparison Paper Draft:** [docs/Goals_Paper/paper-draft-model-comparison.md](docs/Goals_Paper/paper-draft-model-comparison.md)
-- **Node Installation Guides:**
-  - [VM-1: Non-RT RIC Installation Guide](docs/vm1-nonrt-ric.md)
-  - [VM-2: Near-RT RIC Installation Guide](docs/vm2-nearrt-ric.md)
-  - [VM-3: OAI 5G Core Installation Guide](docs/vm3-oai-5gc.md)
-  - [VM-4: OAI RAN CU/DU Installation Guide](docs/vm4-oai-ran.md)
-  - [VM-5: OAI nrUE Emulator Installation Guide](docs/vm5-nrue.md)
-  - [VM-6: Telemetry & Monitoring Installation Guide](docs/vm6-monitoring.md)
-- **Interface Integration Guides:**
-  - [A1 Integration Guide (Non-RT to Near-RT)](docs/a1-integration.md)
-  - [E2 Integration Guide (RAN to Near-RT)](docs/e2-integration.md)
+- **Node Installation Guides:** → [`docs/vm/`](docs/vm/README.md)
+  - [VM-1: Non-RT RIC Installation Guide](docs/vm/vm1-nonrt-ric.md)
+  - [VM-2: Near-RT RIC Installation Guide](docs/vm/vm2-nearrt-ric.md)
+  - [VM-3: OAI 5G Core Installation Guide](docs/vm/vm3-oai-5gc.md)
+  - [VM-4: OAI RAN CU/DU Installation Guide](docs/vm/vm4-oai-ran.md)
+  - [VM-5: OAI nrUE Emulator Installation Guide](docs/vm/vm5-nrue.md)
+  - [VM-6: Telemetry & Monitoring Installation Guide](docs/vm/vm6-monitoring.md)
+- **Interface Integration Guides:** → [`docs/integration/`](docs/integration/README.md)
+  - [A1 Integration Guide (Non-RT to Near-RT)](docs/integration/a1-integration.md)
+  - [E2 Integration Guide (RAN to Near-RT)](docs/integration/e2-integration.md)
 - **Troubleshooting Manual:** [docs/troubleshooting.md](docs/troubleshooting.md)
 
 ---

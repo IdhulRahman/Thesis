@@ -214,7 +214,7 @@ The compatibility shim only maps URI paths. It does not rewrite the policy JSON.
 
 See:
 
-[A1 Integration](a1-integration.md)
+[A1 Integration](integration/a1-integration.md)
 
 ---
 
@@ -2354,11 +2354,18 @@ Even when standard 3GPP query parameters (`ana-req`, `event-filter`) are passed,
 
 ## Related Documentation
 
-- [VM-1 — Non-RT RIC](vm1-nonrt-ric.md)
-- [VM-2 — Near-RT RIC](vm2-nearrt-ric.md)
-- [A1 Integration](a1-integration.md)
-- [E2 Integration](e2-integration.md)
+- [VM-1 — Non-RT RIC](vm/vm1-nonrt-ric.md)
+- [VM-2 — Near-RT RIC](vm/vm2-nearrt-ric.md)
+- [VM-3 — OAI 5GC](vm/vm3-oai-5gc.md)
+- [VM-4 — OAI RAN](vm/vm4-oai-ran.md)
+- [VM-5 — OAI nrUE](vm/vm5-nrue.md)
+- [VM-6 — Monitoring & TSDB](vm/vm6-monitoring.md)
+- [A1 Integration Guide](integration/a1-integration.md)
+- [E2 Integration Guide](integration/e2-integration.md)
 - [System Architecture](architecture.md)
+- [System Technical Snapshot](thesis-system-technical-snapshot.md)
+- [Regulatory Bottleneck Taxonomy](bottleneck-list-regulator.md)
+- [Bottleneck Methodology](bottleneck-methodology.md)
 
 ---
 

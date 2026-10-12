@@ -53,7 +53,7 @@ The final validated deployment uses:
 
 A1 PMS `2.6.0` is listed by O-RAN SC as the H Release version.
 
-> The project initially tested newer PMS versions, but the final validated deployment uses `2.6.0` together with the OSC A1 client compatibility path described in [A1 Integration](a1-integration.md).
+> The project initially tested newer PMS versions, but the final validated deployment uses `2.6.0` together with the OSC A1 client compatibility path described in [A1 Integration](../integration/a1-integration.md).
 
 ---
 
@@ -208,7 +208,7 @@ HTTP/1.1 200 OK
 
 The compatibility endpoint on port `10001` is described in:
 
-[docs/a1-integration.md](a1-integration.md)
+[A1 Integration Guide](../integration/a1-integration.md)
 
 ---
 
@@ -504,7 +504,7 @@ The same policy should be visible at the A1 Mediator on VM-2 and delivered to th
 
 See:
 
-[docs/a1-integration.md](a1-integration.md)
+[A1 Integration Guide](../integration/a1-integration.md)
 
 ---
 
@@ -610,7 +610,7 @@ Do not point the final PMS configuration directly to the A1 Mediator `/A1-P/v2` 
 
 The compatibility reason is documented separately in:
 
-[docs/a1-integration.md](a1-integration.md)
+[A1 Integration Guide](../integration/a1-integration.md)
 
 ---
 
@@ -734,5 +734,5 @@ Official references used for this deployment:
 
 For the cross-VM A1 compatibility and RMR path, see:
 
-[docs/a1-integration.md](a1-integration.md)
+[A1 Integration Guide](../integration/a1-integration.md)
 

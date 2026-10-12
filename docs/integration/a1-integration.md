@@ -1229,7 +1229,10 @@ Official references:
 
 Related deployment guides:
 
-- [VM-1 — Non-RT RIC](vm1-nonrt-ric.md)
-- [VM-2 — Near-RT RIC](vm2-nearrt-ric.md)
-- [Baseline & Methodology Guide](bottleneck-methodology.md)
+- [VM-1 — Non-RT RIC](../vm/vm1-nonrt-ric.md)
+- [VM-2 — Near-RT RIC](../vm/vm2-nearrt-ric.md)
+- [E2 Integration Guide](e2-integration.md)
+- [Baseline & Methodology Guide](../bottleneck-methodology.md)
+- [System Architecture](../architecture.md)
+- [Troubleshooting](../troubleshooting.md)
 

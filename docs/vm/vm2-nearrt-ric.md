@@ -1254,7 +1254,7 @@ A1 Mediator /A1-P/v2
 
 See:
 
-[docs/a1-integration.md](a1-integration.md)
+[A1 Integration Guide](../integration/a1-integration.md)
 
 ---
 
@@ -1400,5 +1400,5 @@ Official references used for this deployment:
 
 For cross-VM A1 integration details, see:
 
-[docs/a1-integration.md](a1-integration.md)
+[A1 Integration Guide](../integration/a1-integration.md)
 

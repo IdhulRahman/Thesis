@@ -291,3 +291,13 @@ With the E2 connection established, the next stage of the research connects the 
 - OpenAirInterface FlexRIC Documentation: https://gitlab.eurecom.fr/mosaic5g/flexric
 - O-RAN SC E2 Manager Documentation: https://docs.o-ran-sc.org/projects/o-ran-sc-ric-plt-e2mgr
 - O-RAN SC E2 Termination Documentation: https://docs.o-ran-sc.org/projects/o-ran-sc-ric-plt-e2
+
+---
+
+## Related Documentation
+
+- [VM-4 — OAI RAN](../vm/vm4-oai-ran.md)
+- [VM-2 — Near-RT RIC](../vm/vm2-nearrt-ric.md)
+- [A1 Integration Guide](a1-integration.md)
+- [System Architecture](../architecture.md)
+- [Troubleshooting](../troubleshooting.md)
