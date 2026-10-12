@@ -111,9 +111,12 @@ sudo ./trafgen.sh start 30 25
 {
   "slice": 2,
   "rtt_ms": 14.2,
-  "packet_loss_pct": 0.0
+  "packet_loss_pct": 0.0,
+  "last_seq": 142,
+  "reply_age_sec": 0
 }
 ```
+*(When no echo reply is received during evaluation window, `"rtt_ms": null` is emitted).*
 
 ---
 
