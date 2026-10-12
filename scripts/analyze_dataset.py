@@ -20,7 +20,7 @@ def main():
     if len(sys.argv) > 1:
         raw_files = [sys.argv[1]]
     else:
-        raw_files = sorted(glob.glob(os.path.join(DATA_DIR, "telemetry_raw_*.csv")))
+        raw_files = sorted(glob.glob(os.path.join(DATA_DIR, "telemetry_raw_*.csv")), key=os.path.getmtime)
 
     if not raw_files or not os.path.exists(raw_files[-1]):
         print(f"[ERROR] File dataset tidak ditemukan di {DATA_DIR}")
