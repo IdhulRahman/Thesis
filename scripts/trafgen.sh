@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -e
 
 # ==============================================================================
 # Automated Multi-Slice Traffic Generator (VM-5 ue-emulator)
@@ -121,7 +120,9 @@ case "$ACTION" in
         # Sequence-based packet loss tracking using icmp_seq with a 200ms (2-probe) grace period.
         # This prevents delayed replies or sampling jitter from being erroneously counted as drops.
         target_seq=$(( sec * 10 - 2 ))
-        (( target_seq < 1 )) && target_seq=1
+        if (( target_seq < 1 )); then
+          target_seq=1
+        fi
         expected_probes=$(( target_seq - prev_eval_seq ))
 
         if (( expected_probes > 0 )); then
@@ -129,12 +130,14 @@ case "$ACTION" in
           # Inspect recent sequence numbers from the latest ping log slice
           for s in $(tail -n 60 "$PING_LOG" 2>/dev/null | grep -oP '(?<=icmp_seq=)\d+'); do
             if (( s > prev_eval_seq && s <= target_seq )); then
-              (( rx_probes++ ))
+              rx_probes=$(( rx_probes + 1 ))
             fi
           done
 
           loss_pct=$(echo "scale=1; ($expected_probes - $rx_probes) * 100.0 / $expected_probes" | bc -l 2>/dev/null || echo "0.0")
-          if (( $(echo "$loss_pct < 0" | bc -l 2>/dev/null || echo 0) )); then loss_pct="0.0"; fi
+          if (( $(echo "$loss_pct < 0" | bc -l 2>/dev/null || echo 0) )); then
+            loss_pct="0.0"
+          fi
           prev_eval_seq=$target_seq
         fi
 
