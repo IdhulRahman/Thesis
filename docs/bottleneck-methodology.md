@@ -2,8 +2,7 @@
 
 This document defines the formal experimental methodology, comparative baseline specifications, and evaluation procedures for the thesis:
 
-> **Bottleneck-Aware Closed-Loop Traffic Steering via O-RAN RIC–NWDAF Coordination in Multi-Slice 5G Networks**  
-> *(Pengarahan Trafik Berbasis Identifikasi Bottleneck melalui Koordinasi O-RAN RIC–NWDAF dengan Kendali Closed-Loop pada Jaringan 5G Multi-Slice)*
+> **Bottleneck-Aware Closed-Loop Traffic Steering via O-RAN RIC–NWDAF Coordination in Multi-Slice 5G Networks**
 
 ---
 
@@ -17,11 +16,11 @@ To validate this hypothesis, the experimental testbed is configured to execute *
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                          SPEKTRUM PARADIGMA KENDALI JARINGAN                           │
+│                          NETWORK CONTROL PARADIGM SPECTRUM                             │
 ├─────────────────┬──────────────────┬─────────────────┬────────────────┬────────────────┤
 │       B0        │      B1 & B2     │       B3        │       B4       │    PROPOSED    │
 │  Static Default │  Single-Domain   │   Decoupled /   │  Coordinated   │  Bottleneck-   │
-│  (Tanpa RIC)    │  (RAN/Core Only) │  Uncoordinated  │ Naive / Fixed  │  Aware Closed  │
+│  (No RIC)       │  (RAN/Core Only) │  Uncoordinated  │ Naive / Fixed  │  Aware Closed  │
 │                 │                  │                 │   Heuristic    │      Loop      │
 └─────────────────┴──────────────────┴─────────────────┴────────────────┴────────────────┘
 ```

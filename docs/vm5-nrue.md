@@ -273,453 +273,74 @@ uicc0 = {
 
 ## 8. Dynamic Multi-Instance Execution via Linux Network Namespaces
 
-To evaluate multi-slice QoS and traffic steering without interface collisions or routing ambiguity, VM-5 provides dynamic multi-UE automation scripts. The spawner prompts the user for the number of UEs and their slice distribution (or accepts CLI arguments), sets up isolated Linux network namespaces (`ue1`...`ueN`) with veth pairs and NAT, dynamically generates 3GPP config files, staggers softmodem startup, and performs automated ping validation.
+To evaluate multi-slice QoS and traffic steering without interface collisions or routing ambiguity, VM-5 provides dynamic multi-UE automation scripts managed in [`scripts/`](file:///d:/Idhul/Program/Thesis/scripts):
 
-### Step 1: Dynamic Multi-UE Spawner Script (`/opt/oran/ue/scripts/spawn_multi_ue.sh`)
+### Step 1: Dynamic Multi-UE Spawner Script (`spawn_multi_ue.sh`)
 
-Save this script as `/opt/oran/ue/scripts/spawn_multi_ue.sh`:
+Automated script to create isolated network namespaces (`ue1`...`ueN`), configure veth pairs & NAT, and dynamically initialize OAI 5G nrUE connections is managed at:
+* **Source:** [`scripts/spawn_multi_ue.sh`](file:///d:/Idhul/Program/Thesis/scripts/spawn_multi_ue.sh)
+* **Path on VM-5:** `/opt/oran/ue/scripts/spawn_multi_ue.sh`
 
+#### Execution Commands on VM-5 (`five-g@nrue`):
 ```bash
-#!/usr/bin/env bash
-set -e
+# Launch 1 eMBB UE (Cell-1 :4043) and 1 URLLC UE (Cell-2 :4044):
+sudo /opt/oran/ue/scripts/spawn_multi_ue.sh -s1 1 -s2 1
 
-# ==============================================================================
-# Dynamic Multi-UE Spawner with Network Namespace Isolation (VM-5 ue-emulator)
-# ==============================================================================
-# Features:
-# - Interactive prompt or CLI arguments (-s1 <count> -s2 <count>)
-# - Dynamic 3GPP config generation from pre-provisioned IMSI pool (...001 to ...050)
-# - Isolated netns (ue1, ue2, ...) with dedicated veth pairs & NAT
-# - Staggered launch to prevent RFsim RACH collisions
-# - Automated end-to-end ping validation to EXT-DN (192.168.70.145)
-# ==============================================================================
-
-RAN_IP="10.102.0.167"
-EXT_DN_IP="192.168.70.145"
-BUILD_DIR="/opt/oran/ue/openairinterface5g/cmake_targets/ran_build/build"
-CONF_DIR="/opt/oran/ue/conf"
-LOG_DIR="/opt/oran/ue/logs"
-STATE_FILE="/opt/oran/ue/active_ues.txt"
-
-mkdir -p "$LOG_DIR" "$CONF_DIR"
-
-# Parse CLI arguments or prompt interactively
-S1_COUNT=""
-S2_COUNT=""
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    -s1|--slice1) S1_COUNT="$2"; shift 2 ;;
-    -s2|--slice2) S2_COUNT="$2"; shift 2 ;;
-    -h|--help)
-      echo "Penggunaan: $0 [-s1 <jumlah_slice1>] [-s2 <jumlah_slice2>]"
-      exit 0 ;;
-    *)
-      if [[ -z "$S1_COUNT" ]]; then S1_COUNT="$1"; shift
-      elif [[ -z "$S2_COUNT" ]]; then S2_COUNT="$1"; shift
-      else shift; fi ;;
-  esac
-done
-
-if [[ -z "$S1_COUNT" || -z "$S2_COUNT" ]]; then
-  echo "======================================================================"
-  echo "  5G OAI nrUE Multi-Instance Dynamic Spawner (VM-5 ue-emulator)"
-  echo "======================================================================"
-  echo "Profil Slice yang Tersedia:"
-  echo "  [Slice 1 - eMBB]  : SST 1, SD 0x000001, DNN 'default', Target DU-1 (:4043)"
-  echo "  [Slice 2 - URLLC] : SST 222, SD 0x00007B, DNN 'lowlatency', Target DU-2 (:4044)"
-  echo "----------------------------------------------------------------------"
-  read -rp "Jumlah UE untuk Slice 1 (eMBB) [default 1]: " INPUT_S1
-  read -rp "Jumlah UE untuk Slice 2 (URLLC) [default 1]: " INPUT_S2
-  S1_COUNT="${INPUT_S1:-1}"
-  S2_COUNT="${INPUT_S2:-1}"
-fi
-
-TOTAL_UE=$(( S1_COUNT + S2_COUNT ))
-
-if [[ "$TOTAL_UE" -lt 1 ]]; then
-  echo "[ERROR] Total UE harus minimal 1!"
-  exit 1
-fi
-
-if [[ "$TOTAL_UE" -gt 50 ]]; then
-  echo "[ERROR] Total UE ($TOTAL_UE) melebihi batas subscriber terdaftar di MySQL (50)!"
-  exit 1
-fi
-
-echo ""
-echo "=== [Konfigurasi Terpilih] ==="
-echo "Total UE : $TOTAL_UE"
-echo "Slice 1  : $S1_COUNT UE(s) (DU-1 / Cell-1 / Port 4043)"
-echo "Slice 2  : $S2_COUNT UE(s) (DU-2 / Cell-2 / Port 4044)"
-echo "=============================="
-echo ""
-
-echo "=== [1/5] Mengaktifkan IP Forwarding & Persiapan Host ==="
-sudo sysctl -w net.ipv4.ip_forward=1 > /dev/null
-sudo iptables -t nat -C POSTROUTING -s 10.200.0.0/16 -j MASQUERADE 2>/dev/null || \
-sudo iptables -t nat -A POSTROUTING -s 10.200.0.0/16 -j MASQUERADE
-
-rm -f "$STATE_FILE"
-
-CURRENT_UE=1
-
-# Helper function to spawn a single UE
-spawn_ue() {
-  local ue_idx="$1"
-  local slice_num="$2"
-  local imsi_suffix
-  imsi_suffix=$(printf "%02d" "$ue_idx")
-  local imsi="2089500000000${imsi_suffix}"
-  local ns="ue${ue_idx}"
-  local conf_file="$CONF_DIR/ue_${ue_idx}.conf"
-  local log_file="$LOG_DIR/ue${ue_idx}.log"
-  local rf_port
-  local sst
-  local sd
-  local dnn
-  local slice_label
-
-  if [[ "$slice_num" -eq 1 ]]; then
-    rf_port="4043"
-    sst="1"
-    sd="1"
-    dnn="default"
-    slice_label="Slice-1 (eMBB)"
-  else
-    rf_port="4044"
-    sst="222"
-    sd="123"
-    dnn="lowlatency"
-    slice_label="Slice-2 (URLLC)"
-  fi
-
-  echo "--- [Mempersiapkan UE #$ue_idx: $slice_label, IMSI: $imsi] ---"
-
-  # 1. Generate Config File
-  cat << EOF_CONF > "$conf_file"
-uicc0 = {
-  imsi      = "$imsi";
-  key       = "0C0A34601D4F07677303652C0462535B";
-  opc       = "63bfa50ee6523365ff14c1f45f88737d";
-  dnn       = "$dnn";
-  nssai_sst = $sst;
-  nssai_sd  = $sd;
-};
-EOF_CONF
-
-  # 2. Setup Namespace & Veth
-  if ! ip netns list | grep -q "^$ns\b"; then
-    sudo ip netns add "$ns"
-  fi
-  sudo ip netns exec "$ns" ip link set lo up
-
-  local veth_host="veth-ue${ue_idx}"
-  local veth_ns="veth-ue${ue_idx}-ns"
-  local host_ip="10.200.${ue_idx}.1"
-  local ns_ip="10.200.${ue_idx}.2"
-
-  if ! ip link show "$veth_host" >/dev/null 2>&1; then
-    sudo ip link add "$veth_host" type veth peer name "$veth_ns"
-    sudo ip link set "$veth_ns" netns "$ns"
-    sudo ip addr add "${host_ip}/24" dev "$veth_host"
-    sudo ip link set "$veth_host" up
-    sudo ip netns exec "$ns" ip addr add "${ns_ip}/24" dev "$veth_ns"
-    sudo ip netns exec "$ns" ip link set "$veth_ns" up
-    sudo ip netns exec "$ns" ip route add default via "$host_ip"
-  fi
-
-  # 3. Launch nr-uesoftmodem inside namespace
-  echo "Menjalankan softmodem UE #$ue_idx di namespace $ns mengarah ke port $rf_port..."
-  sudo ip netns exec "$ns" nohup "$BUILD_DIR/nr-uesoftmodem" \
-    -r 106 \
-    --numerology 1 \
-    --band 78 \
-    -C 3619200000 \
-    --rfsim \
-    --rfsimulator.serveraddr "$RAN_IP" \
-    --rfsimulator.serverport "$rf_port" \
-    -O "$conf_file" \
-    > "$log_file" 2>&1 &
-  local pid=$!
-
-  echo "$ue_idx:$ns:$imsi:$slice_label:$dnn:$rf_port:$pid" >> "$STATE_FILE"
-  echo "UE #$ue_idx berjalan (PID: $pid). Menunggu 6 detik untuk registrasi..."
-  sleep 6
-}
-
-echo "=== [2/5] Menjalankan $S1_COUNT UE(s) pada Slice 1 (eMBB) ==="
-for ((i=1; i<=S1_COUNT; i++)); do
-  spawn_ue "$CURRENT_UE" 1
-  CURRENT_UE=$(( CURRENT_UE + 1 ))
-done
-
-echo "=== [3/5] Menjalankan $S2_COUNT UE(s) pada Slice 2 (URLLC) ==="
-for ((i=1; i<=S2_COUNT; i++)); do
-  spawn_ue "$CURRENT_UE" 2
-  CURRENT_UE=$(( CURRENT_UE + 1 ))
-done
-
-echo ""
-echo "=== [4/5] Verifikasi Status Antarmuka Tunnel (oaitun_ue1) ==="
-sleep 3
-
-printf "%-5s | %-8s | %-16s | %-16s | %-12s | %-15s | %-10s\n" "UE#" "Netns" "IMSI" "Slice" "Target" "Tunnel IP" "Ping EXT-DN"
-printf "%s\n" "---------------------------------------------------------------------------------------------------"
-
-while IFS=":" read -r ue_id ns imsi slice dnn port pid; do
-  tun_ip=$(sudo ip netns exec "$ns" ip -4 addr show oaitun_ue1 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "DOWN")
-  ping_res="FAIL"
-  if [[ "$tun_ip" != "DOWN" ]]; then
-    if sudo ip netns exec "$ns" ping -I oaitun_ue1 -c 2 -W 2 "$EXT_DN_IP" >/dev/null 2>&1; then
-      ping_res="OK (0% loss)"
-    fi
-  fi
-  printf "%-5s | %-8s | %-16s | %-16s | %-12s | %-15s | %-10s\n" "$ue_id" "$ns" "$imsi" "$slice" "Port $port" "$tun_ip" "$ping_res"
-done < "$STATE_FILE"
-
-echo ""
-echo "=== [5/5] Multi-UE Spawning Selesai! ==="
-echo "Untuk menghentikan dan membersihkan semua UE, jalankan:"
-echo "  sudo /opt/oran/ue/scripts/stop_multi_ue.sh"
-```
-
-Make the script executable:
-```bash
-chmod +x /opt/oran/ue/scripts/spawn_multi_ue.sh
+# Or run interactively:
+sudo /opt/oran/ue/scripts/spawn_multi_ue.sh
 ```
 
 ---
 
-### Step 2: Automated Multi-UE Teardown Script (`/opt/oran/ue/scripts/stop_multi_ue.sh`)
+### Step 2: Automated Multi-UE Teardown Script (`stop_multi_ue.sh`)
 
-Save this script as `/opt/oran/ue/scripts/stop_multi_ue.sh`:
+Clean teardown script to terminate all UE softmodem processes, veth interfaces, and network namespaces is managed at:
+* **Source:** [`scripts/stop_multi_ue.sh`](file:///d:/Idhul/Program/Thesis/scripts/stop_multi_ue.sh)
+* **Path on VM-5:** `/opt/oran/ue/scripts/stop_multi_ue.sh`
 
+#### Execution Commands on VM-5 (`five-g@nrue`):
 ```bash
-#!/usr/bin/env bash
-echo "Menghentikan semua proses nr-uesoftmodem..."
-sudo pkill -9 nr-uesoftmodem || true
-
-echo "Membersihkan semua antarmuka veth dan namespace UE..."
-for ns in $(ip netns list | grep -oP '^ue\d+'); do
-  ue_idx="${ns#ue}"
-  echo "Menghapus $ns dan veth-ue${ue_idx}..."
-  sudo ip link del "veth-ue${ue_idx}" 2>/dev/null || true
-  sudo ip netns del "$ns" 2>/dev/null || true
-done
-
-rm -f /opt/oran/ue/active_ues.txt
-echo "Seluruh UE berhasil dihentikan dan dibersihkan."
-```
-
-Make the script executable:
-```bash
-chmod +x /opt/oran/ue/scripts/stop_multi_ue.sh
+sudo /opt/oran/ue/scripts/stop_multi_ue.sh
 ```
 
 ---
 
-### Step 3: Automated Multi-Slice Traffic Generator (`/opt/oran/ue/scripts/trafgen.sh`)
+### Step 3: Automated Multi-Slice Traffic Generator (`trafgen.sh`)
 
-Instead of manual terminal windows, VM-5 provides a unified automated traffic generator (`trafgen.sh`). The script reads active UE state, applies slice-appropriate traffic profiles (heavy UDP throughput for Slice 1 eMBB and high-frequency precision ping for Slice 2 URLLC), and logs performance metrics.
+Integrated multi-slice traffic generator (iperf3 UDP eMBB on UE1 and precision URLLC latency probing on UE2 with automated metric reporting to VM-6 `:9100/report`) is managed at:
+* **Source:** [`scripts/trafgen.sh`](file:///d:/Idhul/Program/Thesis/scripts/trafgen.sh)
+* **Path on VM-5:** `/opt/oran/ue/scripts/trafgen.sh`
 
-Save this script as `/opt/oran/ue/scripts/trafgen.sh`:
-
+#### Usage Commands on VM-5 (`five-g@nrue`):
 ```bash
-#!/usr/bin/env bash
-# ==============================================================================
-# Automated Multi-Slice Traffic Generator (VM-5 ue-emulator)
-# ==============================================================================
-# Usage:
-#   sudo ./trafgen.sh ping                  # Uji konektivitas ping cepat ke EXT-DN
-#   sudo ./trafgen.sh start [sec] [mbps]    # Jalankan benchmark simultan (default: 30s, 30M)
-#   sudo ./trafgen.sh status                # Pantau status proses pengujian
-#   sudo ./trafgen.sh stop                  # Hentikan semua proses pengujian
-# ==============================================================================
+# 1. Quick connectivity check to External DN (192.168.70.145):
+sudo /opt/oran/ue/scripts/trafgen.sh ping
 
-STATE_FILE="/opt/oran/ue/active_ues.txt"
-LOG_DIR="/opt/oran/ue/logs"
-EXT_DN_IP="192.168.70.145"
+# 2. Run simultaneous benchmark (e.g., 80 seconds, 18 Mbps eMBB):
+sudo /opt/oran/ue/scripts/trafgen.sh run 80 18
 
-mkdir -p "$LOG_DIR"
+# 3. Check status of running traffic tests:
+sudo /opt/oran/ue/scripts/trafgen.sh status
 
-if [[ ! -f "$STATE_FILE" || ! -s "$STATE_FILE" ]]; then
-  echo "[ERROR] File status UE ($STATE_FILE) tidak ditemukan atau kosong!"
-  echo "Jalankan spawn_multi_ue.sh terlebih dahulu untuk mengaktifkan UE."
-  exit 1
-fi
-
-ACTION="${1:-run}"
-if [[ "$ACTION" =~ ^[0-9]+$ ]]; then
-  DURATION="$1"
-  EMBB_RATE="${2:-25}"
-  ACTION="run"
-else
-  DURATION="${2:-30}"
-  EMBB_RATE="${3:-25}"
-fi
-
-MONITOR_URL="http://10.102.0.67:9100/report"
-
-cleanup() {
-  pkill -f "iperf3 -c $EXT_DN_IP" 2>/dev/null || true
-  pkill -f "ping -I oaitun_ue1.*$EXT_DN_IP" 2>/dev/null || true
-}
-
-trap 'cleanup; echo -e "\n[!] Pengujian dihentikan."; exit 0' INT TERM
-
-case "$ACTION" in
-  ping)
-    printf "%-5s | %-8s | %-16s | %-16s | %-15s | %-12s\n" "UE#" "Netns" "IMSI" "Slice" "RTT Avg (ms)" "Packet Loss"
-    printf "%s\n" "----------------------------------------------------------------------------------------"
-
-    while IFS=":" read -r ue_id ns imsi slice dnn port pid; do
-      tun_ip=$(ip netns exec "$ns" ip -4 addr show oaitun_ue1 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "DOWN")
-      if [[ "$tun_ip" == "DOWN" ]]; then
-        printf "%-5s | %-8s | %-16s | %-16s | %-15s | %-12s\n" "$ue_id" "$ns" "$imsi" "$slice" "N/A" "DOWN"
-        continue
-      fi
-
-      ping_out=$(ip netns exec "$ns" ping -I oaitun_ue1 -c 4 -W 2 "$EXT_DN_IP" 2>&1 || true)
-      loss=$(echo "$ping_out" | grep -oP '\d+(?=% packet loss)' || echo "100")
-      rtt=$(echo "$ping_out" | grep -oP '(?<=rtt min/avg/max/mdev = )[^/]+/[^/]+' | cut -d/ -f2 || echo "0.0")
-
-      printf "%-5s | %-8s | %-16s | %-16s | %-15s | %-12s\n" "$ue_id" "$ns" "$imsi" "$slice" "${rtt} ms" "${loss}%"
-
-      if [[ "$slice" == *"URLLC"* ]]; then
-        curl -s -m 1 -X POST -H "Content-Type: application/json" \
-          -d "{\"slice\": 2, \"rtt_ms\": ${rtt}, \"packet_loss_pct\": ${loss}}" "$MONITOR_URL" >/dev/null 2>&1 &
-      fi
-    done < "$STATE_FILE"
-    ;;
-
-  run|start)
-    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-    cleanup
-
-    IPERF_LOG=""
-    PING_LOG=""
-    UE1_NS=""
-    UE2_NS=""
-
-    while IFS=":" read -r ue_id ns imsi slice dnn port pid; do
-      tun_ip=$(ip netns exec "$ns" ip -4 addr show oaitun_ue1 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "DOWN")
-      [[ "$tun_ip" == "DOWN" ]] && continue
-
-      if [[ "$slice" == *"eMBB"* ]]; then
-        UE1_NS="$ns"
-        IPERF_LOG="$LOG_DIR/iperf_${ns}_${TIMESTAMP}.log"
-        > "$IPERF_LOG"
-        nohup ip netns exec "$ns" iperf3 -c "$EXT_DN_IP" -u -b "${EMBB_RATE}M" -t "$DURATION" -i 1 --logfile "$IPERF_LOG" </dev/null >/dev/null 2>&1 &
-      else
-        UE2_NS="$ns"
-        PING_LOG="$LOG_DIR/ping_${ns}_${TIMESTAMP}.log"
-        > "$PING_LOG"
-        nohup ip netns exec "$ns" ping -I oaitun_ue1 -i 0.1 -c $(( DURATION * 10 )) "$EXT_DN_IP" </dev/null > "$PING_LOG" 2>&1 &
-      fi
-    done < "$STATE_FILE"
-
-    echo "[TrafGen] Durasi: ${DURATION}s | Target: eMBB ${EMBB_RATE}M, URLLC 100ms | TSDB: 10.102.0.67"
-    printf "%-5s | %-17s | %-15s | %-10s | %-6s | %s\n" "Sec" "eMBB Throughput" "URLLC Latency" "Jitter" "Loss" "SLA (<20ms)"
-    echo "------+-------------------+-----------------+------------+--------+-------------"
-
-    prev_rtt="0.0"
-    for ((sec=1; sec<=DURATION; sec++)); do
-      sleep 1
-
-      tput="0.0"
-      if [[ -n "$IPERF_LOG" && -f "$IPERF_LOG" ]]; then
-        tput=$(grep -oP '\d+(\.\d+)?(?=\s+Mbits/sec)' "$IPERF_LOG" 2>/dev/null | tail -n 1 || echo "0.0")
-        [[ -z "$tput" ]] && tput="0.0"
-      fi
-
-      rtt="0.0"
-      jitter="0.00"
-      if [[ -n "$PING_LOG" && -f "$PING_LOG" ]]; then
-        rtt=$(tail -n 5 "$PING_LOG" 2>/dev/null | grep -oP '(?<=time=)\d+(\.\d+)?' | tail -n 1 || echo "0.0")
-        [[ -z "$rtt" ]] && rtt="0.0"
-        
-        if (( $(echo "$prev_rtt > 0 && $rtt > 0" | bc -l 2>/dev/null || echo 0) )); then
-          jitter=$(echo "scale=2; sqrt(($rtt - $prev_rtt)^2)" | bc -l 2>/dev/null || echo "0.00")
-        fi
-        prev_rtt="$rtt"
-      fi
-
-      sla="OK"
-      if (( $(echo "$rtt > 20.0" | bc -l 2>/dev/null || echo 0) )); then
-        sla="VIOLATED"
-      elif [[ "$rtt" == "0.0" ]]; then
-        sla="WAIT"
-      fi
-
-      curl -s -m 1 -X POST -H "Content-Type: application/json" \
-        -d "{\"slice\": 1, \"throughput_mbps\": $tput}" "$MONITOR_URL" >/dev/null 2>&1 &
-      curl -s -m 1 -X POST -H "Content-Type: application/json" \
-        -d "{\"slice\": 2, \"rtt_ms\": $rtt, \"packet_loss_pct\": 0.0}" "$MONITOR_URL" >/dev/null 2>&1 &
-
-      printf "%4ds | %-17s | %-15s | %-10s | %-6s | %s\n" \
-        "$sec" "${tput} Mbps" "${rtt} ms" "${jitter} ms" "0%" "$sla"
-    done
-
-    echo "------+-------------------+-----------------+------------+--------+-------------"
-    
-    final_tput="$EMBB_RATE"
-    if [[ -n "$IPERF_LOG" && -f "$IPERF_LOG" ]]; then
-      final_tput=$(grep -oP '\d+(\.\d+)?(?=\s+Mbits/sec\s+receiver)' "$IPERF_LOG" 2>/dev/null | tail -n 1 || grep -oP '\d+(\.\d+)?(?=\s+Mbits/sec)' "$IPERF_LOG" | tail -n 1 || echo "$EMBB_RATE")
-    fi
-
-    ping_stat=""
-    if [[ -n "$PING_LOG" && -f "$PING_LOG" ]]; then
-      ping_stat=$(tail -n 2 "$PING_LOG" 2>/dev/null | grep -oP '(?<=rtt min/avg/max/mdev = )[^/]+/[^/]+/[^/]+/[^/]+' || echo "N/A")
-    fi
-
-    echo "Hasil : eMBB Avg: ${final_tput} Mbps | URLLC RTT: ${ping_stat} ms | Loss: 0%"
-    cleanup
-    ;;
-
-  status)
-    ps aux | grep -E "iperf3 -c|ping -I oaitun_ue1" | grep -v grep || echo "Tidak ada proses trafik aktif."
-    ;;
-
-  stop)
-    cleanup
-    echo "Semua proses trafik dihentikan."
-    ;;
-
-  *)
-    echo "Penggunaan: $0 [durasi_detik] [rate_mbps]"
-    exit 1
-    ;;
-esac
-```
-
-Make the script executable:
-```bash
-chmod +x /opt/oran/ue/scripts/trafgen.sh
+# 4. Forcibly terminate all traffic:
+sudo /opt/oran/ue/scripts/trafgen.sh stop
 ```
 
 ---
 
-### Step 4: Interactive CLI Shell / Terminal Access (`/opt/oran/ue/scripts/enter_ue.sh`)
+### Step 4: Interactive CLI Shell / Terminal Access (`enter_ue.sh`)
 
-If manual diagnostic access into a specific UE's network namespace is occasionally required, use `enter_ue.sh`:
+For direct inspection or troubleshooting within a specific UE network namespace:
+* **Source:** [`scripts/enter_ue.sh`](file:///d:/Idhul/Program/Thesis/scripts/enter_ue.sh)
+* **Path on VM-5:** `/opt/oran/ue/scripts/enter_ue.sh`
 
+#### Execution Commands on VM-5 (`five-g@nrue`):
 ```bash
-cat << 'EOF' > /opt/oran/ue/scripts/enter_ue.sh
-#!/usr/bin/env bash
-ns="${1:-ue1}"
-if ! ip netns list | grep -q "^$ns\b"; then
-  echo "Namespace $ns tidak ditemukan! Namespace yang sedang aktif:"
-  ip netns list
-  exit 1
-fi
-echo "Masuk ke dalam namespace $ns (Ketik 'exit' untuk kembali ke shell host)..."
-sudo ip netns exec "$ns" bash --rcfile <(echo "
-  export PS1='\[\e[1;33m\][$ns]#\[\e[0m\] '
-")
-EOF
+# Enter UE-1 namespace:
+sudo /opt/oran/ue/scripts/enter_ue.sh ue1
 
-chmod +x /opt/oran/ue/scripts/enter_ue.sh
+# Enter UE-2 namespace:
+sudo /opt/oran/ue/scripts/enter_ue.sh ue2
 ```
 
 ---

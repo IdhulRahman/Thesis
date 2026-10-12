@@ -578,69 +578,24 @@ sudo ./nr-softmodem -O /opt/oran/ran/conf/du_gnb2.conf --rfsim 2>&1 | tee /opt/o
 
 ### 9.1 Automated Background Daemon Scripts (`start_ran.sh` & `stop_ran.sh`)
 
-To run the split RAN components cleanly in the background without maintaining multiple open SSH sessions, use the automated management scripts:
+To execute the Split RAN components cleanly and automatically in the background without maintaining multiple interactive terminal sessions, use the automation scripts managed in [`scripts/`](file:///d:/Idhul/Program/Thesis/scripts):
 
-#### 1. Launcher Script (`/opt/oran/ran/start_ran.sh`)
+* **Launcher Script:** [`scripts/start_ran.sh`](file:///d:/Idhul/Program/Thesis/scripts/start_ran.sh) (deployed on VM-4 at `/opt/oran/ran/start_ran.sh`)
+* **Stopper Script:** [`scripts/stop_ran.sh`](file:///d:/Idhul/Program/Thesis/scripts/stop_ran.sh) (deployed on VM-4 at `/opt/oran/ran/stop_ran.sh`)
+
+#### Execution Commands on VM-4 (`five-g@oai-ran`):
 ```bash
-cat << 'EOF' > /opt/oran/ran/start_ran.sh
-#!/bin/bash
-BIN_DIR="/opt/oran/ran/openairinterface5g/cmake_targets/ran_build/build"
-CONF_DIR="/opt/oran/ran/conf"
-LOG_DIR="/opt/oran/ran"
+# 1. Start all RAN components (CU, DU-1, DU-2) staged sequentially in the background:
+/opt/oran/ran/start_ran.sh
 
-echo "=== Stopping previous RAN processes (if any) ==="
-sudo pkill -9 nr-softmodem 2>/dev/null
-sleep 2
+# 2. Terminate all running RAN processes:
+/opt/oran/ran/stop_ran.sh
 
-echo "=== 1. Starting CU in background ==="
-cd "$BIN_DIR"
-nohup sudo ./nr-softmodem -O "$CONF_DIR/cu_gnb.conf" \
-  --e2_agent.near_ric_ip_addr 10.102.0.66 \
-  --e2_agent.sm_dir /usr/local/lib/flexric/ \
-  > "$LOG_DIR/cu.log" 2>&1 &
-
-echo "Waiting for CU to establish N2 (AMF) and E2 (Near-RT RIC)..."
-sleep 4
-
-echo "=== 2. Starting DU-1 (Cell-1, Port 4043) in background ==="
-nohup sudo ./nr-softmodem -O "$CONF_DIR/du_gnb1.conf" --rfsim \
-  > "$LOG_DIR/du1.log" 2>&1 &
-sleep 2
-
-echo "=== 3. Starting DU-2 (Cell-2, Port 4044) in background ==="
-nohup sudo ./nr-softmodem -O "$CONF_DIR/du_gnb2.conf" --rfsim \
-  > "$LOG_DIR/du2.log" 2>&1 &
-sleep 2
-
-echo ""
-echo "=== RAN Process Status ==="
-ps aux | grep "[n]r-softmodem"
-echo ""
-echo "=== Cell In-Service Verification ==="
-grep -E "is in service|associated AMF" "$LOG_DIR/cu.log"
-echo "OAI Split RAN successfully started in background."
-EOF
-
-chmod +x /opt/oran/ran/start_ran.sh
+# 3. Monitor real-time component logs:
+tail -f /opt/oran/ran/cu.log
+tail -f /opt/oran/ran/du1.log
+tail -f /opt/oran/ran/du2.log
 ```
-
-#### 2. Stopper Script (`/opt/oran/ran/stop_ran.sh`)
-```bash
-cat << 'EOF' > /opt/oran/ran/stop_ran.sh
-#!/bin/bash
-echo "Stopping all OAI RAN processes (CU, DU-1, DU-2)..."
-sudo pkill -9 nr-softmodem
-sleep 1
-echo "All RAN processes stopped."
-EOF
-
-chmod +x /opt/oran/ran/stop_ran.sh
-```
-
-Usage commands:
-- **Start All RAN:** `/opt/oran/ran/start_ran.sh`
-- **Stop All RAN:** `/opt/oran/ran/stop_ran.sh`
-- **Tail Live Logs:** `tail -f /opt/oran/ran/cu.log` or `tail -f /opt/oran/ran/du1.log`
 
 ---
 

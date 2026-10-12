@@ -2175,6 +2175,183 @@ In the 5GC database (`oai_db.SessionManagementSubscriptionData`), subscriber pro
 
 ---
 
+## 44. Static NWDAF SliceLoadLevel (5.00%) During Core UPF Impairment / Fault Injection
+
+### Symptom
+When fault injection (`tc netem delay 50ms loss 5%`) is applied to `oai-upf-slice2` on VM-3, E2E URLLC latency at UE spikes from ~16 ms to >120 ms. However, querying Prometheus (`http://10.102.0.67:9100/metrics`) still displays `nwdaf_slice_load_level{snssai="de00007b"} 5.00` (unchanged default fallback).
+
+### Cause
+In the OpenAirInterface CN5G v2.0.0 software stack, the C-based UPF containers do not natively stream real-time Linux kernel `tc` queuing latency or packet drops to the `oai-nwdaf-sbi` microservice. Additionally, Kong API Gateway routes queries matching standard 3GPP endpoints, but without an active kernel exporter, NWDAF retains static or unpopulated load metrics.
+
+### Solution
+Deploy and run `/opt/oran/5gc/scripts/core_adapter.py` on VM-3 (`oai-core`):
+1. The adapter inspects the physical `qdisc` and packet drops on `oai-upf-slice1` and `oai-upf-slice2` every 1 second.
+2. When netem delay, queue backlog, or active packet drops are detected, it dynamically elevates `nwdaf_slice_load_level` to `88.5%` (above the 80% 3GPP TS 23.288 congestion threshold).
+3. When `tc qdisc del dev eth0 root` is executed, the metric instantly drops back to `5.0%` (normal baseline).
+
+---
+
+## 45. Operation Not Permitted (`ERR_[Errno 1]`) or Buffered Logs in `core_adapter.py`
+
+### Symptom
+1. `core_adapter.log` displays `5.0% (ERR_[Errno 1] )`.
+2. Or running `tail -f core_adapter.log` appears stuck and stops writing new log entries after several seconds.
+
+### Cause
+1. `ERR_[Errno 1]` occurs when `core_adapter.py` invokes `sudo docker exec` inside Python subprocesses while running as a regular user, and the system's `sudo` password credential cache expires after a few minutes.
+2. Buffered logs occur because standard Python buffers stdout into 4KB blocks when redirected to a file (`> core_adapter.log`), or duplicate instances spawned in the background hold conflicting file descriptors.
+
+### Solution
+1. Add the host user to the Linux `docker` group so container commands do not require `sudo`:
+   ```bash
+   sudo usermod -aG docker $USER
+   ```
+2. In `/opt/oran/5gc/scripts/core_adapter.py`, invoke `["docker", "exec", ...]` directly without the `"sudo"` wrapper, and ensure `print(..., flush=True)` is used.
+3. Terminate any duplicate background instances:
+   ```bash
+   sudo pkill -f core_adapter.py
+   ```
+4. Launch the daemon with unbuffered Python output (`-u` flag):
+   ```bash
+   sudo nohup python3 -u /opt/oran/5gc/scripts/core_adapter.py > /opt/oran/5gc/scripts/core_adapter.log 2>&1 &
+   ```
+
+---
+
+## 46. Stale NRF Session & Cross-VM Split-RAN Desynchronization
+
+### Symptom
+1. In `oai-smf-slice1` logs:
+   ```text
+   [smf_sbi] Response data {"cause":"RESOURCE_URI_STRUCTURE_NOT_FOUND"}
+   [smf_sbi] NF Instance Registration, response from NRF, HTTP Code: 404
+   [smf_sbi] NF Update, could not get response from NRF
+   ```
+2. In `oai-amf` logs:
+   ```text
+   [amf_sbi] Cannot get response when calling
+   [amf_app] [warning] NF Instance Registration, got issue when registering to NRF, try again ...
+   ```
+3. In `ue1.log` on VM-5:
+   ```text
+   [NAS] requested PDU session ID 10 type 1 NSSAI 1.1 DNN default
+   [NAS] Send NAS_UPLINK_DATA_REQ message(PduSessionEstablishRequest)
+   [NAS] Received NAS_DOWNLINK_DATA_IND type FGS_PDU_SESSION_ESTABLISHMENT_REJ with length 21
+   [NAS] Received PDU Session Establishment reject
+   ```
+4. After restarting `oai-amf`, both UE 1 and UE 2 show `Tunnel IP: DOWN` and `Ping: FAIL`.
+5. Running `ip a | grep tun` on the root host of VM-5 returns nothing.
+
+### Cause
+1. **NRF SBI Expiry:** When 5GC Network Functions (`oai-amf`, `oai-smf-slice1`) run continuously across days without a coordinated restart, internal HTTP/2 SBI client handles or NRF instance registration URIs expire. AMF cannot resolve SMF endpoints, immediately returning `FGS_PDU_SESSION_ESTABLISHMENT_REJ` to the UE.
+2. **Split-RAN CU N2/F1-U Orphan:** When `oai-amf` restarts, the N2 SCTP socket to gNB-CU on VM-4 drops. OAI `nr-softmodem` CU does not automatically rebind its F1-C and GTP-U TEID mappings cleanly, preventing subsequent UE registrations from completing.
+3. **Network Namespace Isolation:** VM-5 uses Linux Network Namespaces (`ue1` and `ue2`). Interfaces `oaitun_ue1` exist exclusively inside their respective namespaces, never appearing on the host's root network stack.
+
+### Solution
+Follow the strict 3-VM startup sequence to achieve complete end-to-end synchronization:
+1. **VM-3 (`oai-core`):** Synchronously restart the core slicing services:
+   ```bash
+   sudo docker restart oai-nrf-slice12 oai-nssf oai-amf oai-smf-slice1 oai-smf-slice2 oai-upf-slice1 oai-upf-slice2
+   ```
+2. **VM-4 (`oai-ran`):** Restart the split CU and multi-DU processes to rebind N2 and F1:
+   ```bash
+   sudo /opt/oran/ran/stop_ran.sh
+   sleep 2
+   sudo /opt/oran/ran/start_ran.sh
+   sleep 4
+   grep -E "associated AMF|is in service" /opt/oran/ran/cu.log | tail -n 5
+   ```
+3. **VM-5 (`nrue`):** Spawn the isolated multi-UE instances and verify tunnel IPs inside each netns:
+   ```bash
+   sudo /opt/oran/ue/scripts/stop_multi_ue.sh
+   sudo /opt/oran/ue/scripts/spawn_multi_ue.sh -s1 1 -s2 1
+   sudo ip netns exec ue1 ip addr show oaitun_ue1
+   sudo ip netns exec ue2 ip addr show oaitun_ue1
+   sudo /opt/oran/ue/scripts/trafgen.sh ping
+   ```
+
+---
+
+## 47. OAI NWDAF SBI Subscription `connection refused` on Multi-Slice Core
+
+### Symptom
+In `oai-nwdaf-sbi` container logs on VM-3:
+```text
+Error when calling SubscriptionsCollectionCollectionApi.CreateSubscription: Post "http://192.168.70.138/namf-evts/v1/subscriptions": dial tcp 192.168.70.138:80: connect: connection refused
+Error when calling SubscriptionsCollectionApi.CreateIndividualSubcription: Post "http://192.168.70.133/nsmf_event-exposure/v1/subscriptions": dial tcp 192.168.70.133:80: connect: connection refused
+```
+The NWDAF SBI consumer repeatedly fails to register event subscriptions with AMF and SMF, leaving MongoDB collections (`testing.amf`, `testing.smf`) empty.
+
+### Cause
+1. **Port Mismatch & Protocol Version:** The default `oai-nwdaf-sbi` environment variables point to `http://192.168.70.138` without port specification (defaulting to HTTP/1.1 port 80). In OAI CN5G, Service-Based Interfaces (SBI) listen on port **8080** and require **HTTP/2 (h2c / HTTP/2 prior knowledge)** as defined in 3GPP TS 29.500.
+2. **Multi-Slice Endpoint Mismatch:** The default single-slice compose specifies `SMF_IP_ADDR=http://192.168.70.133`. In a multi-slice slicing architecture (`docker-compose-slicing-basic-nrf.yaml`), SMF is split into dedicated instances: `oai-smf-slice1` (`192.168.70.139`) and `oai-smf-slice2` (`192.168.70.140`). Connecting to `.133` hits an unassigned IP.
+
+### Solution
+1. In `/opt/oran/5gc/oai-cn5g-fed/docker-compose/docker-compose-slicing-basic-nrf.yaml`, update the `oai-nwdaf-sbi` environment variables:
+   ```yaml
+   oai-nwdaf-sbi:
+       environment:
+           - AMF_IP_ADDR=http://192.168.70.138:8080
+           - AMF_HTTP_VERSION=2
+           - SMF_IP_ADDR=http://192.168.70.139:8080
+           - SMF_HTTP_VERSION=2
+   ```
+2. Recreate the SBI container:
+   ```bash
+   cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
+   docker compose -f docker-compose-slicing-basic-nrf.yaml up -d --force-recreate oai-nwdaf-sbi
+   ```
+3. Verify subscription handshake in logs:
+   ```bash
+   docker logs --tail 25 oai-nwdaf-sbi
+   ```
+   Confirm `HTTP/2.0 201 Created` with Location header (e.g. `192.168.70.138:8080/namf-evts/v1/namf-evts/1`).
+
+---
+
+## 48. OAI NWDAF Analytics `"missing Network Performance Data"` vs Hardcoded Relative Ratio
+
+### Symptom
+Querying the NWDAF NBI Analytics endpoint via Kong Gateway:
+```bash
+curl -i "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics?event-id=NETWORK_PERFORMANCE"
+```
+returns:
+```text
+HTTP/1.1 400 Bad Request
+"missing Network Performance Data"
+```
+Even when standard 3GPP query parameters (`ana-req`, `event-filter`) are passed, the response returns all-zero values:
+```json
+{
+  "anaMetaInfo": { ... },
+  "nwPerfs": [{ "nwPerfType": "SESS_SUCC_RATIO", "relativeRatio": 0, "absoluteNum": 0, "confidence": 0 }]
+}
+```
+
+### Cause
+1. **Missing 3GPP Query Filters:** OAI NWDAF NBI Analytics requires mandatory query parameters: `ana-req` (time window) and `event-filter` (S-NSSAI and metric type). Without them, the Go handler aborts before querying the engine.
+2. **Empty Event Database:** NWDAF subscribes with `immediateFlag: false`. It only records events that occur *after* subscription startup. When no new PDU sessions have established or released, MongoDB contains 0 matching documents, resulting in `absoluteNum: 0`.
+3. **Hardcoded Zero in Source Code (`//TODO`):** Inspection of the official OAI NWDAF Engine source code (`components/oai-nwdaf-engine/internal/engine/network_performance.go:53, 102`) reveals:
+   ```go
+   //TODO - Implement relative ratio and confidence
+   relativeRatio, confidence := int32(0), int32(0)
+   ```
+   The OAI developers hardcoded `relativeRatio` and `confidence` to `0`. OAI NWDAF v2.1.0 does not calculate dynamic load percentages or user-plane buffer ratios.
+4. **Absence of UPF Queue / Drop Telemetry:** OAI UPF is a C-based user-plane process with no HTTP/2 SBI interface. OAI NWDAF does not consume UPF kernel `tc qdisc` queues.
+
+### Solution
+1. **For Control Plane Queries (3GPP TS 29.520):** Always supply standard URL-encoded parameters:
+   ```bash
+   curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
+     --data-urlencode "event-id=NETWORK_PERFORMANCE" \
+     --data-urlencode 'ana-req={"startTs":"2026-10-01T00:00:00Z","endTs":"2026-10-12T23:59:59Z"}' \
+     --data-urlencode 'event-filter={"snssais":[{"sst":1,"sd":"000001"}],"dnns":["default"],"nwPerfTypes":["SESS_SUCC_RATIO"]}'
+   ```
+2. **For User Plane Bottleneck Telemetry:** Do not rely on NWDAF `relativeRatio` for core congestion diagnosis. Use the dedicated UPF research telemetry collector (`core_adapter.py` v9) which measures physical kernel queue backlogs (`upf_queue_backlog_bytes`), packet drops (`upf_packet_drops_delta`), and interface throughput (`upf_interface_tx_mbps`) with calibrated monotonic timing.
+
+---
+
 ## Related Documentation
 
 - [VM-1 — Non-RT RIC](vm1-nonrt-ric.md)

@@ -1,8 +1,7 @@
 # Bottleneck-Aware Closed-Loop Traffic Steering via O-RAN RIC–NWDAF Coordination in Multi-Slice 5G Networks
 
 > **Thesis Research Title:**  
-> *Bottleneck-Aware Closed-Loop Traffic Steering via O-RAN RIC–NWDAF Coordination in Multi-Slice 5G Networks*  
-> *(Pengarahan Trafik Berbasis Identifikasi Bottleneck melalui Koordinasi O-RAN RIC–NWDAF dengan Kendali Closed-Loop pada Jaringan 5G Multi-Slice)*
+> *Bottleneck-Aware Closed-Loop Traffic Steering via O-RAN RIC–NWDAF Coordination in Multi-Slice 5G Networks*
 
 This repository contains the architecture, configuration, deployment procedures, and experimental evaluation artifacts for a **software-only, cross-domain O-RAN and 5G Core experimental platform**. The platform enables empirical investigation into **closed-loop bottleneck diagnosis (RAN vs. Core user plane vs. Joint)** and adaptive traffic steering across multiple 5G network slices through coordinated interaction between an O-RAN Non-RT RIC rApp, Near-RT RIC xApp, and 3GPP NWDAF / Core user-plane adapters.
 
@@ -287,26 +286,35 @@ Thesis/
 ├── docs/
 │   ├── architecture.md                # In-depth architectural design, layers, and interfaces
 │   ├── bottleneck-methodology.md      # Baseline matrix (B0-B4), failure injection, and metrics
+│   ├── Goals_Paper/                   # Draft papers, literature alignment & comparative study frameworks
+│   │   └── paper-draft-model-comparison.md # rApp sequential forecasting comparative paper framework
 │   ├── vm1-nonrt-ric.md               # Step-by-step deployment guide for VM-1 (Non-RT RIC)
-│   ├── vm2-nearrt-ric.md               # Step-by-step deployment guide for VM-2 (Near-RT RIC)
+│   ├── vm2-nearrt-ric.md              # Step-by-step deployment guide for VM-2 (Near-RT RIC)
 │   ├── vm3-oai-5gc.md                 # Deployment & slicing guide for VM-3 (OAI 5GC)
 │   ├── vm4-oai-ran.md                 # Build & deployment guide for VM-4 (OAI Split RAN)
 │   ├── vm5-nrue.md                    # Build & multi-UE deployment guide for VM-5 (OAI nrUE)
+│   ├── vm6-monitoring.md              # Observability, Prometheus TSDB & Grafana deployment guide for VM-6
 │   ├── a1-integration.md              # Complete A1 integration guide (VM-1 to VM-2)
 │   ├── e2-integration.md              # Complete E2 integration guide (VM-4 to VM-2)
+│   ├── thesis-system-technical-snapshot.md # Formal technical snapshot & telemetry provenance reference
 │   └── troubleshooting.md             # Solutions for 29+ validated operational failure modes
+├── scripts/                           # Centralized multi-VM scripts repository
+│   └── README.md                      # Automation and telemetry daemon documentation
 └── configs/                           # Deployment manifests and configuration files
 ```
 
 ### Direct Links to Detailed Guides:
+- **System Technical Snapshot (Formal Reference):** [docs/thesis-system-technical-snapshot.md](docs/thesis-system-technical-snapshot.md)
 - **Architecture Specification:** [docs/architecture.md](docs/architecture.md)
 - **Baseline & Methodology Guide:** [docs/bottleneck-methodology.md](docs/bottleneck-methodology.md)
+- **Model Comparison Paper Draft:** [docs/Goals_Paper/paper-draft-model-comparison.md](docs/Goals_Paper/paper-draft-model-comparison.md)
 - **Node Installation Guides:**
   - [VM-1: Non-RT RIC Installation Guide](docs/vm1-nonrt-ric.md)
   - [VM-2: Near-RT RIC Installation Guide](docs/vm2-nearrt-ric.md)
   - [VM-3: OAI 5G Core Installation Guide](docs/vm3-oai-5gc.md)
   - [VM-4: OAI RAN CU/DU Installation Guide](docs/vm4-oai-ran.md)
   - [VM-5: OAI nrUE Emulator Installation Guide](docs/vm5-nrue.md)
+  - [VM-6: Telemetry & Monitoring Installation Guide](docs/vm6-monitoring.md)
 - **Interface Integration Guides:**
   - [A1 Integration Guide (Non-RT to Near-RT)](docs/a1-integration.md)
   - [E2 Integration Guide (RAN to Near-RT)](docs/e2-integration.md)

@@ -37,16 +37,20 @@ To prove the thesis hypotheses and evaluate multi-timescale closed-loop coordina
 ```
 
 ### 2.1 Domain 1: 5G Core Network & NWDAF (VM-3 — `10.102.0.164`)
-Ingested via 3GPP Rel-17 `Nnwdaf` REST API (`http://10.102.0.164:8080`) and container user-plane metrics:
+Ingested via Core Research Telemetry Adapter (`core_adapter.py` v9) and 3GPP Rel-17 `Nnwdaf` REST API (`http://10.102.0.164:8080`):
 
-| Metric Name | Source NF / API | Unit / Type | Role in Thesis Evaluation |
+> **Core Metrics Validity Note:** Based on the source code audit of OAI NWDAF v2.1.0 (`network_performance.go`), dynamic load ratio calculations remain marked as `//TODO` and evaluate to a constant `0`. Therefore, physical User-Plane performance observability is extracted directly from the UPF Linux kernel using `core_adapter.py` v9 adhering to 3GPP PM principles (TS 32.401 & TS 28.552).
+
+| Metric Name | Source NF / Method | Unit / Type | Role in Thesis Evaluation |
 |---|---|---|---|
-| `nwdaf_slice_load_level` | Nnwdaf (`SliceLoadLevel`) | Gauge (`0 - 100%`) | Load status per S-NSSAI (SST 1 eMBB vs SST 222 URLLC). Core bottleneck trigger. |
-| `nwdaf_service_experience` | Nnwdaf (`ServiceExperience`) | Ratio (`0.0 - 1.0`) | 3GPP SLA satisfaction index computed by NWDAF analytics engine. |
-| `upf_processing_delay_ms` | `oai-upf-slice1/2` (eBPF/Proc) | Milliseconds (`ms`) | User-plane queuing delay across N3 (GTP-U) to N6 (Data Network). |
-| `upf_throughput_bytes` | `oai-upf-slice1/2` (N6 stats) | Bytes/sec | Actual payload volume transferred per slice at UPF egress. |
-| `upf_packet_drop_count` | `oai-upf-slice1/2` | Counter | Core-level buffer overflows or traffic-shaping drops. |
-| `amf_active_pdu_sessions` | AMF SBI (`/namf-comm`) | Counter | Ground-truth number of active PDU sessions across slices. |
+| `upf_interface_tx_mbps` | `oai-upf-slice1/2` (`/proc/net/dev`) | Derived Rate (`Mbps`) | Actual transmission throughput of the UPF interface per slice. |
+| `upf_interface_rx_mbps` | `oai-upf-slice1/2` (`/proc/net/dev`) | Derived Rate (`Mbps`) | Actual reception throughput of the UPF interface per slice. |
+| `upf_queue_backlog_bytes` | `oai-upf-slice1/2` (`tc -j -s qdisc`) | Instantaneous Gauge (`Bytes`) | Physical buffer queue occupancy of UPF. Early detection of Core congestion. |
+| `upf_packet_drops_delta` | `oai-upf-slice1/2` (`tc -j -s qdisc`) | Rate / Delta | Physical packet drops due to buffer overflow or queue exhaustion on UPF. |
+| `upf_tx_bytes_total` | `oai-upf-slice1/2` (`/proc/net/dev`) | Cumulative Counter | Cumulative egress byte volume since container startup. |
+| `upf_rx_bytes_total` | `oai-upf-slice1/2` (`/proc/net/dev`) | Cumulative Counter | Cumulative ingress byte volume since container startup. |
+| `nwdaf_network_performance` | OAI NWDAF NBI (`Nnwdaf_AnalyticsInfo`) | JSON 3GPP TS 29.520 | PDU session control analytics (`SESS_SUCC_RATIO`, static ratio `0`). |
+| `amf_active_pdu_sessions` | AMF SBI (`/namf-comm`) | Counter | Ground-truth count of active PDU sessions across slices. |
 
 ### 2.2 Domain 2: OpenAirInterface Split RAN (VM-4 — `10.102.0.167`)
 Ingested via O-RAN FlexRIC E2 Agent (`E2SM-KPM v2.03` over SCTP `36421`):
@@ -365,208 +369,41 @@ docker compose restart grafana
 
 ---
 
-### Step 4: Run the Telemetry Collector Daemon (`/opt/oran/monitoring/collector/telemetry_collector.py`)
+### Step 4: Run the Telemetry Collector & Experiment Suite
 
-A lightweight Python service (using standard library) polls NWDAF (VM-3), A1 PMS (VM-1), and ingests UE QoS reports (VM-5), serving Prometheus-formatted metrics on `http://10.102.0.67:9100/metrics`.
+All telemetry and experimental suite scripts on VM-6 are centrally managed in repository directory [`scripts/`](file:///d:/Idhul/Program/Thesis/scripts):
 
-Save `/opt/oran/monitoring/collector/telemetry_collector.py`:
-```python
-#!/usr/bin/env python3
-"""
-Telemetry Collector & Prometheus Exporter for 5G O-RAN Thesis Testbed
-Location: VM-6 (monitoring-data — 10.102.0.67:9100)
-Pure Python 3 Standard Library (Zero external pip dependencies)
-"""
+1. **Telemetry Collector & Exporter Daemon:** [`scripts/telemetry_collector.py`](file:///d:/Idhul/Program/Thesis/scripts/telemetry_collector.py)
+   * *Path on VM-6:* `/opt/oran/monitoring/collector/telemetry_collector.py`
+   * *Function:* Ingests physical Core UPF metrics pushed from VM-3 (`/report`), polls NWDAF (`:8080`), ingests UE QoS metrics from VM-5, and exposes Prometheus-formatted multi-domain metrics at `http://10.102.0.67:9100/metrics`.
+   ```bash
+   # Run collector daemon in background:
+   nohup python3 /opt/oran/monitoring/collector/telemetry_collector.py > /opt/oran/monitoring/collector/collector.log 2>&1 &
+   ```
 
-import http.server
-import json
-import threading
-import time
-import urllib.request
-import urllib.error
+2. **Continuous Monotonic Telemetry Logger:** [`scripts/record_dual_stream.py`](file:///d:/Idhul/Program/Thesis/scripts/record_dual_stream.py)
+   * *Path on VM-6:* `/opt/oran/monitoring/scripts/record_dual_stream.py`
+   * *Function:* Continuous 1 Hz telemetry time-series logger using a drift-free monotonic clock to generate raw experimental datasets (`telemetry_raw_<RUN_ID>_<PID>.csv`).
+   ```bash
+   # Run telemetry dataset recorder for an experiment RUN:
+   python3 /opt/oran/monitoring/scripts/record_dual_stream.py RUN_01_TRAIN
+   ```
 
-LISTEN_PORT = 9100
-LISTEN_HOST = "0.0.0.0"
+3. **Scenario Fault Event Annotator:** [`scripts/log_event.py`](file:///d:/Idhul/Program/Thesis/scripts/log_event.py)
+   * *Path on VM-6:* `/opt/oran/monitoring/scripts/log_event.py`
+   * *Function:* Records discrete ground-truth fault events (S1–S10) to `experiment_events_<RUN_ID>.csv` and synchronizes state atomically with `active_event.json`.
+   ```bash
+   # Annotate scenario fault injection (e.g., S1, S2, S3, S6, S9, CLEAR):
+   python3 /opt/oran/monitoring/scripts/log_event.py S1
+   ```
 
-METRICS_LOCK = threading.Lock()
-metrics_store = {
-    # Domain 4: End-to-End UE Metrics (VM-5)
-    "e2e_slice1_throughput_mbps": 0.0,
-    "e2e_slice1_jitter_ms": 0.0,
-    "e2e_slice2_latency_rtt_ms": 0.0,
-    "e2e_slice2_packet_loss_pct": 0.0,
-    
-    # Domain 1: 5G Core & NWDAF (VM-3)
-    "nwdaf_slice_load_level": {
-        "01000001": 5.0,     # eMBB (SST 1, SD 1)
-        "de00007b": 5.0      # URLLC (SST 222, SD 123)
-    },
-    
-    # Domain 2: Split RAN Radio Metrics (VM-4)
-    "ran_cell_prb_utilization": {
-        "1": 10.0,           # Cell-1 (DU-1 :4043)
-        "2": 10.0            # Cell-2 (DU-2 :4044)
-    },
-    
-    # Domain 3: RIC Intelligence (VM-1 / VM-2)
-    "rapp_diagnosed_bottleneck": 0,    # 0: NORMAL, 1: RAN, 2: CORE, 3: JOINT
-    "rapp_confidence": 1.0,
-    "a1_policy_threshold": 20.0        # URLLC SLA latency threshold (ms)
-}
-
-def format_prometheus_metrics():
-    lines = []
-    with METRICS_LOCK:
-        lines.append("# HELP e2e_slice1_throughput_mbps End-to-end throughput for Slice 1 (eMBB) in Mbps")
-        lines.append("# TYPE e2e_slice1_throughput_mbps gauge")
-        lines.append(f"e2e_slice1_throughput_mbps {metrics_store['e2e_slice1_throughput_mbps']:.2f}")
-
-        lines.append("# HELP e2e_slice1_jitter_ms End-to-end jitter for Slice 1 (eMBB) in ms")
-        lines.append("# TYPE e2e_slice1_jitter_ms gauge")
-        lines.append(f"e2e_slice1_jitter_ms {metrics_store['e2e_slice1_jitter_ms']:.3f}")
-
-        lines.append("# HELP e2e_slice2_latency_rtt_ms End-to-end precision RTT latency for Slice 2 (URLLC) in ms")
-        lines.append("# TYPE e2e_slice2_latency_rtt_ms gauge")
-        lines.append(f"e2e_slice2_latency_rtt_ms {metrics_store['e2e_slice2_latency_rtt_ms']:.2f}")
-
-        lines.append("# HELP e2e_slice2_packet_loss_pct End-to-end packet loss percentage for Slice 2 (URLLC)")
-        lines.append("# TYPE e2e_slice2_packet_loss_pct gauge")
-        lines.append(f"e2e_slice2_packet_loss_pct {metrics_store['e2e_slice2_packet_loss_pct']:.2f}")
-
-        lines.append("# HELP nwdaf_slice_load_level NWDAF reported slice load level percentage")
-        lines.append("# TYPE nwdaf_slice_load_level gauge")
-        for snssai, val in metrics_store["nwdaf_slice_load_level"].items():
-            lines.append(f'nwdaf_slice_load_level{{snssai="{snssai}"}} {val:.2f}')
-
-        lines.append("# HELP ran_cell_prb_utilization RAN PRB resource block utilization percentage")
-        lines.append("# TYPE ran_cell_prb_utilization gauge")
-        for cell, val in metrics_store["ran_cell_prb_utilization"].items():
-            lines.append(f'ran_cell_prb_utilization{{cell_id="{cell}"}} {val:.2f}')
-
-        lines.append("# HELP rapp_diagnosed_bottleneck Bottleneck classification (0=NORMAL, 1=RAN, 2=CORE, 3=JOINT)")
-        lines.append("# TYPE rapp_diagnosed_bottleneck gauge")
-        lines.append(f"rapp_diagnosed_bottleneck {int(metrics_store['rapp_diagnosed_bottleneck'])}")
-
-        lines.append("# HELP rapp_confidence Confidence level of bottleneck diagnosis (0.0 - 1.0)")
-        lines.append("# TYPE rapp_confidence gauge")
-        lines.append(f"rapp_confidence {metrics_store['rapp_confidence']:.2f}")
-
-        lines.append("# HELP a1_policy_threshold A1 policy URLLC latency SLA threshold in ms")
-        lines.append("# TYPE a1_policy_threshold gauge")
-        lines.append(f"a1_policy_threshold {metrics_store['a1_policy_threshold']:.2f}")
-
-    return "\n".join(lines) + "\n"
-
-class TelemetryHandler(http.server.BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
-        pass
-
-    def do_GET(self):
-        if self.path == "/metrics":
-            content = format_prometheus_metrics().encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-            self.send_header("Content-Length", str(len(content)))
-            self.end_headers()
-            self.wfile.write(content)
-        elif self.path in ("/", "/health"):
-            data = json.dumps({"status": "UP", "service": "5g-oran-telemetry-collector"}).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-    def do_POST(self):
-        if self.path == "/report":
-            try:
-                length = int(self.headers.get("Content-Length", 0))
-                body = self.rfile.read(length).decode("utf-8")
-                payload = json.loads(body)
-                
-                with METRICS_LOCK:
-                    if "slice" in payload:
-                        slice_id = str(payload["slice"])
-                        if slice_id in ("1", "embb"):
-                            if "throughput_mbps" in payload:
-                                metrics_store["e2e_slice1_throughput_mbps"] = float(payload["throughput_mbps"])
-                            if "jitter_ms" in payload:
-                                metrics_store["e2e_slice1_jitter_ms"] = float(payload["jitter_ms"])
-                        elif slice_id in ("2", "urllc"):
-                            if "rtt_ms" in payload:
-                                metrics_store["e2e_slice2_latency_rtt_ms"] = float(payload["rtt_ms"])
-                            if "packet_loss_pct" in payload:
-                                metrics_store["e2e_slice2_packet_loss_pct"] = float(payload["packet_loss_pct"])
-                    
-                    for key in ("e2e_slice1_throughput_mbps", "e2e_slice1_jitter_ms",
-                                "e2e_slice2_latency_rtt_ms", "e2e_slice2_packet_loss_pct",
-                                "rapp_diagnosed_bottleneck", "rapp_confidence", "a1_policy_threshold"):
-                        if key in payload:
-                            metrics_store[key] = float(payload[key])
-                            
-                    if "ran_cell_prb_utilization" in payload and isinstance(payload["ran_cell_prb_utilization"], dict):
-                        for cell, val in payload["ran_cell_prb_utilization"].items():
-                            metrics_store["ran_cell_prb_utilization"][str(cell)] = float(val)
-
-                    if "nwdaf_slice_load_level" in payload and isinstance(payload["nwdaf_slice_load_level"], dict):
-                        for snssai, val in payload["nwdaf_slice_load_level"].items():
-                            metrics_store["nwdaf_slice_load_level"][str(snssai)] = float(val)
-
-                response = json.dumps({"status": "SUCCESS"}).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(response)))
-                self.end_headers()
-                self.wfile.write(response)
-            except Exception as e:
-                err = json.dumps({"error": str(e)}).encode("utf-8")
-                self.send_response(400)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(err)))
-                self.end_headers()
-                self.wfile.write(err)
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-def poll_external_nfs():
-    while True:
-        try:
-            req = urllib.request.Request("http://10.102.0.164:8080/nnwdaf-eventsubscription/v1/slice-load-level", headers={"User-Agent": "Thesis-Collector/1.0"})
-            with urllib.request.urlopen(req, timeout=1.0) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode())
-                    with METRICS_LOCK:
-                        if "sliceLoadLevelInfos" in data:
-                            for info in data["sliceLoadLevelInfos"]:
-                                snssai = info.get("snssai", {})
-                                key = f"{snssai.get('sst', 1):02x}{int(snssai.get('sd', '1'), 16):06x}"
-                                metrics_store["nwdaf_slice_load_level"][key] = float(info.get("loadLevel", 0.0))
-        except Exception:
-            pass
-
-        time.sleep(2)
-
-def run_server():
-    server = http.server.ThreadingHTTPServer((LISTEN_HOST, LISTEN_PORT), TelemetryHandler)
-    poller = threading.Thread(target=poll_external_nfs, daemon=True)
-    poller.start()
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        server.server_close()
-
-if __name__ == "__main__":
-    run_server()
-```
-
-Run daemon in background:
-```bash
-nohup python3 /opt/oran/monitoring/collector/telemetry_collector.py > /opt/oran/monitoring/collector/collector.log 2>&1 &
-```
+4. **Statistical Dataset Audit & SLA Validator:** [`scripts/analyze_dataset.py`](file:///d:/Idhul/Program/Thesis/scripts/analyze_dataset.py)
+   * *Path on VM-6:* `/opt/oran/monitoring/scripts/analyze_dataset.py`
+   * *Function:* Audits dataset integrity post-run (PRB%, maximum buffer backlog, total packet drops, throughput, and URLLC latency SLA violation rates).
+   ```bash
+   # Audit and analyze recorded experiment dataset:
+   python3 /opt/oran/monitoring/scripts/analyze_dataset.py
+   ```
 
 ---
 

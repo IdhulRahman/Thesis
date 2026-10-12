@@ -2,8 +2,7 @@
 
 This document describes the high-level architecture of the cross-domain experimental platform used for:
 
-> **Bottleneck-Aware Closed-Loop Traffic Steering via O-RAN RIC–NWDAF Coordination in Multi-Slice 5G Networks**  
-> *(Pengarahan Trafik Berbasis Identifikasi Bottleneck melalui Koordinasi O-RAN RIC–NWDAF dengan Kendali Closed-Loop pada Jaringan 5G Multi-Slice)*
+> **Bottleneck-Aware Closed-Loop Traffic Steering via O-RAN RIC–NWDAF Coordination in Multi-Slice 5G Networks**
 
 The platform is designed as a **software-only cross-domain testbed** using six virtual machines. The architecture unifies O-RAN radio control loops with 5G Core user-plane analytics (NWDAF / Core Adapter) so that bottleneck identification and traffic steering can be evaluated across multiple operational baselines and experimental failure modes.
 
