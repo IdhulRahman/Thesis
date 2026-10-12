@@ -169,17 +169,20 @@ case "$ACTION" in
 
     echo "------+-------------------+-----------------+------------+--------+-------------"
 
-    final_tput="$EMBB_RATE"
+    final_tput=""
     if [[ -n "$IPERF_LOG" && -f "$IPERF_LOG" ]]; then
-      final_tput=$(grep -oP '\d+(\.\d+)?(?=\s+Mbits/sec\s+receiver)' "$IPERF_LOG" 2>/dev/null | tail -n 1 || grep -oP '\d+(\.\d+)?(?=\s+Mbits/sec)' "$IPERF_LOG" | tail -n 1 || echo "$EMBB_RATE")
+      final_tput=$(grep -oP '\d+(\.\d+)?(?=\s+Mbits/sec\s+receiver)' "$IPERF_LOG" 2>/dev/null | tail -n 1 || true)
+      [[ -z "$final_tput" ]] && final_tput=$(grep -oP '\d+(\.\d+)?(?=\s+Mbits/sec)' "$IPERF_LOG" 2>/dev/null | tail -n 1 || true)
     fi
+    [[ -z "$final_tput" ]] && final_tput="$EMBB_RATE"
 
     ping_stat=""
     if [[ -n "$PING_LOG" && -f "$PING_LOG" ]]; then
-      ping_stat=$(tail -n 2 "$PING_LOG" 2>/dev/null | grep -oP '(?<=rtt min/avg/max/mdev = )[^/]+/[^/]+/[^/]+/[^/]+' || echo "N/A")
+      ping_stat=$(tail -n 2 "$PING_LOG" 2>/dev/null | grep -oP '(?<=rtt min/avg/max/mdev = )[^ ]+' || echo "N/A")
     fi
+    [[ -z "$ping_stat" ]] && ping_stat="N/A"
 
-    echo "Hasil : eMBB Avg: ${final_tput} Mbps | URLLC RTT: ${ping_stat} ms | Loss: 0%"
+    echo "Hasil : eMBB (Sender): ${final_tput} Mbps | URLLC RTT (min/avg/max/mdev): ${ping_stat} ms | Loss: ${loss_pct}%"
     cleanup
     ;;
 
