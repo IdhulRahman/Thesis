@@ -126,8 +126,8 @@ def format_prometheus_metrics():
             metrics_store["e2e_slice2_last_seq"] = float("nan")
             metrics_store["e2e_slice2_reply_age_sec"] = float("nan")
 
-        # Probe freshness reflects the actual freshness of active QoS probing, not mere reporting
-        metrics_store["e2e_probe_freshness"] = 1 if (ue2_meas_fresh or (ue1_reporting and not math.isnan(metrics_store["e2e_slice1_throughput_mbps"]))) else 0
+        # Probe freshness reflects the actual freshness of active QoS canary probing (URLLC RTT)
+        metrics_store["e2e_probe_freshness"] = 1 if ue2_meas_fresh else 0
 
         # Auto-reset stale Core metrics if core_adapter stopped pushing (> 3.5 seconds)
         if last_report_core > 0.0 and (now - last_report_core > 3.5):
