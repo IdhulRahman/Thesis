@@ -715,19 +715,19 @@ A1 policy type 20008          ✅
 A1 PMS → xApp delivery        ✅
 RMR 20010 / 20011             ✅
 
-VM-3 OAI 5GC (13 Containers) ✅
+VM-3 OAI 5GC (12 Containers) ✅
 VM-4 OAI RAN (CU + 2 DUs)    ✅
 E2 integration (E2AP/SCTP)   ✅
 E2SM-KPM (ID: 2)             ✅
 E2SM-RC (ID: 3)              ✅
 FlexRIC Service Models (8 SM)✅
+VM-5 OAI nrUE (Multi-UE)     ✅
+VM-6 monitoring (TSDB/Logger)✅
+QoS / multi-slicing (dual UPF) ✅
 
-Native NWDAF (oai-nwdaf)     ⏳
-VM-5 OAI nrUE (Multi-UE)     ⏳ (Next Phase)
-F1 handover                  ⏳
-QoS / slicing                ⏳
-DRL integration              ⏳
-VM-6 monitoring              ⏳
+Native NWDAF (oai-nwdaf)     ⏳ (Bypassed via Core Adapter v9)
+F1 handover (E2SM-RC / RRC)  ⏳ (In Progress)
+DRL / ML model integration   ⏳ (In Progress)
 ```
 
 ---

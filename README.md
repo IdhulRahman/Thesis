@@ -92,21 +92,12 @@ All virtual machines run on Ubuntu 22.04 LTS interconnected via static IP assign
 
 | VM | Hostname | IP Address | vCPU | RAM | Disk | Key Assigned Services |
 |---|---|---|:---:|:---:|:---:|---|
-<<<<<<< HEAD
 | **VM-1** | `nonrt-ric` | `10.102.0.168` | 4 | 8 GB | 30 GB | Non-RT RIC, A1 PMS v2.6.0, Bottleneck-Aware Coordinator rApp |
 | **VM-2** | `near-rt-ric` | `10.102.0.66` | 6 | 12 GB | 40 GB | Minimal Near-RT RIC, A1 Mediator, xApp, E2Term, E2Mgr, DBaaS Redis 5.0.9 |
-| **VM-3** | `oai-5gc` | `10.102.0.164` | 4 | 8 GB | 30 GB | OAI 5GC Multi-Slice (AMF, SMF-1/2, UPF-1/2, NRF, UDM, MySQL) + NWDAF / Core Adapter |
+| **VM-3** | `oai-5gc` | `10.102.0.164` | 4 | 8 GB | 30 GB | OAI 5GC Multi-Slice (AMF, SMF-1/2, UPF-1/2, NRF, UDM, MySQL) + Core Adapter v9 |
 | **VM-4** | `oai-ran` | `10.102.0.167` | 8 | 16 GB | 50 GB | OAI 5G RAN (CU + DU-1 + DU-2 + FlexRIC E2 Agent + RFsim :4043/:4044) |
 | **VM-5** | `ue-emulator` | `10.102.0.165` | 4 | 8 GB | 30 GB | OAI nrUE Multi-Instance Emulator (rfsim client) |
-| **VM-6** | `monitoring-data` | `10.102.0.67` | 4 | 8 GB | 40 GB | Prometheus TSDB, Grafana Dashboards, Telemetry Collector |
-=======
-| **VM-1** | `nonrt-ric` | `10.10.10.11` | 4 | 4 GB | 60 GB | Non-RT RIC, A1 PMS v2.6.0, Custom QoS rApp |
-| **VM-2** | `near-rt-ric` | `10.10.10.12` | 4 | 4 GB | 60 GB | Minimal Near-RT RIC, A1 Mediator, xApp, E2Term, E2Mgr, DBaaS Redis 5.0.9 |
-| **VM-3** | `oai-5gc` | `10.10.10.13` | 4 | 4 GB | 60 GB | OAI 5GC v2.1.0 Multi-Slice (AMF, SMF-1/2, UPF-1/2, NRF, UDM, MySQL) |
-| **VM-4** | `oai-ran` | `10.10.10.14` | 4 | 4 GB | 60 GB | OAI 5G RAN (CU + DU-1 + DU-2 + FlexRIC E2 Agent + RFsim :4043/:4044) |
-| **VM-5** | `ue-emulator` | `10.10.10.15` | 4 | 4 GB | 60 GB | OAI nrUE Multi-Instance Emulator (rfsim client) |
-| **VM-6** | `monitoring-data` | `10.10.10.16` | 4 | 4 GB | 60 GB | Prometheus TSDB, Grafana Dashboards, Telemetry Collector |
->>>>>>> 89e2253a8557676afd4d0a3744f6b652e29a909d
+| **VM-6** | `monitoring-data` | `10.102.0.67` | 4 | 8 GB | 40 GB | Prometheus TSDB, Grafana Dashboards, Telemetry Collector & Monotonic Logger |
 
 ---
 
@@ -250,10 +241,10 @@ sudo ./nr-uesoftmodem -r 106 --numerology 1 --band 78 -C 3619200000 \
 | **VM-3: OAI 5G Core Multi-Slice** | VM-3 | ✅ Complete | 12 containers running; dual UPFs active; N2 exposed on port 38412. |
 | **VM-4: OAI RAN Split CU/DU** | VM-4 | ✅ Complete | CU and Dual DUs compiled; F1-C/F1-U active; Cell 1 & 2 in service. |
 | **O-RAN E2 Interface Integration** | VM-4 $\leftrightarrow$ VM-2 | ✅ Complete | Node `gnb_208_095_00000e00` connected; 8 Service Models registered. |
-| **VM-5: OAI nrUE Multi-UE** | VM-5 | ⏳ Next Phase | Dual-slice multi-UE connection via RFsimulator TCP sockets. |
-| **F1 Handover Execution** | VM-4 / VM-5 | ⏳ Next Phase | Inter-cell handover between DU-1 (:4043) and DU-2 (:4044). |
-| **Coordinated rApp + xApp Steering** | VM-1 / VM-2 | ⏳ Planned | Thesis evaluation: QoS-aware DRL traffic steering mechanism. |
-| **Telemetry & Experiment Pipeline** | VM-6 | ⏳ Planned | Automated logging of throughput, latency, loss, and handover signaling. |
+| **VM-5: OAI nrUE Multi-UE** | VM-5 | ✅ Complete | Multi-UE instances in isolated netns (`ue1` eMBB & `ue2` URLLC) active via `trafgen.sh`. |
+| **Telemetry & Experiment Pipeline** | VM-6 | ✅ Complete | 1.000 Hz drift-free monotonic logger, Core/RAN adapters, Prometheus TSDB, and CSV logging operational. |
+| **F1 Handover Execution** | VM-4 / VM-5 | ⏳ In Progress | Inter-cell handover between DU-1 (:4043) and DU-2 (:4044) via E2SM-RC / RRC reconfiguration. |
+| **Coordinated rApp + xApp Steering** | VM-1 / VM-2 | ⏳ In Progress | A1 policy exchange validated; offline ML dataset collected; closed-loop inference under implementation. |
 
 ---
 
