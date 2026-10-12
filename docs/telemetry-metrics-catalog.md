@@ -1,67 +1,71 @@
 # 5G O-RAN Telemetry Metrics Catalog & Extraction Guide
 
-This document serves as the authoritative catalog detailing all telemetry metrics extractable from the multi-slice 5G O-RAN testbed, data sources, mathematical formulations, and step-by-step procedures for both manual extraction (shell CLI) and automated collection via standard-library Python daemons.
+This document serves as the authoritative, peer-reviewed reference detailing all telemetry metrics extractable from the multi-slice 5G O-RAN testbed, their underlying data sources, mathematical formulations, standard mappings (3GPP / ETSI / IETF), measurement semantics, and step-by-step extraction procedures.
 
 ---
 
 ## 1. Telemetry Dataflow Architecture
 
-Telemetry is continuously harvested at a synchronized nominal frequency of **1.000 Hz (1 sample per second)** across five architectural domains:
+Telemetry is harvested across five architectural domains at a nominal polling frequency of **1.000 Hz (1 sample per second)**:
 
 ```text
-[ VM-5: nrUE ]             [ VM-4: Split RAN ]          [ VM-3: 5G Core ]
-  (iperf3 / ping)            (gNB DU Scheduler)           (UPF Container)
-        │                            │                            │
-        ▼                            ▼                            ▼
-  trafgen.sh                  ran_adapter.py               core_adapter.py
-        │                            │                            │
-        └────────────────────┬───────┴────────────────────────────┘
-                             │ POST :9100/report
-                             ▼
-                 [ VM-6: Monitoring Host ]
-                   telemetry_collector.py  ──►  Prometheus (:9100/metrics)
-                             │
-                             ▼
-                   record_dual_stream.py  ──►  telemetry_raw_<RUN_ID>.csv
+[ VM-5: nrUE (ue1 / ue2) ]     [ VM-4: Split RAN ]          [ VM-3: 5G Core ]
+  (iperf3 / ping canary)         (gNB DU Scheduler Logs)      (UPF Container eth0)
+        │                               │                            │
+        ▼                               ▼                            ▼
+  trafgen.sh                     ran_adapter.py               core_adapter.py v9
+        │                               │                            │
+        └───────────────────────┬───────┴────────────────────────────┘
+                                │ POST :9100/report
+                                ▼
+                    [ VM-6: Monitoring Host ]
+                      telemetry_collector.py  ──►  Prometheus (:9100/metrics)
+                                │
+                                ▼
+                      record_dual_stream.py  ──►  telemetry_raw_<RUN_ID>.csv
 ```
 
 ---
 
-## 2. Complete Metric Inventory
+## 2. Complete Metric Inventory & Semantic Definitions
 
-| No | CSV Column Name | Prometheus Metric Identifier | Domain | Host / Process Source | Unit / Type | Description & Standards Mapping |
+> [!IMPORTANT]
+> **Measurement Semantics Notice:**
+> In accordance with 3GPP TS 38.314, TS 28.552, and TS 23.288, physical telemetry must strictly distinguish between instantaneous point-in-time samples, observation-interval aggregates, client-side offered load versus server-side goodput, and empirical research approximations. The table below documents the precise semantics implemented in this testbed.
+
+| No | CSV Column Name | Prometheus Metric Identifier | Domain | Source Component | Unit / Type | Exact Measurement Semantics & Scientific Scope |
 |---|---|---|---|---|---|---|
-| 1 | `timestamp_utc` | *(Row Metadata)* | Pipeline | System Clock UTC | ISO-8601 | Microsecond-accurate UTC timestamp for cross-VM synchronization. |
-| 2 | `elapsed_sec` | *(Row Metadata)* | Pipeline | Monotonic Clock | Seconds | Monotonic float (zero wall-clock drift) since run initialization. |
-| 3 | `run_id` | *(Row Metadata)* | Pipeline | CLI Session / Argument| String | Unique experiment session identifier (e.g., `PILOT_TEST`). |
-| 4 | `scrape_ok` | *(Internal Logger)* | Pipeline | HTTP Status :9100 | Boolean (0/1) | Prometheus scrape success status indicator. |
-| 5 | `scrape_latency_ms` | *(Internal Logger)* | Pipeline | Scrape Duration | ms | End-to-end HTTP request duration to scrape `:9100/metrics`. |
-| 6 | `e2e_slice1_tput_mbps` | `e2e_slice1_throughput_mbps` | UE Experience | VM-5 `ue1` ns | Mbps | Slice 1 (eMBB) user goodput delivered to EXT-DN via `iperf3`. |
-| 7 | `e2e_slice1_jitter_ms` | `e2e_slice1_jitter_ms` | UE Experience | VM-5 `ue1` ns | ms | Slice 1 (eMBB) UDP packet delay variation / jitter. |
-| 8 | `e2e_slice2_rtt_ms` | `e2e_slice2_latency_rtt_ms` | UE Experience | VM-5 `ue2` ns | ms | Slice 2 (URLLC) precision Round-Trip Time (ICMP canary to EXT-DN). |
-| 9 | `e2e_slice2_loss_pct` | `e2e_slice2_packet_loss_pct` | UE Experience | VM-5 `ue2` ns | % | Slice 2 (URLLC) packet loss ratio (URLLC SLA reliability probe). |
-| 10 | `nwdaf_load_embb` | `nwdaf_slice_load_level{snssai="01000001"}` | 5G Core / NWDAF | VM-3 5GC / UPF | % (0–100) | Slice load level per 3GPP TS 23.288 §6.3 (Nnwdaf API or UPF dynamic fallback). |
-| 11 | `nwdaf_load_urllc` | `nwdaf_slice_load_level{snssai="de00007b"}` | 5G Core / NWDAF | VM-3 5GC / UPF | % (0–100) | Slice load level per 3GPP TS 23.288 §6.3 (Nnwdaf API or UPF dynamic fallback). |
-| 12 | `upf_backlog_bytes_embb` | `upf_queue_backlog_bytes{snssai="01000001"}` | 5G Core UPF | VM-3 `oai-upf-slice1` | Bytes | Kernel egress qdisc buffer occupancy on Slice 1 UPF interface. |
-| 13 | `upf_backlog_bytes_urllc`| `upf_queue_backlog_bytes{snssai="de00007b"}` | 5G Core UPF | VM-3 `oai-upf-slice2` | Bytes | Kernel egress qdisc buffer occupancy on Slice 2 UPF interface. |
-| 14 | `upf_drops_embb` | `upf_packet_drops{snssai="01000001"}` | 5G Core UPF | VM-3 `oai-upf-slice1` | Drops / s | Instantaneous packet drop rate from UPF buffer overflow or TBF shaping. |
-| 15 | `upf_drops_urllc` | `upf_packet_drops{snssai="de00007b"}` | 5G Core UPF | VM-3 `oai-upf-slice2` | Drops / s | Instantaneous packet drop rate from UPF buffer overflow or TBF shaping. |
-| 16 | `ran_prb_cell1` | `ran_cell_prb_utilization{cell_id="1"}` | Split RAN L2 | VM-4 DU-1 (:4043) | % (0–100) | Cell-1 Physical Resource Block (PRB) allocation ratio $(NPRB / 106) \times 100\%$. |
-| 17 | `ran_prb_cell2` | `ran_cell_prb_utilization{cell_id="2"}` | Split RAN L2 | VM-4 DU-2 (:4044) | % (0–100) | Cell-2 Physical Resource Block (PRB) allocation ratio $(NPRB / 106) \times 100\%$. |
-| 18 | `ran_mcs_cell1` | `ran_cell_mcs{cell_id="1"}` | Split RAN L2 | VM-4 DU-1 (:4043) | Index (0–28) | Cell-1 Modulation & Coding Scheme (MCS) reflecting physical link adaptation. |
-| 19 | `ran_mcs_cell2` | `ran_cell_mcs{cell_id="2"}` | Split RAN L2 | VM-4 DU-2 (:4044) | Index (0–28) | Cell-2 Modulation & Coding Scheme (MCS) reflecting physical link adaptation. |
-| 20 | `ran_bler_cell1` | `ran_cell_bler{cell_id="1"}` | Split RAN L2 | VM-4 DU-1 (:4043) | Ratio (0.0–1.0) | Cell-1 UL-SCH MAC Block Error Rate (CRC failures ratio). |
-| 21 | `ran_bler_cell2` | `ran_cell_bler{cell_id="2"}` | Split RAN L2 | VM-4 DU-2 (:4044) | Ratio (0.0–1.0) | Cell-2 UL-SCH MAC Block Error Rate (CRC failures ratio). |
-| 22 | `ran_snr_cell1` | `ran_cell_snr_db{cell_id="1"}` | Split RAN L1/L2 | VM-4 DU-1 (:4043) | dB | Cell-1 Uplink Signal-to-Noise Ratio (SNR) measured at gNB receiver. |
-| 23 | `ran_snr_cell2` | `ran_cell_snr_db{cell_id="2"}` | Split RAN L1/L2 | VM-4 DU-2 (:4044) | dB | Cell-2 Uplink Signal-to-Noise Ratio (SNR) measured at gNB receiver. |
-| 24 | *(Prometheus Gauge)* | `ran_cell_rssi_dbm{cell_id="X"}` | Split RAN L1 | VM-4 DU-X | dBm | Received Signal Strength Indicator (RSSI) at gNB receiver. |
-| 25 | *(Prometheus Gauge)* | `ran_cell_ulsch_errors{cell_id="X"}` | Split RAN L2 | VM-4 DU-X | Counter | Cumulative MAC layer UL-SCH decoding errors count. |
-| 26 | `rapp_diagnosed_bottleneck`| `rapp_diagnosed_bottleneck` | RIC Intelligence | VM-1 / VM-2 RIC | Enum (0–3) | rApp sequential bottleneck diagnosis: `0=NORMAL`, `1=RAN`, `2=CORE`, `3=JOINT`. |
-| 27 | `rapp_confidence` | `rapp_confidence` | RIC Intelligence | VM-1 / VM-2 RIC | Score (0.0–1.0)| Probabilistic diagnostic confidence score emitted by the rApp. |
-| 28 | *(Prometheus Gauge)* | `a1_policy_threshold` | RIC Intelligence | VM-1 Non-RT RIC | ms | URLLC latency SLA threshold enforced via A1 Policy Type 20008. |
-| 29 | `event_scenario` | *(Dataset Label)* | Ground Truth | VM-6 Operator | String Enum | Ground-truth injected scenario ID (`S1`, `S2`, `S3`, `S6`, `S9`, etc.). |
-| 30 | `event_domain` | *(Dataset Label)* | Ground Truth | VM-6 Operator | String Enum | Target failure domain (`BASELINE`, `RAN`, `CORE`, `JOINT`). |
-| 31 | `event_component` | *(Dataset Label)* | Ground Truth | VM-6 Operator | String Enum | Target network component (`NONE`, `DU-1_Cell-1`, `UPF-1_Slice-1`, etc.). |
+| 1 | `timestamp_utc` | *(Row Metadata)* | Pipeline | Host Clock UTC | ISO-8601 | Microsecond-accurate UTC timestamp for cross-VM time alignment. |
+| 2 | `elapsed_sec` | *(Row Metadata)* | Pipeline | Monotonic Clock | Seconds | Monotonic float (`time.monotonic()`) with zero wall-clock drift. |
+| 3 | `run_id` | *(Row Metadata)* | Pipeline | Session Argument | String | Unique experiment identifier (e.g., `PILOT_TEST`, `RUN_01_TRAIN`). |
+| 4 | `scrape_ok` | *(Internal Logger)* | Pipeline | HTTP Scraper | Boolean (0/1) | Indicates whether the 1 Hz HTTP scrape to `:9100/metrics` succeeded. |
+| 5 | `scrape_latency_ms` | *(Internal Logger)* | Pipeline | HTTP Scraper | ms | Duration taken by the scraper to ingest Prometheus metrics. |
+| 6 | `e2e_slice1_tput_mbps` | `e2e_slice1_throughput_mbps` | UE Experience | VM-5 `ue1` ns | Mbps | **Sender-side offered load** reported by `iperf3 -u` client. Receiver goodput requires EXT-DN server telemetry. |
+| 7 | `e2e_slice1_jitter_ms` | `e2e_slice1_jitter_ms` | UE Experience | VM-5 `ue1` ns | ms | **Experimental UDP jitter**. In current CLI mode, represents inter-probe variance; server UDP jitter requires two-way socket parsing. |
+| 8 | `e2e_slice2_rtt_ms` | `e2e_slice2_latency_rtt_ms` | UE Experience | VM-5 `ue2` ns | ms | **Latest ICMP Canary RTT** to EXT-DN (`192.168.70.145`). Represents the most recent probe reply in the 1-second window. |
+| 9 | `e2e_slice2_loss_pct` | `e2e_slice2_packet_loss_pct` | UE Experience | VM-5 `ue2` ns | % | **1-Second Probe Loss Ratio**: Percentage of canary ping packets (10 probes/sec) unacknowledged during the sampling window. |
+| 10 | `nwdaf_load_embb` | `nwdaf_slice_load_level{snssai="01000001"}` | 5G Core / NWDAF | VM-3 UPF-1 / VM-6 | % (0–100) | **Research Interface Utilization Estimate** ($\min(100, \max(5, \frac{\text{Tx}}{25.0} \times 100))$). NOT certified 3GPP Nnwdaf analytics. |
+| 11 | `nwdaf_load_urllc` | `nwdaf_slice_load_level{snssai="de00007b"}` | 5G Core / NWDAF | VM-3 UPF-2 / VM-6 | % (0–100) | **Research Interface Utilization Estimate** ($\min(100, \max(5, \frac{\text{Tx}}{5.0} \times 100))$). NOT certified 3GPP Nnwdaf analytics. |
+| 12 | `upf_backlog_bytes_embb` | `upf_queue_backlog_bytes{snssai="01000001"}` | 5G Core UPF | VM-3 `oai-upf-slice1` | Bytes | **UPF Container Interface Egress Qdisc Backlog** on `eth0`. Measures queued bytes in kernel TC qdisc, not UPF internal rings. |
+| 13 | `upf_backlog_bytes_urllc`| `upf_queue_backlog_bytes{snssai="de00007b"}` | 5G Core UPF | VM-3 `oai-upf-slice2` | Bytes | **UPF Container Interface Egress Qdisc Backlog** on `eth0`. Measures queued bytes in kernel TC qdisc, not UPF internal rings. |
+| 14 | `upf_drops_embb` | `upf_packet_drops{snssai="01000001"}` | 5G Core UPF | VM-3 `oai-upf-slice1` | Drops / s | **UPF Egress Qdisc Packet Drop Rate** ($\Delta \text{drops} / \Delta t$) resulting from buffer saturation or TBF rate limiting. |
+| 15 | `upf_drops_urllc` | `upf_packet_drops{snssai="de00007b"}` | 5G Core UPF | VM-3 `oai-upf-slice2` | Drops / s | **UPF Egress Qdisc Packet Drop Rate** ($\Delta \text{drops} / \Delta t$) resulting from buffer saturation or TBF rate limiting. |
+| 16 | `ran_prb_cell1` | `ran_cell_prb_utilization{cell_id="1"}` | Split RAN L2 | VM-4 DU-1 (:4043) | % (0–100) | **Instantaneous MAC Slot PRB Allocation Ratio** ($(NPRB / 106) \times 100\%$) from latest DU log entry, not TS 38.314 time-integrated cell usage. |
+| 17 | `ran_prb_cell2` | `ran_cell_prb_utilization{cell_id="2"}` | Split RAN L2 | VM-4 DU-2 (:4044) | % (0–100) | **Instantaneous MAC Slot PRB Allocation Ratio** ($(NPRB / 106) \times 100\%$) from latest DU log entry, not TS 38.314 time-integrated cell usage. |
+| 18 | `ran_mcs_cell1` | `ran_cell_mcs{cell_id="1"}` | Split RAN L2 | VM-4 DU-1 (:4043) | Index (0–28) | Latest UL-SCH Modulation & Coding Scheme allocated to the active UE in Cell-1. `NaN` when unallocated. |
+| 19 | `ran_mcs_cell2` | `ran_cell_mcs{cell_id="2"}` | Split RAN L2 | VM-4 DU-2 (:4044) | Index (0–28) | Latest UL-SCH Modulation & Coding Scheme allocated to the active UE in Cell-2. `NaN` when unallocated. |
+| 20 | `ran_bler_cell1` | `ran_cell_bler{cell_id="1"}` | Split RAN L2 | VM-4 DU-1 (:4043) | Ratio (0.0–1.0) | Latest Block Error Rate on UL-SCH transport blocks in Cell-1. `NaN` when unallocated. |
+| 21 | `ran_bler_cell2` | `ran_cell_bler{cell_id="2"}` | Split RAN L2 | VM-4 DU-2 (:4044) | Ratio (0.0–1.0) | Latest Block Error Rate on UL-SCH transport blocks in Cell-2. `NaN` when unallocated. |
+| 22 | `ran_snr_cell1` | `ran_cell_snr_db{cell_id="1"}` | Split RAN L1/L2 | VM-4 DU-1 (:4043) | dB | Latest Uplink Signal-to-Noise Ratio (SNR) measured at gNB receiver for Cell-1. `NaN` when unallocated. |
+| 23 | `ran_snr_cell2` | `ran_cell_snr_db{cell_id="2"}` | Split RAN L1/L2 | VM-4 DU-2 (:4044) | dB | Latest Uplink Signal-to-Noise Ratio (SNR) measured at gNB receiver for Cell-2. `NaN` when unallocated. |
+| 24 | *(Prometheus Gauge)* | `ran_cell_rssi_dbm{cell_id="X"}` | Split RAN L1 | VM-4 DU-X | dBm | Received Signal Strength Indicator (RSSI) at gNB receiver. `NaN` when unallocated. |
+| 25 | *(Prometheus Gauge)* | `ran_cell_ulsch_errors{cell_id="X"}` | Split RAN L2 | VM-4 DU-X | Counter | Cumulative MAC layer UL-SCH CRC decode failures count. |
+| 26 | `rapp_diagnosed_bottleneck`| `rapp_diagnosed_bottleneck` | RIC Intelligence | VM-1 / VM-2 RIC | Enum (-1–3) | rApp diagnosis: `-1=UNINITIALIZED`, `0=NORMAL`, `1=RAN`, `2=CORE`, `3=JOINT`. |
+| 27 | `rapp_confidence` | `rapp_confidence` | RIC Intelligence | VM-1 / VM-2 RIC | Score (0.0–1.0)| Diagnostic model confidence score. Initialized to `0.0` until active model inference runs. |
+| 28 | *(Prometheus Gauge)* | `a1_policy_threshold` | RIC Intelligence | VM-1 Non-RT RIC | ms | URLLC latency SLA constraint communicated via A1 Policy Type 20008. |
+| 29 | `event_scenario` | *(Dataset Label)* | Ground Truth | VM-6 Operator | String Enum | Operator-injected scenario identifier (`S1`, `S2`, `S3`, `S6`, `S9`, `CLEAR`). |
+| 30 | `event_domain` | *(Dataset Label)* | Ground Truth | VM-6 Operator | String Enum | Intended target failure domain (`BASELINE`, `RAN`, `CORE`, `JOINT`). |
+| 31 | `event_component` | *(Dataset Label)* | Ground Truth | VM-6 Operator | String Enum | Intended target failure entity (`NONE`, `DU-1_Cell-1`, `UPF-1_Slice-1`, etc.). |
 
 ---
 
@@ -71,79 +75,71 @@ Telemetry is continuously harvested at a synchronized nominal frequency of **1.0
 
 ### Domain 1: End-to-End UE QoS Experience (VM-5 `oai-ue`)
 
-#### 1.1 Available Metrics
-1. **`e2e_slice1_tput_mbps`**: Actual UDP application goodput delivered from UE1 to the external data network (EXT-DN).
-2. **`e2e_slice1_jitter_ms`**: End-to-end packet delay variation / jitter on Slice 1.
-3. **`e2e_slice2_rtt_ms`**: Precision Round-Trip Time latency from UE2 to EXT-DN (`192.168.70.145`).
-4. **`e2e_slice2_loss_pct`**: Packet loss percentage on Slice 2 probe packets.
+#### 1.1 Architectural Context & Standards Notes
+* **Sender vs. Receiver Throughput (RFC 2544 / iperf3 Docs):**
+  In `iperf3 -u` (UDP client mode), the client log reports the **sender-side offered bitrate**. If packets are dropped downstream at the gNB or UPF, the client is unaware unless bidirectional control packets or receiver-side logs (`iperf3 -s` at EXT-DN) are captured. Consequently, `e2e_slice1_tput_mbps` represents offered load at the UE ingress.
+* **Canary Latency Sampling (RFC 2681):**
+  `e2e_slice2_rtt_ms` samples the latest ICMP echo reply from a continuous 100 ms canary probe stream directed at EXT-DN (`192.168.70.145`). 
 
 #### 1.2 Manual Shell Extraction Procedure (VM-5)
-Each UE is isolated inside its designated network namespace (`ue1` for eMBB and `ue2` for URLLC):
 ```bash
-# Test Slice 1 (eMBB) UDP throughput via iperf3 in the ue1 namespace:
+# Execute Slice 1 (eMBB) UDP offered load test inside the ue1 namespace:
 sudo ip netns exec ue1 iperf3 -c 192.168.70.145 -u -b 25M -t 5 -i 1
 
-# Test Slice 2 (URLLC) latency via ICMP Canary in the ue2 namespace:
-sudo ip netns exec ue2 ping -I oaitun_ue1 -c 4 -i 0.2 192.168.70.145
+# Execute Slice 2 (URLLC) ICMP canary probe inside the ue2 namespace:
+sudo ip netns exec ue2 ping -I oaitun_ue1 -c 10 -i 0.1 192.168.70.145
 ```
 
-#### 1.3 Automated Extraction via Script
+#### 1.3 Automated Extraction Implementation
 Executed by [`scripts/trafgen.sh`](file:///d:/Idhul/Program/Thesis/scripts/trafgen.sh):
 ```bash
-# Launch simultaneous multi-slice traffic benchmark (30s duration, 25 Mbps eMBB load):
 cd /opt/oran/ue/scripts
 sudo ./trafgen.sh start 30 25
 ```
-*Telemetry Push Mechanism:* In the background, `trafgen.sh` parses live log outputs and executes asynchronous HTTP POSTs to the VM-6 collector:
-```bash
-curl -s -X POST -H "Content-Type: application/json" \
-  -d '{"slice": 1, "throughput_mbps": 23.4, "jitter_ms": 1.25}' \
-  http://10.102.0.67:9100/report
+*Telemetry Push Payload to `:9100/report`:*
+```json
+{
+  "slice": 1,
+  "throughput_mbps": 24.8,
+  "jitter_ms": 0.0
+}
+```
+```json
+{
+  "slice": 2,
+  "rtt_ms": 14.2,
+  "packet_loss_pct": 0.0
+}
 ```
 
 ---
 
 ### Domain 2: Split-RAN Radio & MAC Layer (VM-4 `oai-ran`)
 
-#### 2.1 Available Metrics
-1. **`ran_cell_prb_utilization`**: MAC scheduler Physical Resource Block utilization percentage:
-   $$\text{PRB Utilization (\%)} = \frac{\text{NPRB}}{106.0} \times 100\%$$
-   *(106 PRB represents the full channel capacity for 40 MHz bandwidth at 30 kHz Subcarrier Spacing).*
-2. **`ran_cell_mcs`**: Active Modulation and Coding Scheme index (0 to 28) allocated by the scheduler per UE.
-3. **`ran_cell_bler`**: Block Error Rate (0.00000 to 1.00000) on the UL-SCH physical transport block.
-4. **`ran_cell_snr_db`**: Signal-to-Noise Ratio (in dB) measured at the gNB antenna receiver.
-5. **`ran_cell_rssi_dbm`**: Received Signal Strength Indicator (in dBm).
-6. **`ran_cell_ulsch_errors`**: Cumulative count of failed MAC layer CRC decodes.
+#### 2.1 Architectural Context & Standards Notes (3GPP TS 38.314 §4.2.1.6)
+* **Standard Definition:** TS 38.314 §4.2.1.6 defines cell PRB utilization as the total number of resource blocks and symbols allocated divided by total available resource block symbols over an observation period $T$.
+* **Implementation Scope:** In `ran_adapter.py`, the script parses the most recent MAC scheduler line from `du1.log` / `du2.log` printed by OAI gNB DU. The metric represents the **instantaneous MAC slot allocation ratio** allocated to the active UE:
+  $$\text{PRB Ratio} = \frac{\text{NPRB}}{106.0} \times 100\%$$
+* **Radio Quality Diagnostics (3GPP TS 23.288 §6.8.2):**
+  When traffic is absent or no matching UE scheduling line is found, the parser emits `NaN` (or `valid: false`), avoiding synthetic "healthy" fallbacks (e.g., hardcoded 25 dB) that would corrupt statistical audits.
 
 #### 2.2 Manual Shell Extraction Procedure (VM-4)
-Both OAI DU instances (`du1` on port `:4043` and `du2` on port `:4044`) continuously print scheduler statistics to their respective log files:
 ```bash
-# Inspect latest radio link scheduler output on Cell-1 (DU-1):
+# Inspect the latest MAC scheduler lines on Cell-1 (DU-1, port :4043):
 grep "NPRB" /opt/oran/ran/du1.log | tail -n 5
 
-# Verbatim OAI DU scheduler format:
+# Verbatim OAI DU scheduler log format:
 # UE 82c3: ulsch_rounds 3455040/0/0/0, ulsch_errors 0, ulsch_DTX 0, BLER 0.00000 MCS (0) 14 (Qm 4 deltaMCS 0) NPRB 51 SNR 25.7 (+2.7) RSSI -42.0 CCE fail 0
 ```
 
-#### 2.3 Automated Extraction via Script
-Executed by the host daemon [`scripts/ran_adapter.py`](file:///d:/Idhul/Program/Thesis/scripts/ran_adapter.py):
-* Continuously tails `du1.log` and `du2.log` via standard-library subprocess regex matching:
-```python
-RADIO_STATS_PATTERN = re.compile(
-    r'ulsch_errors\s+(?P<errors>\d+).*?'
-    r'BLER\s+(?P<bler>[0-9.]+).*?'
-    r'MCS\s*(?:\([^)]*\))?\s*(?P<mcs>\d+).*?'
-    r'NPRB\s+(?P<nprb>\d+).*?'
-    r'SNR\s+(?P<snr>[-0-9.]+).*?'
-    r'RSSI\s+(?P<rssi>[-0-9.]+)'
-)
-```
-*Execution command on VM-4:*
+#### 2.3 Automated Extraction Implementation
+Executed by host daemon [`scripts/ran_adapter.py`](file:///d:/Idhul/Program/Thesis/scripts/ran_adapter.py):
+* Execution:
 ```bash
 cd /opt/oran/ran/scripts
 python3 ran_adapter.py > ran_adapter.log 2>&1 &
 ```
-*Report payload sent to `:9100/report`:*
+*Telemetry Payload to `:9100/report`:*
 ```json
 {
   "ran_cell_prb_utilization": {"1": 48.72, "2": 4.72},
@@ -158,46 +154,25 @@ python3 ran_adapter.py > ran_adapter.log 2>&1 &
 
 ### Domain 3: 5G Core User-Plane & NWDAF (VM-3 `oai-core`)
 
-#### 3.1 Available Metrics
-1. **`upf_interface_tx_mbps` / `rx_mbps`**: Layer-3 IP interface throughput on UPF instances per slice.
-2. **`upf_bytes_sent`**: Cumulative egress byte counter (compliant with 3GPP TS 28.552).
-3. **`upf_queue_backlog_bytes`**: Kernel egress qdisc buffer occupancy on the UPF interface (in bytes).
-4. **`upf_packet_drops`**: Packet drop rate resulting from queue buffer saturation or TBF rate-limiting (drops/s).
-5. **`nwdaf_slice_load_level`**: Slice resource load index (0–100%) per 3GPP TS 23.288 §6.3.
+#### 3.1 Architectural Context & Standards Notes (3GPP TS 28.552 / TS 23.288)
+* **Qdisc Backlog Scope:** `upf_backlog_bytes` captures the Linux kernel traffic control (`tc`) egress queue depth on the container network interface (`eth0`). It specifically measures the bytes waiting inside the egress qdisc (e.g., TBF or pfifo_fast) before delivery to the bridge, not internal C-based OAI UPF ring buffers.
+* **Drops Decoupling:** In compliance with PM principles (TS 32.401), drops are reported as instantaneous rates (`drops_pps`) and cumulative counters (`drops_total`), preventing unit confusion.
+* **NWDAF Load Level Status:** As documented in [`docs/vm/vm3-oai-5gc.md`](file:///d:/Idhul/Program/Thesis/docs/vm/vm3-oai-5gc.md#L529-L565), OAI NWDAF v2.1.0 does not implement user-plane performance analytics. The collector’s `nwdaf_slice_load_level` is an **empirical research proxy** based on interface throughput against provisioned slice capacity (25 Mbps eMBB, 5 Mbps URLLC).
 
 #### 3.2 Manual Shell Extraction Procedure (VM-3)
 ```bash
-# 1. Read interface packet and byte counters inside the Slice 1 UPF container:
+# 1. Inspect UPF Slice 1 Linux interface byte counters:
 docker exec oai-upf-slice1 cat /proc/net/dev | grep eth0
 
-# 2. Inspect root qdisc queue discipline, buffer backlog, and drop counters:
+# 2. Inspect root qdisc queue discipline, buffer occupancy, and drop counters:
 docker exec oai-upf-slice1 tc -j -s qdisc show dev eth0
 ```
-*Sample JSON output from `tc -j -s qdisc show`:*
-```json
-[
-  {
-    "kind": "tbf",
-    "handle": "1:",
-    "root": true,
-    "bytes": 2854910,
-    "packets": 1952,
-    "drops": 145,
-    "backlog": 124500,
-    "qlen": 83
-  }
-]
-```
 
-#### 3.3 Automated Extraction via Script
-Executed by the host daemon [`scripts/core_adapter.py`](file:///d:/Idhul/Program/Thesis/scripts/core_adapter.py) v9:
-* Samples counters within high-precision monotonic timing brackets.
-* Computes rates via differential observation:
-  $$\Delta \text{rate} = \frac{\text{counter}_t - \text{counter}_{t-1}}{\Delta t_{\text{monotonic}}}$$
+#### 3.3 Automated Extraction Implementation
+Executed by [`scripts/core_adapter.py`](file:///d:/Idhul/Program/Thesis/scripts/core_adapter.py) v9:
+* Samples interface counters with monotonic timestamp bracketing.
 * Archives locally to `./upf-telemetry/<RUN_ID>/telemetry.jsonl` and `./telemetry.csv`.
 * Asynchronously delivers reports to `http://10.102.0.67:9100/report`.
-
-*Execution command on VM-3:*
 ```bash
 cd /opt/oran/5gc/scripts
 python3 core_adapter.py --run-id PILOT_TEST > core_adapter.log 2>&1 &
@@ -207,26 +182,14 @@ python3 core_adapter.py --run-id PILOT_TEST > core_adapter.log 2>&1 &
 
 ### Domain 4: O-RAN RIC Intelligence & Control Loop (VM-1 / VM-2)
 
-#### 4.1 Available Metrics
-1. **`rapp_diagnosed_bottleneck`**: Classification state generated by the Non-RT RIC rApp sequential diagnosis engine:
-   * `0`: **NORMAL** (Healthy network state, SLA fully met).
-   * `1`: **RAN Bottleneck** (Radio access saturation or channel degradation).
-   * `2`: **CORE Bottleneck** (UPF buffer queue buildup or shaping drops).
-   * `3`: **JOINT Bottleneck** (Simultaneous congestion across both RAN and Core).
-2. **`rapp_confidence`**: Model classification probability score (0.00 to 1.00).
-3. **`a1_policy_threshold`**: URLLC latency SLA constraint communicated via A1 Policy Type 20008 (ms).
+#### 4.1 Architectural Context
+* **Inference State Tracking:** In training and data generation runs, `rapp_diagnosed_bottleneck` is initialized to `-1` (`UNINITIALIZED`) with `confidence = 0.0`. When an active rApp model executes inference in closed-loop evaluation runs, it publishes classifications `0` (NORMAL), `1` (RAN), `2` (CORE), or `3` (JOINT).
+* **A1 Policy Constraints (O-RAN.WG2.A1AP):** The Non-RT RIC dispatches A1 Policy Type 20008 (`urllc_sla_latency_threshold_ms: 20.0`) to constrain Near-RT RIC traffic steering.
 
-#### 4.2 Manual Query Procedure (VM-1 / VM-2)
+#### 4.2 Manual Query Procedure (VM-1)
 ```bash
-# Query active A1 policies from Non-RT RIC (VM-1):
+# Query active A1 policies on Non-RT RIC:
 curl -s http://10.102.0.166:8080/A1-P/v2/policytypes/20008/policies
-
-# Sample A1 Policy response:
-# {
-#   "policy_ratio_id": "slice-steering-policy-01",
-#   "urllc_sla_latency_threshold_ms": 20.0,
-#   "target_cell_id": "Cell-1"
-# }
 ```
 
 ---
@@ -234,61 +197,41 @@ curl -s http://10.102.0.166:8080/A1-P/v2/policytypes/20008/policies
 ### Domain 5: Telemetry Aggregation, Exporter & Dataset Logger (VM-6 `monitor`)
 
 #### 5.1 Telemetry Aggregator ([`scripts/telemetry_collector.py`](file:///d:/Idhul/Program/Thesis/scripts/telemetry_collector.py))
-Runs on port `:9100`:
-* Ingestion Endpoint: `POST http://10.102.0.67:9100/report` (Ingests JSON reports from VM-3, VM-4, and VM-5).
-* Exporter Endpoint: `GET http://10.102.0.67:9100/metrics` (Exposes standardized Prometheus metrics).
-
-*Live Verification Commands on VM-6:*
-```bash
-# Verify live radio link metrics:
-curl -s http://127.0.0.1:9100/metrics | grep ran_cell
-
-# Verify live Core UPF and NWDAF metrics:
-curl -s http://127.0.0.1:9100/metrics | grep -E "upf_|nwdaf_"
-
-# Verify live End-to-End UE QoS metrics:
-curl -s http://127.0.0.1:9100/metrics | grep e2e_slice
-```
+* `POST /report`: Ingests JSON reports from VM-3, VM-4, and VM-5.
+* `GET /metrics`: Exposes standardized Prometheus format on port `:9100`.
 
 #### 5.2 High-Precision Dataset Logger ([`scripts/record_dual_stream.py`](file:///d:/Idhul/Program/Thesis/scripts/record_dual_stream.py))
-* Scrapes `http://127.0.0.1:9100/metrics` at an exact 1.000 Hz interval using `time.monotonic()` (zero drift).
-* Synchronizes active fault annotations from `/opt/oran/monitoring/data/active_event.json`.
-* Flushes records instantaneously to `/opt/oran/monitoring/data/telemetry_raw_<RUN_ID>_<PID>.csv`.
-
-*Execution Command:*
-```bash
-cd /opt/oran/monitoring/scripts
-python3 record_dual_stream.py RUN_01_TRAIN
-```
+* Scrapes `:9100/metrics` at an exact 1.000 Hz interval using zero-drift monotonic timing.
+* Flushes synchronized rows directly to `/opt/oran/monitoring/data/telemetry_raw_<RUN_ID>_<PID>.csv`.
 
 #### 5.3 Ground-Truth Event Logger ([`scripts/log_event.py`](file:///d:/Idhul/Program/Thesis/scripts/log_event.py))
-* Atomically logs ground-truth labels during live fault injection runs:
-```bash
-python3 log_event.py S1 "Normal Light Load Baseline"
-python3 log_event.py S3 "Inject RAN Overload 40 Mbps"
-python3 log_event.py S6 "Inject Core TBF Rate Limit 12 Mbps"
-python3 log_event.py CLEAR "Clear All Injections"
-```
+* Records intended operator fault injection events (`S1`–`S10`) to `active_event.json` and `experiment_events_<RUN_ID>.csv`.
 
 #### 5.4 Automated Statistical Auditor ([`scripts/analyze_dataset.py`](file:///d:/Idhul/Program/Thesis/scripts/analyze_dataset.py))
 * Audits the latest recorded CSV dataset (sorted by modification time `mtime`):
 ```bash
+cd /opt/oran/monitoring/scripts
 python3 analyze_dataset.py
 ```
 
 ---
 
-## 4. Cross-Domain Bottleneck Signature Matrix
+## 4. Cross-Domain Bottleneck Diagnostic Signature Matrix
 
-The following matrix defines the physical signatures distinguishing each bottleneck class based on the extracted metrics:
+> [!NOTE]
+> **Corrected Diagnostic Decision Logic:**
+> 1. **RAN Overload:** Characterized by sustained PRB saturation ($\approx 100\%$) and offered load exceeding radio capacity (28.4 Mbps), resulting in throughput plateauing. Under clean RF conditions, MCS remains high and BLER remains near zero; depressed MCS and elevated BLER specifically indicate radio channel degradation or interference.
+> 2. **Core Bottleneck:** Characterized by sustained UPF egress buffer buildup (`upf_backlog_bytes > 0`) and positive queue packet drops on the affected slice (Slice 1). PRB on the RAN does not need to be low; it simply matches whatever traffic the throttled UPF can egress.
+> 3. **Joint Bottleneck:** Confirmed physical bottleneck signatures on **both** RAN (sustained PRB saturation) **and** Core (sustained UPF buffer backlog and packet drops) concurrently.
+> 4. **Normal Baseline:** Delivered throughput matches offered load, UPF buffer backlog is zero, packet drops are zero, and URLLC latency satisfies SLA constraints ($< 20\text{ ms}$).
 
-| Network State | Class Label | PRB C1 (`ran_prb`) | Radio MCS (`ran_mcs`) | Radio BLER (`ran_bler`) | UPF Buffer (`upf_backlog`) | UPF Drops (`upf_drops`) | URLLC RTT (`e2e_rtt`) |
-|---|---|---|---|---|---|---|---|
-| **Normal Light** (`S1`) | `NORMAL` (0) | $\approx 48\%$ | High ($\ge 14$) | $\approx 0.0000$ | **`0 B`** | **`0`** | $< 15\text{ ms}$ (Compliant) |
-| **Normal High** (`S2`) | `NORMAL` (0) | $\approx 67\%$ | High ($\ge 14$) | $\approx 0.0000$ | **`0 B`** | **`0`** | $\approx 20\text{ ms}$ (Near SLA boundary) |
-| **RAN Overload** (`S3`) | `RAN` (1) | **Saturated ($\approx 100\%$)** | Depressed | Positive / Errors | **`0 B`** | **`0`** | $> 25\text{ ms}$ (SLA Violated) |
-| **Core TBF Congestion** (`S6`) | `CORE` (2) | Low ($< 25\%$) | Normal | $\approx 0.0000$ | **Elevated ($> 100\text{ KB}$)** | **Positive ($> 0$)** | $> 25\text{ ms}$ (SLA Violated) |
-| **Joint Overload** (`S9`) | `JOINT` (3) | **Saturated ($\approx 100\%$)** | Depressed | Positive | **Elevated ($> 100\text{ KB}$)** | **Positive ($> 0$)** | $> 35\text{ ms}$ (Critical SLA Violation) |
+| Network State | Class Label | PRB C1 (`ran_prb`) | Radio MCS (`ran_mcs`) | Radio BLER (`ran_bler`) | UPF Buffer (`upf_backlog`) | UPF Drops (`upf_drops`) | URLLC RTT (`e2e_rtt`) | Primary Bottleneck Proof |
+|---|---|---|---|---|---|---|---|---|
+| **Normal Light** (`S1`) | `NORMAL` (0) | $\approx 48\%$ | Healthy ($\ge 14$) | $\approx 0.0000$ | **`0 B`** | **`0`** | $< 15\text{ ms}$ (Compliant) | Offload matches demand, zero queuing. |
+| **Normal High** (`S2`) | `NORMAL` (0) | $\approx 67\%$ | Healthy ($\ge 14$) | $\approx 0.0000$ | **`0 B`** | **`0`** | $\approx 20\text{ ms}$ (Near SLA boundary) | High goodput without queuing or loss. |
+| **RAN Overload** (`S3`) | `RAN` (1) | **Saturated ($\approx 100\%$)** | High (if clean RF) / Depressed (if degraded) | Low (if clean RF) / Elevated (if degraded) | **`0 B`** | **`0`** | $> 25\text{ ms}$ (SLA Violated) | Radio scheduler capacity exhaustion; Core buffer empty. |
+| **Core TBF Congestion** (`S6`) | `CORE` (2) | Dependent on UPF egress rate | Normal | $\approx 0.0000$ | **Elevated ($> 100\text{ KB}$)** | **Positive ($> 0$)** | Variable (Cross-slice isolation observation) | UPF egress qdisc buffer exhaustion and packet drops. |
+| **Joint Overload** (`S9`) | `JOINT` (3) | **Saturated ($\approx 100\%$)** | Variable | Variable | **Elevated ($> 100\text{ KB}$)** | **Positive ($> 0$)** | $> 35\text{ ms}$ (Critical SLA Violation) | Simultaneous saturation of radio PRBs and Core UPF buffers. |
 
 ---
 

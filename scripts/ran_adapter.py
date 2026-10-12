@@ -35,10 +35,10 @@ def extract_latest_radio_stats(log_path):
     stats = {
         "nprb": 5,
         "prb_pct": round((5.0 / MAX_PRB) * 100.0, 2),
-        "mcs": 0,
-        "bler": 0.0,
-        "snr_db": 25.0,
-        "rssi_dbm": -42.0,
+        "mcs": None,
+        "bler": None,
+        "snr_db": None,
+        "rssi_dbm": None,
         "ulsch_errors": 0,
         "valid": False
     }
@@ -111,7 +111,11 @@ def main():
             status_str = "SUCCESS" if ok else "FAILED"
             t_str = time.strftime("%H:%M:%S")
 
-            print(f"{t_str:<8} | {s1['prb_pct']:>7.1f}% | {s1['mcs']:>6} | {s1['bler']:>8.4f} | {s1['snr_db']:>5.1f}dB | {s2['prb_pct']:>7.1f}% | {status_str}", flush=True)
+            mcs_str = f"{s1['mcs']:>6}" if s1['mcs'] is not None else f"{'N/A':>6}"
+            bler_str = f"{s1['bler']:>8.4f}" if s1['bler'] is not None else f"{'N/A':>8}"
+            snr_str = f"{s1['snr_db']:>5.1f}dB" if s1['snr_db'] is not None else f"{'N/A':>7}"
+
+            print(f"{t_str:<8} | {s1['prb_pct']:>7.1f}% | {mcs_str} | {bler_str} | {snr_str} | {s2['prb_pct']:>7.1f}% | {status_str}", flush=True)
         except Exception as e:
             print(f"Error loop: {e}", flush=True)
 

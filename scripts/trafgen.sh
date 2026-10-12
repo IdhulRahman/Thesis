@@ -97,10 +97,11 @@ case "$ACTION" in
     done < "$STATE_FILE"
 
     echo "[TrafGen] Durasi: ${DURATION}s | Target: eMBB ${EMBB_RATE}M, URLLC 100ms | TSDB: 10.102.0.67"
-    printf "%-5s | %-17s | %-15s | %-10s | %-6s | %s\n" "Sec" "eMBB Throughput" "URLLC Latency" "Jitter" "Loss" "SLA (<20ms)"
-    echo "------+-------------------+-----------------+------------+--------+-------------"
+    printf "%-5s | %-17s | %-15s | %-12s | %-7s | %s\n" "Sec" "eMBB (Sender)" "URLLC Latency" "URLLC Jitter" "Loss %" "SLA (<20ms)"
+    echo "------+-------------------+-----------------+--------------+---------+-------------"
 
     prev_rtt="0.0"
+    prev_ping_count=0
     for ((sec=1; sec<=DURATION; sec++)); do
       sleep 1
 
@@ -112,9 +113,23 @@ case "$ACTION" in
 
       rtt="0.0"
       jitter="0.00"
+      loss_pct="0.0"
       if [[ -n "$PING_LOG" && -f "$PING_LOG" ]]; then
-        rtt=$(tail -n 5 "$PING_LOG" 2>/dev/null | grep -oP '(?<=time=)\d+(\.\d+)?' | tail -n 1 || echo "0.0")
+        rtt=$(tail -n 15 "$PING_LOG" 2>/dev/null | grep -oP '(?<=time=)\d+(\.\d+)?' | tail -n 1 || echo "0.0")
         [[ -z "$rtt" ]] && rtt="0.0"
+
+        # Dynamically measure probe packet loss within the 1-second interval (~10 probes expected)
+        cur_ping_count=$(grep -c 'time=' "$PING_LOG" 2>/dev/null || echo 0)
+        replies=$(( cur_ping_count - prev_ping_count ))
+        prev_ping_count=$cur_ping_count
+        if (( replies < 10 && replies >= 0 )); then
+          loss_pct=$(echo "scale=1; (10 - $replies) * 10.0" | bc -l 2>/dev/null || echo "0.0")
+        else
+          loss_pct="0.0"
+        fi
+        if [[ "$rtt" == "0.0" ]]; then
+          loss_pct="100.0"
+        fi
 
         if (( $(echo "$prev_rtt > 0 && $rtt > 0" | bc -l 2>/dev/null || echo 0) )); then
           jitter=$(echo "scale=2; sqrt(($rtt - $prev_rtt)^2)" | bc -l 2>/dev/null || echo "0.00")
@@ -132,10 +147,10 @@ case "$ACTION" in
       curl -s -m 1 -X POST -H "Content-Type: application/json" \
         -d "{\"slice\": 1, \"throughput_mbps\": $tput}" "$MONITOR_URL" >/dev/null 2>&1 &
       curl -s -m 1 -X POST -H "Content-Type: application/json" \
-        -d "{\"slice\": 2, \"rtt_ms\": $rtt, \"packet_loss_pct\": 0.0}" "$MONITOR_URL" >/dev/null 2>&1 &
+        -d "{\"slice\": 2, \"rtt_ms\": $rtt, \"packet_loss_pct\": $loss_pct}" "$MONITOR_URL" >/dev/null 2>&1 &
 
-      printf "%4ds | %-17s | %-15s | %-10s | %-6s | %s\n" \
-        "$sec" "${tput} Mbps" "${rtt} ms" "${jitter} ms" "0%" "$sla"
+      printf "%4ds | %-17s | %-15s | %-12s | %-7s | %s\n" \
+        "$sec" "${tput} Mbps" "${rtt} ms" "${jitter} ms" "${loss_pct}%" "$sla"
     done
 
     echo "------+-------------------+-----------------+------------+--------+-------------"

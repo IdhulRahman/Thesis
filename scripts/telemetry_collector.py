@@ -9,6 +9,7 @@ exposing Prometheus metrics on http://10.102.0.67:9100/metrics and ingesting on 
 
 import http.server
 import json
+import math
 import threading
 import time
 import urllib.request
@@ -49,20 +50,20 @@ metrics_store = {
         "2": 10.0            # Cell-2 (DU-2 :4044)
     },
     "ran_cell_mcs": {
-        "1": 0.0,
-        "2": 0.0
+        "1": float("nan"),
+        "2": float("nan")
     },
     "ran_cell_bler": {
-        "1": 0.0,
-        "2": 0.0
+        "1": float("nan"),
+        "2": float("nan")
     },
     "ran_cell_snr_db": {
-        "1": 25.0,
-        "2": 25.0
+        "1": float("nan"),
+        "2": float("nan")
     },
     "ran_cell_rssi_dbm": {
-        "1": -42.0,
-        "2": -42.0
+        "1": float("nan"),
+        "2": float("nan")
     },
     "ran_cell_ulsch_errors": {
         "1": 0.0,
@@ -70,8 +71,8 @@ metrics_store = {
     },
 
     # Domain 3: RIC Intelligence (VM-1 / VM-2)
-    "rapp_diagnosed_bottleneck": 0,    # 0: NORMAL, 1: RAN, 2: CORE, 3: JOINT
-    "rapp_confidence": 1.0,
+    "rapp_diagnosed_bottleneck": -1,   # -1: UNINITIALIZED, 0: NORMAL, 1: RAN, 2: CORE, 3: JOINT
+    "rapp_confidence": 0.0,
     "a1_policy_threshold": 20.0        # URLLC SLA latency threshold (ms)
 }
 
@@ -139,22 +140,26 @@ def format_prometheus_metrics():
         lines.append("# HELP ran_cell_mcs RAN Modulation and Coding Scheme (MCS)")
         lines.append("# TYPE ran_cell_mcs gauge")
         for cell, val in metrics_store["ran_cell_mcs"].items():
-            lines.append(f'ran_cell_mcs{{cell_id="{cell}"}} {val:.1f}')
+            val_str = f"{val:.1f}" if (val is not None and not math.isnan(val)) else "NaN"
+            lines.append(f'ran_cell_mcs{{cell_id="{cell}"}} {val_str}')
 
         lines.append("# HELP ran_cell_bler RAN Block Error Rate (BLER)")
         lines.append("# TYPE ran_cell_bler gauge")
         for cell, val in metrics_store["ran_cell_bler"].items():
-            lines.append(f'ran_cell_bler{{cell_id="{cell}"}} {val:.4f}')
+            val_str = f"{val:.4f}" if (val is not None and not math.isnan(val)) else "NaN"
+            lines.append(f'ran_cell_bler{{cell_id="{cell}"}} {val_str}')
 
         lines.append("# HELP ran_cell_snr_db RAN Signal to Noise Ratio in dB")
         lines.append("# TYPE ran_cell_snr_db gauge")
         for cell, val in metrics_store["ran_cell_snr_db"].items():
-            lines.append(f'ran_cell_snr_db{{cell_id="{cell}"}} {val:.2f}')
+            val_str = f"{val:.2f}" if (val is not None and not math.isnan(val)) else "NaN"
+            lines.append(f'ran_cell_snr_db{{cell_id="{cell}"}} {val_str}')
 
         lines.append("# HELP ran_cell_rssi_dbm RAN Received Signal Strength Indicator in dBm")
         lines.append("# TYPE ran_cell_rssi_dbm gauge")
         for cell, val in metrics_store["ran_cell_rssi_dbm"].items():
-            lines.append(f'ran_cell_rssi_dbm{{cell_id="{cell}"}} {val:.2f}')
+            val_str = f"{val:.2f}" if (val is not None and not math.isnan(val)) else "NaN"
+            lines.append(f'ran_cell_rssi_dbm{{cell_id="{cell}"}} {val_str}')
 
         lines.append("# HELP ran_cell_ulsch_errors Cumulative MAC layer ULSCH transmission errors")
         lines.append("# TYPE ran_cell_ulsch_errors gauge")
@@ -241,14 +246,10 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
                         for cell, stats in payload["ran_cell_radio_stats"].items():
                             cid = str(cell)
                             if isinstance(stats, dict):
-                                if "mcs" in stats and stats["mcs"] is not None:
-                                    metrics_store["ran_cell_mcs"][cid] = float(stats["mcs"])
-                                if "bler" in stats and stats["bler"] is not None:
-                                    metrics_store["ran_cell_bler"][cid] = float(stats["bler"])
-                                if "snr_db" in stats and stats["snr_db"] is not None:
-                                    metrics_store["ran_cell_snr_db"][cid] = float(stats["snr_db"])
-                                if "rssi_dbm" in stats and stats["rssi_dbm"] is not None:
-                                    metrics_store["ran_cell_rssi_dbm"][cid] = float(stats["rssi_dbm"])
+                                for k, m_dict in (("mcs", "ran_cell_mcs"), ("bler", "ran_cell_bler"),
+                                                  ("snr_db", "ran_cell_snr_db"), ("rssi_dbm", "ran_cell_rssi_dbm")):
+                                    val = stats.get(k)
+                                    metrics_store[m_dict][cid] = float(val) if val is not None else float("nan")
                                 if "ulsch_errors" in stats and stats["ulsch_errors"] is not None:
                                     metrics_store["ran_cell_ulsch_errors"][cid] = float(stats["ulsch_errors"])
 
