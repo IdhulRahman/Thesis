@@ -27,18 +27,18 @@ All components are classified into four formal operational statuses:
 | **VM-2** | `10.102.0.66` | A1 Mediator & NGINX Reverse-Proxy | A1 Mediator `3.2.2`, Nginx `:10001` | A1 protocol normalization & RMR routing | **TERUJI** | Passes `/a1-p/healthcheck` |
 | **VM-2** | `10.102.0.66` | Python xApp Runner (`python_xapp_runner`) | `i-release` (container IP `10.0.2.20`) | Hosts Python xApps (RMR `:4560`) | **BERJALAN** | Container healthy, `ricxappframe` OK |
 | **VM-2** | `10.102.0.66` | Traffic Steering xApp (`a1_policy_xapp.py`) | Python xApp baseline | Handles policy 20008, prepares E2SM-RC actions | **TERUJI** | A1 policy CREATE/GET lifecycle passed |
-| **VM-3** | `10.102.0.164` | OAI 5G Core Network Functions | OAI 5GC v2.0.0 / v1.5.0 Docker Compose | 5GC Control Plane (NRF, UDR, UDM, AUSF, AMF, SMF) | **BERJALAN** | [`docs/vm/vm3-oai-5gc.md`](file:///d:/Idhul/Program/Thesis/docs/vm/vm3-oai-5gc.md) (Docker Compose UP, AMF N2 `:38412` active) |
+| **VM-3** | `10.102.0.164` | OAI 5G Core Network Functions | OAI 5GC Federation `v2.1.0` (pinned Compose) | 5GC Control Plane (NRF, UDR, UDM, AUSF, AMF, SMF) | **BERJALAN** | [`docs/vm/vm3-oai-5gc.md`](file:///d:/Idhul/Program/Thesis/docs/vm/vm3-oai-5gc.md) (Docker Compose UP, AMF N2 `:38412` active) |
 | **VM-3** | `10.102.0.164` | Dedicated UPF Slice 1 (`oai-upf-slice1`) | `oai-upf-vpp` / `spgwu-tiny` | User-Plane Anchor for eMBB (`01000001`, `12.1.1.0/24`) | **TERUJI** | Egress traffic routed, N3/N6 active |
-| **VM-3** | `10.102.0.164` | Dedicated UPF Slice 2 (`oai-upf-slice2`) | `oai-upf-vpp` / `spgwu-tiny` | User-Plane Anchor for URLLC (`de00007b`, `12.2.1.0/24`) | **TERUJI** | Egress traffic routed, N3/N6 active |
+| **VM-3** | `10.102.0.164` | Dedicated UPF Slice 2 (`oai-upf-slice2`) | `oai-upf-vpp` / `spgwu-tiny` | User-Plane Anchor for URLLC (`de00007b`, `12.1.2.0/24`) | **TERUJI** | Egress traffic routed, N3/N6 active |
 | **VM-3** | `10.102.0.164` | External Data Network (`oai-ext-dn`) | Container IP `192.168.70.145` | iperf3 server `:5201` & ICMP ping target | **TERUJI** | Target reachable by UE1 & UE2 |
 | **VM-3** | `10.102.0.164` | Core Telemetry Adapter (`core_adapter.py`) | Host Python daemon v9 | Scrapes UPF Linux kernel qdisc & pushes to VM-6 | **BERJALAN** | Log: sampling at 1 Hz, HTTP push `:9100/report` |
 | **VM-3** | `10.102.0.164` | OAI NWDAF Container (`oai-nwdaf`) | 3GPP Rel-17 Nnwdaf REST API (`:8080`) | Slice load analytics provider | **DIRENCANAKAN** | Bypassed; physical UPF telemetry measured directly via `core_adapter.py` v9 |
 | **VM-4** | `10.102.0.167` | OAI gNB CU (`cu_gnb.conf`) | OAI 2024.w39 `nr-softmodem` | CU-CP (RRC) & CU-UP (PDCP/SDAP), E2 Agent to VM-2 | **TERUJI** | [`docs/vm/vm4-oai-ran.md`](file:///d:/Idhul/Program/Thesis/docs/vm/vm4-oai-ran.md) (E2 Agent connected to `:36421`) |
-| **VM-4** | `10.102.0.167` | OAI gNB DU-1 (`du_gnb1.conf`, Cell-1) | OAI 2024.w39 `nr-softmodem --rfsim` | RLC/MAC/PHY DU for Cell-1 (TCP server `:4043`) | **TERUJI** | Serving UE1 & UE2 via RFsimulator |
-| **VM-4** | `10.102.0.167` | OAI gNB DU-2 (`du_gnb2.conf`, Cell-2) | OAI 2024.w39 `nr-softmodem --rfsim` | RLC/MAC/PHY DU for Cell-2 (TCP server `:4044`) | **BERJALAN** | Active standby target cell for traffic steering |
+| **VM-4** | `10.102.0.167` | OAI gNB DU-1 (`du_gnb1.conf`, Cell-1) | OAI 2024.w39 `nr-softmodem --rfsim` | RLC/MAC/PHY DU for Cell-1 (TCP server `:4043`) | **TERUJI** | Primary serving cell for UE1 (and co-located contention cell for UE2) |
+| **VM-4** | `10.102.0.167` | OAI gNB DU-2 (`du_gnb2.conf`, Cell-2) | OAI 2024.w39 `nr-softmodem --rfsim` | RLC/MAC/PHY DU for Cell-2 (TCP server `:4044`) | **BERJALAN** | Target standby cell for steering (or serving cell for UE2 per `spawn_multi_ue.sh` default) |
 | **VM-4** | `10.102.0.167` | RAN Telemetry Adapter (`ran_adapter.py`) | Host Python daemon v1 | Tails `du1.log`/`du2.log` for `NPRB` & pushes to VM-6 | **BERJALAN** | Log: streaming Cell-1 & Cell-2 PRB% at 1 Hz |
-| **VM-5** | `10.102.0.165` | OAI nrUE Emulator (`ue1` namespace) | OAI 2024.w39 `nr-uesoftmodem` | Attached to Cell-1, eMBB slice, IP `12.1.1.2` | **TERUJI** | [`docs/vm/vm5-nrue.md`](file:///d:/Idhul/Program/Thesis/docs/vm/vm5-nrue.md) (Interface `oaitun_ue1` active in `ue1`) |
-| **VM-5** | `10.102.0.165` | OAI nrUE Emulator (`ue2` namespace) | OAI 2024.w39 `nr-uesoftmodem` | Attached to Cell-1, URLLC slice, IP `12.2.1.2` | **TERUJI** | Interface `oaitun_ue1` active in `ue2` |
+| **VM-5** | `10.102.0.165` | OAI nrUE Emulator (`ue1` namespace) | OAI 2024.w39 `nr-uesoftmodem` | Attached to Cell-1 (`:4043`), eMBB slice, IP `12.1.1.2` | **TERUJI** | [`docs/vm/vm5-nrue.md`](file:///d:/Idhul/Program/Thesis/docs/vm/vm5-nrue.md) (Interface `oaitun_ue1` active in `ue1`) |
+| **VM-5** | `10.102.0.165` | OAI nrUE Emulator (`ue2` namespace) | OAI 2024.w39 `nr-uesoftmodem` | URLLC slice, IP `12.1.2.2` (Default spawner attaches to Cell-2 `:4044`; contention mode attaches to Cell-1 `:4043`) | **TERUJI** | [`docs/vm/vm5-nrue.md`](file:///d:/Idhul/Program/Thesis/docs/vm/vm5-nrue.md) (Interface `oaitun_ue1` active in `ue2`) |
 | **VM-5** | `10.102.0.165` | Multi-Slice TrafGen (`trafgen.sh`) | Bash automation script | Injects iperf3 UDP (eMBB) & ping (URLLC), pushes QoS | **TERUJI** | Live 1s loops push `/report` to VM-6 |
 | **VM-6** | `10.102.0.67` | Telemetry Collector (`telemetry_collector.py`) | Python HTTP Server (`:9100`) | Ingests `/report`, exports Prometheus `/metrics` | **BERJALAN** | [`docs/vm/vm6-monitoring.md`](file:///d:/Idhul/Program/Thesis/docs/vm/vm6-monitoring.md) (Running with 3.5s staleness auto-reset) |
 | **VM-6** | `10.102.0.67` | Dual-Stream Logger (`record_dual_stream.py`)| Monotonic 1.000 Hz Python logger | Generates `telemetry_raw_<RUN>_<PID>.csv` | **TERUJI** | Successfully logged 952 rows on run `297233` |
@@ -306,11 +306,11 @@ Empirical analysis of the live run (`telemetry_raw_DATASET_EXP_FINAL_297233.csv`
 * **Baseline Normal State (Line 58, S1):**
   `2026-10-11T15:36:34.456673+00:00,56.001107,DATASET_EXP_FINAL,1,2.170,0.00,0.000,0.00,0.00,5.00,5.00,0.00,0.00,0.00,0.00,4.72,4.72,0,1.00,S1_NORMAL_LIGHT,BASELINE,NONE`
 * **Pure RAN Bottleneck State (Line 420, S3):**
-  `2026-10-11T15:42:36.456711+00:00,418.001145,DATASET_EXP_FINAL,1,2.180,40.10,0.000,24.50,0.00,5.00,5.00,0.00,0.00,0.00,0.00,85.60,4.72,0,1.00,S3_RAN_OVERLOAD,RAN,DU-1_Cell-1`
+  `2026-10-11T15:42:36.456681+00:00,418.001116,DATASET_EXP_FINAL,1,1.705,40.00,0.000,16.40,0.00,5.00,5.00,0.00,0.00,0.00,0.00,100.00,4.72,0,1.00,S3_RAN_OVERLOAD,RAN,DU-1_Cell-1`
 * **Pure Core Bottleneck State (Line 600, S6):**
-  `2026-10-11T15:45:36.456689+00:00,598.001123,DATASET_EXP_FINAL,1,2.210,14.80,0.000,20.10,0.00,5.00,5.00,299490.00,0.00,950.00,0.00,58.40,4.72,0,1.00,S6_CORE_QUEUE_TBF,CORE,UPF-1_Slice-1`
+  `2026-10-11T15:45:36.456746+00:00,598.001204,DATASET_EXP_FINAL,1,2.299,18.00,0.000,14.50,0.00,5.00,5.00,298000.00,0.00,565.00,0.00,17.92,4.72,0,1.00,S6_CORE_QUEUE_TBF,CORE,UPF-1_Slice-1`
 * **Joint Bottleneck State (Line 750, S9):**
-  `2026-10-11T15:48:06.456701+00:00,748.001135,DATASET_EXP_FINAL,1,2.450,14.70,0.000,22.80,0.00,5.00,5.00,299564.00,0.00,1812.00,0.00,83.12,4.72,0,1.00,S9_JOINT_OVERLOAD,JOINT,Cell-1+UPF-1`
+  `2026-10-11T15:48:06.456691+00:00,748.001138,DATASET_EXP_FINAL,1,2.607,40.00,0.000,30.60,0.00,5.00,5.00,299490.00,0.00,1634.00,0.00,100.00,4.72,0,1.00,S9_JOINT_OVERLOAD,JOINT,Cell-1+UPF-1`
 
 ---
 

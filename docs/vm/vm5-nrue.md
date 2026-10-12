@@ -442,10 +442,10 @@ To measure end-to-end SLA satisfaction and evaluate baseline recovery times from
 
 ```bash
 # Terminal 1: Slice 1 (Throughput / eMBB) - Heavy background UDP traffic
-sudo ip netns exec ue1 iperf3 -c 192.168.70.135 -u -b 40M -t 300 -i 1
+sudo ip netns exec ue1 iperf3 -c 192.168.70.145 -u -b 40M -t 300 -i 1
 
 # Terminal 2: Slice 2 (Low Latency / URLLC) - High-frequency latency probe (every 50ms)
-sudo ip netns exec ue2 ping -c 6000 -i 0.05 192.168.70.135 | tee /opt/oran/nrue/slice2_latency.log
+sudo ip netns exec ue2 ping -c 6000 -i 0.05 192.168.70.145 | tee /opt/oran/nrue/slice2_latency.log
 ```
 
 ### 11.2 Ground-Truth SLA Violation Logging

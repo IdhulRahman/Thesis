@@ -516,26 +516,33 @@ Action
 
 ---
 
-## 14. DRL Integration
+## 14. ML / DRL Integration & Inference Separation
 
-DRL training is planned to be performed outside VM-2, primarily on a laptop or training environment.
+Model training is performed offline outside the runtime execution hosts, primarily on an external GPU workstation or training environment using datasets collected and exported from VM-6.
 
-The runtime separation is:
+The architectural separation of roles is:
 
 ```text
-Training environment
+Offline Training Environment (GPU / Workstation)
         │
-        │ trained model
+        │ trained model weights (MLP, LSTM, GRU / DRL)
         ▼
-VM-2 xApp
-        │
-        ▼
-PyTorch inference only
+┌──────────────────────────────────────────────────────────────┐
+│  VM-1: Non-RT RIC rApp (Cross-Domain Diagnosis Inference)   │
+│  - Executes 1 Hz sequential classification (NORMAL/RAN/CORE) │
+│  - Synthesizes A1 Policy constraints (Policy Type 20008)     │
+└──────────────────────────────┬───────────────────────────────┘
+                               │ A1 Interface (REST :10001)
+                               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  VM-2: Near-RT RIC xApp (Policy-Constrained Steering)        │
+│  - Fast-Loop control (10 ms – 1 s) under A1 policy bounds    │
+│  - Inhibits futile handovers during CORE bottleneck          │
+│  - Dispatches E2SM-RC actions to OAI CU                      │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-VM-2 is therefore not intended to perform heavy model training.
-
-The training dataset can be produced from experiment data exported from VM-6.
+VM-2 and VM-1 are not intended to perform heavy training loops during live operations. The models run inference only, consuming standardized telemetry streams.
 
 ---
 
@@ -578,51 +585,32 @@ This allows the control decisions to be correlated with network outcomes.
 
 ## 16. Experimental Baselines
 
-The architecture is designed so that all baselines can use the same infrastructure.
+The architecture is designed so that all comparative baselines execute on the identical underlying 6-VM testbed infrastructure. For full configuration parameters and execution guides, see [Baseline & Methodology Guide](bottleneck-methodology.md).
 
-### B0 — Conventional RAN Handover
+### B0 — Static 3GPP Default (No RIC)
+- Autonomous RRC A3 event handover only; no dynamic RIC intervention.
+- Completely blind to slice SLAs and Core congestion; no dynamic steering.
 
-```text
-No rApp control
-No DRL steering
-RAN mobility logic only
-```
+### B1 — RAN-Only Control (Standalone xApp)
+- Near-RT RIC xApp triggers inter-cell steering based solely on radio metrics (PRB, CQI, RLC delay).
+- **Core-Blind:** Triggers futile handovers and ping-pong instability when Core UPF is congested.
 
-### B1 — Static O-RAN Traffic-Steering Policy
+### B2 — Core-Only Control (Standalone Core Adaptation)
+- Core user-plane rate shaping based solely on UPF queue depth and packet loss.
+- **Radio-Blind:** Ineffective during radio channel degradation; cannot leverage alternative cells.
 
-```text
-Static A1 policy
-+
-traffic-steering xApp logic
-```
+### B3 — Decoupled / Uncoordinated Control
+- Both Near-RT RIC xApp and Core adapt independently without coordination.
+- **Conflicting Actions:** Simultaneous, uncoordinated actuations destabilize QoS and cause action churn.
 
-Policy type `20008` provides the initial baseline concept.
+### B4 — Coordinated Naive / Fixed Heuristic
+- Aggregated cross-domain telemetry with a fixed action order (e.g., Handover $\rightarrow$ Rate Shape).
+- **Ineffective Actions:** Executes the wrong action first when bottleneck origin does not match the hardcoded priority.
 
-### B2 — Optional O-RAN SC Baseline
-
-Optional comparison using available O-RAN SC anomaly-detection / QoE-prediction / traffic-steering logic where practical.
-
-### B3 — xApp-Only DRL
-
-```text
-fixed QoS configuration
-+
-DRL xApp
-+
-no adaptive rApp policy
-```
-
-### Proposed Method
-
-```text
-adaptive rApp
-+
-dynamic A1 QoS policy
-+
-policy-constrained DRL xApp
-+
-stability mechanism
-```
+### Proposed System — Bottleneck-Aware Closed-Loop
+- Cross-domain telemetry correlated in Non-RT RIC rApp ($T \ge 1\text{ s}$).
+- Offline-trained sequential ML classifier diagnoses bottleneck origin (`NORMAL`, `RAN`, `CORE`, `JOINT`).
+- Dispatches matched A1 policy constraints (Policy Type 20008) to xApp and Core shaper with closed-loop SLA feedback verification.
 
 ---
 
