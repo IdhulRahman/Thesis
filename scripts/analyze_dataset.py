@@ -46,7 +46,8 @@ def main():
             if scen not in scen_data:
                 scen_data[scen] = {
                     "tput": [], "rtt": [], "prb_c1": [], "prb_c2": [],
-                    "backlog": [], "drops": [], "sla_violated": 0
+                    "backlog": [], "drops": [], "mcs_c1": [], "bler_c1": [], "snr_c1": [],
+                    "sla_violated": 0
                 }
 
             def parse_val(col):
@@ -80,21 +81,35 @@ def main():
             if not math.isnan(drop):
                 scen_data[scen]["drops"].append(drop)
 
-    print(f"{'Skenario Event':<20} | {'Sampel':<6} | {'Tput Avg':<9} | {'PRB C1 Avg':<10} | {'Backlog Max':<12} | {'Drops Total':<11} | {'URLLC RTT Avg':<13} | {'SLA Viol %'}")
-    print("-" * 110)
+            mcs1 = parse_val("ran_mcs_cell1")
+            if not math.isnan(mcs1):
+                scen_data[scen]["mcs_c1"].append(mcs1)
+
+            bler1 = parse_val("ran_bler_cell1")
+            if not math.isnan(bler1):
+                scen_data[scen]["bler_c1"].append(bler1)
+
+            snr1 = parse_val("ran_snr_cell1")
+            if not math.isnan(snr1):
+                scen_data[scen]["snr_c1"].append(snr1)
+
+    print(f"{'Skenario Event':<20} | {'Sampel':<6} | {'Tput Avg':<9} | {'PRB C1':<8} | {'MCS C1':<7} | {'BLER C1':<8} | {'SNR C1':<8} | {'Backlog Max':<12} | {'URLLC RTT':<11} | {'SLA Viol %'}")
+    print("-" * 125)
 
     for scen, d in sorted(scen_data.items()):
         n = len(d["rtt"]) or len(d["tput"]) or 1
         avg_tput = (sum(d["tput"]) / len(d["tput"])) if d["tput"] else 0.0
         avg_prb = (sum(d["prb_c1"]) / len(d["prb_c1"])) if d["prb_c1"] else 0.0
+        avg_mcs = (sum(d["mcs_c1"]) / len(d["mcs_c1"])) if d["mcs_c1"] else 0.0
+        avg_bler = (sum(d["bler_c1"]) / len(d["bler_c1"])) if d["bler_c1"] else 0.0
+        avg_snr = (sum(d["snr_c1"]) / len(d["snr_c1"])) if d["snr_c1"] else 0.0
         max_b = max(d["backlog"]) if d["backlog"] else 0.0
-        tot_d = sum(d["drops"]) if d["drops"] else 0.0
         avg_rtt = (sum(d["rtt"]) / len(d["rtt"])) if d["rtt"] else 0.0
         sla_pct = (d["sla_violated"] / len(d["rtt"]) * 100.0) if d["rtt"] else 0.0
 
-        print(f"{scen:<20} | {n:<6} | {avg_tput:>7.2f} M | {avg_prb:>8.1f} % | {max_b:>10,.0f} B | {tot_d:>11,.0f} | {avg_rtt:>10.2f} ms | {sla_pct:>8.1f} %")
+        print(f"{scen:<20} | {n:<6} | {avg_tput:>7.2f} M | {avg_prb:>6.1f} % | {avg_mcs:>7.1f} | {avg_bler:>8.4f} | {avg_snr:>6.1f}dB | {max_b:>10,.0f} B | {avg_rtt:>8.2f} ms | {sla_pct:>8.1f} %")
 
-    print("=" * 110)
+    print("=" * 125)
     print(f"Total Sampel Dievaluasi: {total_rows} baris")
 
 

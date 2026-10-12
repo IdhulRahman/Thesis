@@ -191,28 +191,35 @@ The recorded dataset (`telemetry_raw_<RUN>_<PID>.csv`) contains exactly 22 colum
 | 15 | `upf_drops_urllc` | VM-3 UPF-2 Container| Kernel qdisc drop rate | `core_adapter.py` $\rightarrow$ `:9100/report` | Drops/s | Rate/Delta| $\Delta \text{drops} / \Delta t$ per second | 1.0 s | Fixed `0.00` | Retains last pushed state | `upf_qdisc_drops_delta["de00007b"]` |
 | 16 | `ran_prb_cell1` | VM-4 DU-1 Process | MAC scheduler allocation | `ran_adapter.py` $\rightarrow$ `:9100/report` | % | Gauge | `(NPRB / 106.0) * 100%` from `du1.log`| 1.0 s | $4.72\% - 100.0\%$ | Defaults to `4.72%` if log quiet | `ran_cell_prb_utilization["1"]` |
 | 17 | `ran_prb_cell2` | VM-4 DU-2 Process | MAC scheduler allocation | `ran_adapter.py` $\rightarrow$ `:9100/report` | % | Gauge | `(NPRB / 106.0) * 100%` from `du2.log`| 1.0 s | $4.72\% - 29.25\%$ | Defaults to `4.72%` if log quiet | `ran_cell_prb_utilization["2"]` |
-| 18 | `rapp_diagnosed_bottleneck`| VM-1 / VM-2 RIC | Controller inference state | `telemetry_collector.py` | Enum | State | Offline training placeholder (0=Normal)| 1.0 s | Fixed `0` | Default `0` | `rapp_diagnosed_bottleneck` |
-| 19 | `rapp_confidence` | VM-1 / VM-2 RIC | Model diagnostic confidence | `telemetry_collector.py` | Score | Gauge | Offline training placeholder (1.00) | 1.0 s | Fixed `1.00` | Default `1.00` | `rapp_confidence` |
-| 20 | `event_scenario` | VM-6 Operator | Experiment event state file | `log_event.py` via `active_event.json` | String | Meta | Injected scenario ID | Event-driven| `S1`, `S2`, `S3`, `S6`, `S9`, `CLEAR` | `UNINITIALIZED` prior to start | Scraped from `active_event.json` |
-| 21 | `event_domain` | VM-6 Operator | Target failure domain | `log_event.py` via `active_event.json` | String | Meta | Injected domain label | Event-driven| `BASELINE`, `RAN`, `CORE`, `JOINT` | `UNINITIALIZED` prior to start | Scraped from `active_event.json` |
-| 22 | `event_component` | VM-6 Operator | Target network entity | `log_event.py` via `active_event.json` | String | Meta | Target failure component | Event-driven| `NONE`, `DU-1_Cell-1`, `UPF-1_Slice-1`, etc.| `NONE` | Scraped from `active_event.json` |
+| 18 | `ran_mcs_cell1` | VM-4 DU-1 Process | Modulation & Coding Scheme | `ran_adapter.py` $\rightarrow$ `:9100/report` | Index | Gauge | Parsed from `du1.log` (`MCS (0) X`) | 1.0 s | $0 - 28$ | Defaults to `0` if log quiet | `ran_cell_mcs["1"]` |
+| 19 | `ran_mcs_cell2` | VM-4 DU-2 Process | Modulation & Coding Scheme | `ran_adapter.py` $\rightarrow$ `:9100/report` | Index | Gauge | Parsed from `du2.log` (`MCS (0) X`) | 1.0 s | $0 - 28$ | Defaults to `0` if log quiet | `ran_cell_mcs["2"]` |
+| 20 | `ran_bler_cell1`| VM-4 DU-1 Process | MAC Block Error Rate | `ran_adapter.py` $\rightarrow$ `:9100/report` | Ratio | Gauge | Parsed from `du1.log` (`BLER X.XXXXX`)| 1.0 s | $0.0000 - 1.0000$ | Defaults to `0.0` if log quiet | `ran_cell_bler["1"]` |
+| 21 | `ran_bler_cell2`| VM-4 DU-2 Process | MAC Block Error Rate | `ran_adapter.py` $\rightarrow$ `:9100/report` | Ratio | Gauge | Parsed from `du2.log` (`BLER X.XXXXX`)| 1.0 s | $0.0000 - 1.0000$ | Defaults to `0.0` if log quiet | `ran_cell_bler["2"]` |
+| 22 | `ran_snr_cell1` | VM-4 DU-1 Process | Uplink Signal-to-Noise Ratio| `ran_adapter.py` $\rightarrow$ `:9100/report` | dB | Gauge | Parsed from `du1.log` (`SNR XX.X`) | 1.0 s | $0.0 - 35.0\text{ dB}$ | Defaults to `25.0 dB` if quiet | `ran_cell_snr_db["1"]` |
+| 23 | `ran_snr_cell2` | VM-4 DU-2 Process | Uplink Signal-to-Noise Ratio| `ran_adapter.py` $\rightarrow$ `:9100/report` | dB | Gauge | Parsed from `du2.log` (`SNR XX.X`) | 1.0 s | $0.0 - 35.0\text{ dB}$ | Defaults to `25.0 dB` if quiet | `ran_cell_snr_db["2"]` |
+| 24 | `rapp_diagnosed_bottleneck`| VM-1 / VM-2 RIC | Controller inference state | `telemetry_collector.py` | Enum | State | Offline training placeholder (0=Normal)| 1.0 s | Fixed `0` | Default `0` | `rapp_diagnosed_bottleneck` |
+| 25 | `rapp_confidence` | VM-1 / VM-2 RIC | Model diagnostic confidence | `telemetry_collector.py` | Score | Gauge | Offline training placeholder (1.00) | 1.0 s | Fixed `1.00` | Default `1.00` | `rapp_confidence` |
+| 26 | `event_scenario` | VM-6 Operator | Experiment event state file | `log_event.py` via `active_event.json` | String | Meta | Injected scenario ID | Event-driven| `S1`, `S2`, `S3`, `S6`, `S9`, `CLEAR` | `UNINITIALIZED` prior to start | Scraped from `active_event.json` |
+| 27 | `event_domain` | VM-6 Operator | Target failure domain | `log_event.py` via `active_event.json` | String | Meta | Injected domain label | Event-driven| `BASELINE`, `RAN`, `CORE`, `JOINT` | `UNINITIALIZED` prior to start | Scraped from `active_event.json` |
+| 28 | `event_component` | VM-6 Operator | Target network entity | `log_event.py` via `active_event.json` | String | Meta | Target failure component | Event-driven| `NONE`, `DU-1_Cell-1`, `UPF-1_Slice-1`, etc.| `NONE` | Scraped from `active_event.json` |
 
 ### 4.1 Granular Ingestion Mechanisms
 1. **The Meaning of `NPRB` and `ran_prb_cell1/2`:**
-   * In `ran_adapter.py`, the regex `NPRB\s+(\d+)` matches the gNB MAC scheduler resource block allocation printed in `du1.log` (e.g., `[NR_MAC] ... NPRB 106`).
+   * In `ran_adapter.py`, the regex matches the gNB MAC scheduler resource block allocation printed in `du1.log` (e.g., `[NR_MAC] ... NPRB 31`).
    * The denominator is **`106.0`**, representing the 106 physical resource blocks of a 40 MHz channel at 30 kHz SCS (`-r 106`).
    * Idle baseline: `NPRB = 5` $\rightarrow 5/106 \times 100\% = 4.71698\% \approx 4.72\%$.
    * Fully saturated: `NPRB = 106` $\rightarrow 106/106 \times 100\% = 100.0\%$.
-2. **Availability of MCS, BLER, Retransmissions, and RLC Queues:**
-   * **MCS & BLER:** Present in OAI softmodem internal statistics and exposed via the OAI Telnet management server (`:9090`), but **not currently scraped** into the 1 Hz CSV pipeline.
-   * **RLC Buffer Occupancy:** Calculated internally in OAI layer 2, but currently uninstrumented in `ran_adapter.py`.
+2. **Instrumented Radio Link Telemetry (MCS, BLER, SNR, RSSI):**
+   * Extracted directly from live OAI scheduler logs (`du1.log`, `du2.log`) via `RADIO_STATS_PATTERN`:
+     `UE <rnti>: ulsch_rounds ... ulsch_errors <err>, BLER <bler> MCS (0) <mcs> ... NPRB <nprb> SNR <snr> RSSI <rssi>`
+   * Provides empirical radio channel proof (3GPP TS 23.288 §6.8.2) to distinguish channel-induced degradation from high goodput.
 3. **UPF Drops: Cumulative vs. Delta:**
    * In `core_adapter.py` v9, the field pushed to the collector is `drops_pps` (instantaneous delta per second: $\frac{\text{drops}_t - \text{drops}_{t-1}}{\Delta t}$).
    * In the raw CSV dataset, this delta appears in `upf_drops_embb`. It fluctuates naturally (e.g., 1800 drops/s $\rightarrow$ 1731 drops/s) because it is a rate, not a monotonic cumulative counter.
 4. **Application Throughput, RTT, and Timeout Handling:**
    * `e2e_slice1_tput_mbps`: Extracted once per second from the active `iperf3` logfile.
-   * `e2e_slice2_rtt_ms`: Extracted from ICMP echo replies. When the probe is starting up or temporarily dropped, `0.0` was previously reported.
-   * **Staleness Retention:** In `telemetry_collector.py` (updated in commit `8363ba7`), an automated **3.5-second heartbeat staleness timer** actively decays `e2e_slice1_tput_mbps` and `e2e_slice2_rtt_ms` back to `0.0` when no new POST request arrives from `trafgen.sh`.
+   * `e2e_slice2_rtt_ms`: Extracted from ICMP echo replies.
+   * **Staleness Retention:** In `telemetry_collector.py`, an automated **3.5-second heartbeat staleness timer** actively decays `e2e_slice1_tput_mbps` and `e2e_slice2_rtt_ms` back to `0.0` when no new POST request arrives from `trafgen.sh`.
 
 ---
 
@@ -220,9 +227,11 @@ The recorded dataset (`telemetry_raw_<RUN>_<PID>.csv`) contains exactly 22 colum
 
 * **Active NWDAF Services:**
   - Standard 3GPP Rel-17 NWDAF container is **NOT active** in the current live docker compose execution.
-* **HTTP Polling Endpoint:**
+* **HTTP Polling Endpoint & Dynamic Fallback:**
   - `telemetry_collector.py` contains a background polling thread targeting:
     `http://10.102.0.164:8080/nnwdaf-eventsubscription/v1/slice-load-level`
+  - **Dynamic Fallback:** If the external Nnwdaf endpoint does not respond within 5 seconds, `telemetry_collector.py` dynamically calculates slice load level based on UPF throughput divided by nominal slice quota:
+    $\text{load}_{\text{embb}} = \min(100.0, \max(5.0, (\text{tx\_mbps} / 25.0) \times 100))$.
 * **Response & Fallback Handling:**
   - Because port `:8080` is unreachable, `poll_external_nfs()` catches `urllib.error.URLError` and quietly passes (`except Exception: pass`).
   - As a result, `metrics_store["nwdaf_slice_load_level"]` continuously retains its hardcoded initialization dictionary:

@@ -36,6 +36,7 @@ HEADERS = [
     "e2e_slice1_tput_mbps", "e2e_slice1_jitter_ms", "e2e_slice2_rtt_ms", "e2e_slice2_loss_pct",
     "nwdaf_load_embb", "nwdaf_load_urllc", "upf_backlog_bytes_embb", "upf_backlog_bytes_urllc",
     "upf_drops_embb", "upf_drops_urllc", "ran_prb_cell1", "ran_prb_cell2",
+    "ran_mcs_cell1", "ran_mcs_cell2", "ran_bler_cell1", "ran_bler_cell2", "ran_snr_cell1", "ran_snr_cell2",
     "rapp_diagnosed_bottleneck", "rapp_confidence", "event_scenario", "event_domain", "event_component"
 ]
 
@@ -84,6 +85,9 @@ def extract_telemetry():
         "upf_backlog_bytes_embb": NAN_STR, "upf_backlog_bytes_urllc": NAN_STR,
         "upf_drops_embb": NAN_STR, "upf_drops_urllc": NAN_STR,
         "ran_prb_cell1": NAN_STR, "ran_prb_cell2": NAN_STR,
+        "ran_mcs_cell1": NAN_STR, "ran_mcs_cell2": NAN_STR,
+        "ran_bler_cell1": NAN_STR, "ran_bler_cell2": NAN_STR,
+        "ran_snr_cell1": NAN_STR, "ran_snr_cell2": NAN_STR,
         "rapp_diagnosed_bottleneck": NAN_STR, "rapp_confidence": NAN_STR
     }
     scrape_ok = 0
@@ -127,6 +131,24 @@ def extract_telemetry():
                         raw_data["ran_prb_cell1"] = val_str
                     elif cid == "2":
                         raw_data["ran_prb_cell2"] = val_str
+                elif name == "ran_cell_mcs":
+                    cid = labels.get("cell_id", "")
+                    if cid == "1":
+                        raw_data["ran_mcs_cell1"] = val_str
+                    elif cid == "2":
+                        raw_data["ran_mcs_cell2"] = val_str
+                elif name == "ran_cell_bler":
+                    cid = labels.get("cell_id", "")
+                    if cid == "1":
+                        raw_data["ran_bler_cell1"] = val_str
+                    elif cid == "2":
+                        raw_data["ran_bler_cell2"] = val_str
+                elif name == "ran_cell_snr_db":
+                    cid = labels.get("cell_id", "")
+                    if cid == "1":
+                        raw_data["ran_snr_cell1"] = val_str
+                    elif cid == "2":
+                        raw_data["ran_snr_cell2"] = val_str
                 elif name == "rapp_diagnosed_bottleneck":
                     raw_data["rapp_diagnosed_bottleneck"] = val_str
                 elif name == "rapp_confidence":
@@ -184,6 +206,9 @@ def main():
                 telemetry["upf_backlog_bytes_embb"], telemetry["upf_backlog_bytes_urllc"],
                 telemetry["upf_drops_embb"], telemetry["upf_drops_urllc"],
                 telemetry["ran_prb_cell1"], telemetry["ran_prb_cell2"],
+                telemetry["ran_mcs_cell1"], telemetry["ran_mcs_cell2"],
+                telemetry["ran_bler_cell1"], telemetry["ran_bler_cell2"],
+                telemetry["ran_snr_cell1"], telemetry["ran_snr_cell2"],
                 telemetry["rapp_diagnosed_bottleneck"], telemetry["rapp_confidence"],
                 scen, domain, comp
             ]

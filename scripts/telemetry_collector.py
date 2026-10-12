@@ -48,6 +48,26 @@ metrics_store = {
         "1": 10.0,           # Cell-1 (DU-1 :4043)
         "2": 10.0            # Cell-2 (DU-2 :4044)
     },
+    "ran_cell_mcs": {
+        "1": 0.0,
+        "2": 0.0
+    },
+    "ran_cell_bler": {
+        "1": 0.0,
+        "2": 0.0
+    },
+    "ran_cell_snr_db": {
+        "1": 25.0,
+        "2": 25.0
+    },
+    "ran_cell_rssi_dbm": {
+        "1": -42.0,
+        "2": -42.0
+    },
+    "ran_cell_ulsch_errors": {
+        "1": 0.0,
+        "2": 0.0
+    },
 
     # Domain 3: RIC Intelligence (VM-1 / VM-2)
     "rapp_diagnosed_bottleneck": 0,    # 0: NORMAL, 1: RAN, 2: CORE, 3: JOINT
@@ -58,6 +78,8 @@ metrics_store = {
 
 last_report_ue1 = 0.0
 last_report_ue2 = 0.0
+last_nwdaf_poll_time = 0.0
+
 
 
 def format_prometheus_metrics():
@@ -113,6 +135,31 @@ def format_prometheus_metrics():
         lines.append("# TYPE ran_cell_prb_utilization gauge")
         for cell, val in metrics_store["ran_cell_prb_utilization"].items():
             lines.append(f'ran_cell_prb_utilization{{cell_id="{cell}"}} {val:.2f}')
+
+        lines.append("# HELP ran_cell_mcs RAN Modulation and Coding Scheme (MCS)")
+        lines.append("# TYPE ran_cell_mcs gauge")
+        for cell, val in metrics_store["ran_cell_mcs"].items():
+            lines.append(f'ran_cell_mcs{{cell_id="{cell}"}} {val:.1f}')
+
+        lines.append("# HELP ran_cell_bler RAN Block Error Rate (BLER)")
+        lines.append("# TYPE ran_cell_bler gauge")
+        for cell, val in metrics_store["ran_cell_bler"].items():
+            lines.append(f'ran_cell_bler{{cell_id="{cell}"}} {val:.4f}')
+
+        lines.append("# HELP ran_cell_snr_db RAN Signal to Noise Ratio in dB")
+        lines.append("# TYPE ran_cell_snr_db gauge")
+        for cell, val in metrics_store["ran_cell_snr_db"].items():
+            lines.append(f'ran_cell_snr_db{{cell_id="{cell}"}} {val:.2f}')
+
+        lines.append("# HELP ran_cell_rssi_dbm RAN Received Signal Strength Indicator in dBm")
+        lines.append("# TYPE ran_cell_rssi_dbm gauge")
+        for cell, val in metrics_store["ran_cell_rssi_dbm"].items():
+            lines.append(f'ran_cell_rssi_dbm{{cell_id="{cell}"}} {val:.2f}')
+
+        lines.append("# HELP ran_cell_ulsch_errors Cumulative MAC layer ULSCH transmission errors")
+        lines.append("# TYPE ran_cell_ulsch_errors gauge")
+        for cell, val in metrics_store["ran_cell_ulsch_errors"].items():
+            lines.append(f'ran_cell_ulsch_errors{{cell_id="{cell}"}} {val:.0f}')
 
         lines.append("# HELP rapp_diagnosed_bottleneck Bottleneck classification (0=NORMAL, 1=RAN, 2=CORE, 3=JOINT)")
         lines.append("# TYPE rapp_diagnosed_bottleneck gauge")
@@ -190,6 +237,21 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
                         for cell, val in payload["ran_cell_prb_utilization"].items():
                             metrics_store["ran_cell_prb_utilization"][str(cell)] = float(val)
 
+                    if "ran_cell_radio_stats" in payload and isinstance(payload["ran_cell_radio_stats"], dict):
+                        for cell, stats in payload["ran_cell_radio_stats"].items():
+                            cid = str(cell)
+                            if isinstance(stats, dict):
+                                if "mcs" in stats and stats["mcs"] is not None:
+                                    metrics_store["ran_cell_mcs"][cid] = float(stats["mcs"])
+                                if "bler" in stats and stats["bler"] is not None:
+                                    metrics_store["ran_cell_bler"][cid] = float(stats["bler"])
+                                if "snr_db" in stats and stats["snr_db"] is not None:
+                                    metrics_store["ran_cell_snr_db"][cid] = float(stats["snr_db"])
+                                if "rssi_dbm" in stats and stats["rssi_dbm"] is not None:
+                                    metrics_store["ran_cell_rssi_dbm"][cid] = float(stats["rssi_dbm"])
+                                if "ulsch_errors" in stats and stats["ulsch_errors"] is not None:
+                                    metrics_store["ran_cell_ulsch_errors"][cid] = float(stats["ulsch_errors"])
+
                     # Core & UPF telemetry handling (safe against null / None values from core_adapter.py v9)
                     core_metric_keys = [
                         "upf_interface_tx_mbps", "upf_interface_rx_mbps",
@@ -238,6 +300,24 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
                                 except (ValueError, TypeError):
                                     pass
 
+                    # Dynamic estimation of NWDAF slice load if external Nnwdaf is unavailable
+                    if "upf_interface_tx_mbps" in payload and isinstance(payload["upf_interface_tx_mbps"], dict):
+                        if (time.time() - last_nwdaf_poll_time) > 5.0:
+                            # Slice 1 (eMBB): capacity ~25 Mbps
+                            tx1 = payload["upf_interface_tx_mbps"].get("01000001")
+                            if tx1 is not None:
+                                try:
+                                    metrics_store["nwdaf_slice_load_level"]["01000001"] = round(min(100.0, max(5.0, (float(tx1) / 25.0) * 100.0)), 2)
+                                except (ValueError, TypeError):
+                                    pass
+                            # Slice 2 (URLLC): capacity ~5 Mbps
+                            tx2 = payload["upf_interface_tx_mbps"].get("de00007b")
+                            if tx2 is not None:
+                                try:
+                                    metrics_store["nwdaf_slice_load_level"]["de00007b"] = round(min(100.0, max(5.0, (float(tx2) / 5.0) * 100.0)), 2)
+                                except (ValueError, TypeError):
+                                    pass
+
                 response = json.dumps({"status": "SUCCESS"}).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -257,6 +337,7 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
 
 
 def poll_external_nfs():
+    global last_nwdaf_poll_time
     while True:
         try:
             req = urllib.request.Request(
@@ -267,6 +348,7 @@ def poll_external_nfs():
                 if resp.status == 200:
                     data = json.loads(resp.read().decode())
                     with METRICS_LOCK:
+                        last_nwdaf_poll_time = time.time()
                         if "sliceLoadLevelInfos" in data:
                             for info in data["sliceLoadLevelInfos"]:
                                 snssai = info.get("snssai", {})
