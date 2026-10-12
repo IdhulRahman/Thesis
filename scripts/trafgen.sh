@@ -38,8 +38,6 @@ MONITOR_URL="http://10.102.0.67:9100/report"
 cleanup() {
   pkill -f "iperf3 -c $EXT_DN_IP" 2>/dev/null || true
   pkill -f "ping -I oaitun_ue1.*$EXT_DN_IP" 2>/dev/null || true
-  curl -s -m 1 -X POST -H "Content-Type: application/json" \
-    -d '{"slice": 1, "throughput_mbps": 0.0, "jitter_ms": 0.0}' "$MONITOR_URL" >/dev/null 2>&1 || true
 }
 
 trap 'cleanup; echo -e "\n[!] Pengujian dihentikan."; exit 0' INT TERM
@@ -101,6 +99,7 @@ case "$ACTION" in
 
     prev_rtt="0.0"
     prev_eval_seq=0
+    T_START=$(date +%s)
     for ((sec=1; sec<=DURATION; sec++)); do
       sleep 1
 
@@ -114,12 +113,15 @@ case "$ACTION" in
       jitter="0.00"
       loss_pct="0.0"
       if [[ -n "$PING_LOG" && -f "$PING_LOG" ]]; then
-        rtt=$(tail -n 15 "$PING_LOG" 2>/dev/null | grep -oP '(?<=time=)\d+(\.\d+)?' | tail -n 1 || echo "0.0")
+        rtt=$(tail -n 15 "$PING_LOG" 2>/dev/null | grep 'bytes from' | grep -oP '(?<=time=)\d+(\.\d+)?' | tail -n 1 || echo "0.0")
         [[ -z "$rtt" ]] && rtt="0.0"
 
         # Sequence-based packet loss tracking using icmp_seq with a 200ms (2-probe) grace period.
-        # This prevents delayed replies or sampling jitter from being erroneously counted as drops.
-        target_seq=$(( sec * 10 - 2 ))
+        # Derived from actual wall-clock elapsed time to prevent loop jitter drift.
+        now_ts=$(date +%s)
+        elapsed_sec=$(( now_ts - T_START ))
+        (( elapsed_sec < 1 )) && elapsed_sec=sec
+        target_seq=$(( elapsed_sec * 10 - 2 ))
         if (( target_seq < 1 )); then
           target_seq=1
         fi
@@ -127,8 +129,9 @@ case "$ACTION" in
 
         if (( expected_probes > 0 )); then
           rx_probes=0
-          # Inspect recent sequence numbers from the latest ping log slice
-          for s in $(tail -n 60 "$PING_LOG" 2>/dev/null | grep -oP '(?<=icmp_seq=)\d+'); do
+          # Strict filter: ONLY count successful echo replies containing 'bytes from' and 'time='.
+          # Ignores ICMP error messages (e.g. Destination Host Unreachable) and deduplicates sequence numbers.
+          for s in $(tail -n 60 "$PING_LOG" 2>/dev/null | grep -E 'bytes from.*time=' | grep -oP 'icmp_seq=\K\d+' | sort -u); do
             if (( s > prev_eval_seq && s <= target_seq )); then
               rx_probes=$(( rx_probes + 1 ))
             fi

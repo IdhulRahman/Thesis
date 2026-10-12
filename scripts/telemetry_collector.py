@@ -21,10 +21,11 @@ LISTEN_HOST = "0.0.0.0"
 METRICS_LOCK = threading.Lock()
 metrics_store = {
     # Domain 4: End-to-End UE Metrics (VM-5)
-    "e2e_slice1_throughput_mbps": 0.0,
+    "e2e_slice1_throughput_mbps": float("nan"),
     "e2e_slice1_jitter_ms": float("nan"),
-    "e2e_slice2_latency_rtt_ms": 0.0,
-    "e2e_slice2_packet_loss_pct": 0.0,
+    "e2e_slice2_latency_rtt_ms": float("nan"),
+    "e2e_slice2_packet_loss_pct": float("nan"),
+    "e2e_probe_freshness": 0,
 
     # Domain 1: 5G Core & NWDAF (VM-3)
     "nwdaf_slice_load_level": {
@@ -106,12 +107,17 @@ def format_prometheus_metrics():
     now = time.time()
     with METRICS_LOCK:
         # Auto-reset stale UE metrics if trafgen stopped pushing (> 3.5 seconds)
-        if last_report_ue1 > 0.0 and (now - last_report_ue1 > 3.5):
-            metrics_store["e2e_slice1_throughput_mbps"] = 0.0
+        ue1_active = (last_report_ue1 > 0.0) and (now - last_report_ue1 <= 3.5)
+        ue2_active = (last_report_ue2 > 0.0) and (now - last_report_ue2 <= 3.5)
+
+        if not ue1_active:
+            metrics_store["e2e_slice1_throughput_mbps"] = float("nan")
             metrics_store["e2e_slice1_jitter_ms"] = float("nan")
-        if last_report_ue2 > 0.0 and (now - last_report_ue2 > 3.5):
-            metrics_store["e2e_slice2_latency_rtt_ms"] = 0.0
-            metrics_store["e2e_slice2_packet_loss_pct"] = 0.0
+        if not ue2_active:
+            metrics_store["e2e_slice2_latency_rtt_ms"] = float("nan")
+            metrics_store["e2e_slice2_packet_loss_pct"] = float("nan")
+
+        metrics_store["e2e_probe_freshness"] = 1 if (ue1_active or ue2_active) else 0
 
         # Auto-reset stale Core metrics if core_adapter stopped pushing (> 3.5 seconds)
         if last_report_core > 0.0 and (now - last_report_core > 3.5):
@@ -121,6 +127,10 @@ def format_prometheus_metrics():
                 metrics_store["upf_packet_drops_delta"][snssai] = float("nan")
                 metrics_store["upf_packet_drops_per_sec"][snssai] = float("nan")
                 metrics_store["estimated_slice_load_level"][snssai] = float("nan")
+
+        # Auto-reset stale NWDAF metrics if external Nnwdaf daemon stopped responding (> 5 seconds)
+        if last_nwdaf_poll_time > 0.0 and (now - last_nwdaf_poll_time > 5.0):
+            for snssai in ("01000001", "de00007b"):
                 metrics_store["nwdaf_slice_load_level"][snssai] = float("nan")
 
         # Auto-reset stale RAN metrics if ran_adapter stopped pushing (> 3.5 seconds)
@@ -148,6 +158,10 @@ def format_prometheus_metrics():
         lines.append("# HELP e2e_slice2_packet_loss_pct End-to-end packet loss percentage for Slice 2 (URLLC)")
         lines.append("# TYPE e2e_slice2_packet_loss_pct gauge")
         lines.append(f"e2e_slice2_packet_loss_pct {fmt_val(metrics_store['e2e_slice2_packet_loss_pct'])}")
+
+        lines.append("# HELP e2e_probe_freshness Freshness indicator for UE probe telemetry (1=Fresh, 0=Stale/Offline)")
+        lines.append("# TYPE e2e_probe_freshness gauge")
+        lines.append(f"e2e_probe_freshness {int(metrics_store['e2e_probe_freshness'])}")
 
         lines.append("# HELP nwdaf_slice_load_level NWDAF reported slice load level percentage")
         lines.append("# TYPE nwdaf_slice_load_level gauge")
@@ -378,10 +392,7 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
                         load2 = round(min(100.0, max(5.0, (float(tx2) / 5.0) * 100.0)), 2) if tx2 is not None else float("nan")
                         metrics_store["estimated_slice_load_level"]["de00007b"] = load2
 
-                        # Mirror to nwdaf_slice_load_level if external Nnwdaf daemon is not responding (> 5s)
-                        if (time.time() - last_nwdaf_poll_time) > 5.0:
-                            metrics_store["nwdaf_slice_load_level"]["01000001"] = load1
-                            metrics_store["nwdaf_slice_load_level"]["de00007b"] = load2
+
 
                 response = json.dumps({"status": "SUCCESS"}).encode("utf-8")
                 self.send_response(200)

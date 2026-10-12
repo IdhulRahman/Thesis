@@ -34,10 +34,17 @@ CSV_FILE = os.path.join(DATA_DIR, f"telemetry_raw_{RUN_ID}_{os.getpid()}.csv")
 HEADERS = [
     "timestamp_utc", "elapsed_sec", "run_id", "scrape_ok", "scrape_latency_ms",
     "e2e_slice1_tput_mbps", "e2e_slice1_jitter_ms", "e2e_slice2_rtt_ms", "e2e_slice2_loss_pct",
-    "nwdaf_load_embb", "nwdaf_load_urllc", "upf_backlog_bytes_embb", "upf_backlog_bytes_urllc",
-    "upf_drops_embb", "upf_drops_urllc", "ran_prb_cell1", "ran_prb_cell2",
-    "ran_mcs_cell1", "ran_mcs_cell2", "ran_bler_cell1", "ran_bler_cell2", "ran_snr_cell1", "ran_snr_cell2",
-    "rapp_diagnosed_bottleneck", "rapp_confidence", "event_scenario", "event_domain", "event_component"
+    "e2e_probe_freshness",
+    "nwdaf_load_embb", "nwdaf_load_urllc",
+    "estimated_load_embb", "estimated_load_urllc",
+    "upf_backlog_bytes_embb", "upf_backlog_bytes_urllc",
+    "upf_drops_embb", "upf_drops_urllc",
+    "ran_prb_cell1", "ran_prb_cell2",
+    "ran_mcs_cell1", "ran_mcs_cell2",
+    "ran_bler_cell1", "ran_bler_cell2",
+    "ran_snr_cell1", "ran_snr_cell2",
+    "rapp_diagnosed_bottleneck", "rapp_confidence",
+    "event_scenario", "event_domain", "event_component"
 ]
 
 PROM_LINE_RE = re.compile(r'^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+([^\s]+)(?:\s+\d+)?$')
@@ -81,7 +88,9 @@ def extract_telemetry():
     raw_data = {
         "e2e_slice1_tput_mbps": NAN_STR, "e2e_slice1_jitter_ms": NAN_STR,
         "e2e_slice2_rtt_ms": NAN_STR, "e2e_slice2_loss_pct": NAN_STR,
+        "e2e_probe_freshness": "0",
         "nwdaf_load_embb": NAN_STR, "nwdaf_load_urllc": NAN_STR,
+        "estimated_load_embb": NAN_STR, "estimated_load_urllc": NAN_STR,
         "upf_backlog_bytes_embb": NAN_STR, "upf_backlog_bytes_urllc": NAN_STR,
         "upf_drops_embb": NAN_STR, "upf_drops_urllc": NAN_STR,
         "ran_prb_cell1": NAN_STR, "ran_prb_cell2": NAN_STR,
@@ -107,12 +116,20 @@ def extract_telemetry():
                     raw_data["e2e_slice2_rtt_ms"] = val_str
                 elif name == "e2e_slice2_packet_loss_pct":
                     raw_data["e2e_slice2_loss_pct"] = val_str
-                elif name in ("nwdaf_slice_load_level", "estimated_slice_load_level"):
+                elif name == "e2e_probe_freshness":
+                    raw_data["e2e_probe_freshness"] = val_str
+                elif name == "nwdaf_slice_load_level":
                     s = labels.get("snssai", "")
                     if s in ("01000001", "1"):
                         raw_data["nwdaf_load_embb"] = val_str
                     elif s in ("de00007b", "222"):
                         raw_data["nwdaf_load_urllc"] = val_str
+                elif name == "estimated_slice_load_level":
+                    s = labels.get("snssai", "")
+                    if s in ("01000001", "1"):
+                        raw_data["estimated_load_embb"] = val_str
+                    elif s in ("de00007b", "222"):
+                        raw_data["estimated_load_urllc"] = val_str
                 elif name == "upf_queue_backlog_bytes":
                     s = labels.get("snssai", "")
                     if s in ("01000001", "1"):
@@ -202,7 +219,9 @@ def main():
                 now_utc, f"{elapsed:.6f}", RUN_ID, scrape_ok, f"{scrape_lat:.3f}",
                 telemetry["e2e_slice1_tput_mbps"], telemetry["e2e_slice1_jitter_ms"],
                 telemetry["e2e_slice2_rtt_ms"], telemetry["e2e_slice2_loss_pct"],
+                telemetry["e2e_probe_freshness"],
                 telemetry["nwdaf_load_embb"], telemetry["nwdaf_load_urllc"],
+                telemetry["estimated_load_embb"], telemetry["estimated_load_urllc"],
                 telemetry["upf_backlog_bytes_embb"], telemetry["upf_backlog_bytes_urllc"],
                 telemetry["upf_drops_embb"], telemetry["upf_drops_urllc"],
                 telemetry["ran_prb_cell1"], telemetry["ran_prb_cell2"],
