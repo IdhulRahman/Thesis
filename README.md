@@ -78,7 +78,7 @@ sequenceDiagram
     NonRT->>RIC: Update A1 Policy (Targeted steering constraints & slice weights)
     RIC->>RAN: E2 Control Request (E2SM-RC ID: 3: Handover UE to Cell-2 if RAN bottleneck)
     RAN->>UE: RRC Reconfiguration (Handover to Cell-2 PCI 2 :4044)
-    NonRT->>NonRT: Verify SLA recovery; suppress ineffective action churn
+    NonRT->>NonRT: Verify SLA recovery and suppress ineffective action churn
     RAN-->>Mon: Stream radio telemetry to Prometheus
     Core-->>Mon: Stream core user-plane metrics to Prometheus
     RIC-->>Mon: Log closed-loop decisions and SLA recovery timestamps
