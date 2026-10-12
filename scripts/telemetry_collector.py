@@ -121,10 +121,12 @@ def format_prometheus_metrics():
             metrics_store["e2e_slice1_jitter_ms"] = float("nan")
 
         if not ue2_reporting:
-            metrics_store["e2e_slice2_latency_rtt_ms"] = float("nan")
             metrics_store["e2e_slice2_packet_loss_pct"] = float("nan")
             metrics_store["e2e_slice2_last_seq"] = float("nan")
             metrics_store["e2e_slice2_reply_age_sec"] = float("nan")
+
+        if not ue2_meas_fresh:
+            metrics_store["e2e_slice2_latency_rtt_ms"] = float("nan")
 
         # Probe freshness reflects the actual freshness of active QoS canary probing (URLLC RTT)
         metrics_store["e2e_probe_freshness"] = 1 if ue2_meas_fresh else 0
@@ -291,7 +293,7 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
                 body = self.rfile.read(length).decode("utf-8")
                 payload = json.loads(body)
 
-                global last_report_ue1, last_report_ue2, last_report_core, last_report_ran
+                global last_report_ue1, last_report_ue2, last_reply_ue2, last_report_core, last_report_ran
                 with METRICS_LOCK:
                     if "slice" in payload:
                         slice_id = str(payload["slice"])
