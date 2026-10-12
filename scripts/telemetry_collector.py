@@ -25,6 +25,8 @@ metrics_store = {
     "e2e_slice1_jitter_ms": float("nan"),
     "e2e_slice2_latency_rtt_ms": float("nan"),
     "e2e_slice2_packet_loss_pct": float("nan"),
+    "e2e_slice2_last_seq": float("nan"),
+    "e2e_slice2_reply_age_sec": float("nan"),
     "e2e_probe_freshness": 0,
 
     # Domain 1: 5G Core & NWDAF (VM-3)
@@ -92,6 +94,7 @@ metrics_store = {
 
 last_report_ue1 = 0.0
 last_report_ue2 = 0.0
+last_reply_ue2 = 0.0
 last_report_core = 0.0
 last_report_ran = 0.0
 last_nwdaf_poll_time = 0.0
@@ -102,22 +105,29 @@ def fmt_val(v, fmt=".2f"):
 
 
 def format_prometheus_metrics():
-    global last_report_ue1, last_report_ue2, last_report_core, last_report_ran
+    global last_report_ue1, last_report_ue2, last_reply_ue2, last_report_core, last_report_ran
     lines = []
     now = time.time()
     with METRICS_LOCK:
         # Auto-reset stale UE metrics if trafgen stopped pushing (> 3.5 seconds)
-        ue1_active = (last_report_ue1 > 0.0) and (now - last_report_ue1 <= 3.5)
-        ue2_active = (last_report_ue2 > 0.0) and (now - last_report_ue2 <= 3.5)
+        ue1_reporting = (last_report_ue1 > 0.0) and (now - last_report_ue1 <= 3.5)
+        ue2_reporting = (last_report_ue2 > 0.0) and (now - last_report_ue2 <= 3.5)
 
-        if not ue1_active:
+        # True measurement freshness: is there a non-NaN RTT measurement received within 3.5s?
+        ue2_meas_fresh = ue2_reporting and (last_reply_ue2 > 0.0) and (now - last_reply_ue2 <= 3.5) and not math.isnan(metrics_store["e2e_slice2_latency_rtt_ms"])
+
+        if not ue1_reporting:
             metrics_store["e2e_slice1_throughput_mbps"] = float("nan")
             metrics_store["e2e_slice1_jitter_ms"] = float("nan")
-        if not ue2_active:
+
+        if not ue2_reporting:
             metrics_store["e2e_slice2_latency_rtt_ms"] = float("nan")
             metrics_store["e2e_slice2_packet_loss_pct"] = float("nan")
+            metrics_store["e2e_slice2_last_seq"] = float("nan")
+            metrics_store["e2e_slice2_reply_age_sec"] = float("nan")
 
-        metrics_store["e2e_probe_freshness"] = 1 if (ue1_active or ue2_active) else 0
+        # Probe freshness reflects the actual freshness of active QoS probing, not mere reporting
+        metrics_store["e2e_probe_freshness"] = 1 if (ue2_meas_fresh or (ue1_reporting and not math.isnan(metrics_store["e2e_slice1_throughput_mbps"]))) else 0
 
         # Auto-reset stale Core metrics if core_adapter stopped pushing (> 3.5 seconds)
         if last_report_core > 0.0 and (now - last_report_core > 3.5):
@@ -162,6 +172,14 @@ def format_prometheus_metrics():
         lines.append("# HELP e2e_probe_freshness Freshness indicator for UE probe telemetry (1=Fresh, 0=Stale/Offline)")
         lines.append("# TYPE e2e_probe_freshness gauge")
         lines.append(f"e2e_probe_freshness {int(metrics_store['e2e_probe_freshness'])}")
+
+        lines.append("# HELP e2e_slice2_reply_age_sec Age of latest valid URLLC ICMP canary reply in seconds")
+        lines.append("# TYPE e2e_slice2_reply_age_sec gauge")
+        lines.append(f"e2e_slice2_reply_age_sec {fmt_val(metrics_store['e2e_slice2_reply_age_sec'], '.1f')}")
+
+        lines.append("# HELP e2e_slice2_last_seq Sequence number of latest valid URLLC ICMP canary reply")
+        lines.append("# TYPE e2e_slice2_last_seq gauge")
+        lines.append(f"e2e_slice2_last_seq {fmt_val(metrics_store['e2e_slice2_last_seq'], '.0f')}")
 
         lines.append("# HELP nwdaf_slice_load_level NWDAF reported slice load level percentage")
         lines.append("# TYPE nwdaf_slice_load_level gauge")
@@ -285,20 +303,41 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
                                 metrics_store["e2e_slice1_jitter_ms"] = float(payload["jitter_ms"])
                         elif slice_id in ("2", "urllc"):
                             last_report_ue2 = time.time()
-                            if "rtt_ms" in payload:
-                                metrics_store["e2e_slice2_latency_rtt_ms"] = float(payload["rtt_ms"])
-                            if "packet_loss_pct" in payload:
-                                metrics_store["e2e_slice2_packet_loss_pct"] = float(payload["packet_loss_pct"])
+                            rtt_val = payload.get("rtt_ms")
+                            if rtt_val is not None and str(rtt_val).lower() not in ("nan", "none", "null"):
+                                metrics_store["e2e_slice2_latency_rtt_ms"] = float(rtt_val)
+                                last_reply_ue2 = time.time()
+                            else:
+                                metrics_store["e2e_slice2_latency_rtt_ms"] = float("nan")
+
+                            loss_val = payload.get("packet_loss_pct")
+                            if loss_val is not None and str(loss_val).lower() not in ("nan", "none", "null"):
+                                metrics_store["e2e_slice2_packet_loss_pct"] = float(loss_val)
+                            else:
+                                metrics_store["e2e_slice2_packet_loss_pct"] = float("nan")
+
+                            if "last_seq" in payload and payload["last_seq"] is not None:
+                                try:
+                                    metrics_store["e2e_slice2_last_seq"] = float(payload["last_seq"])
+                                except (ValueError, TypeError):
+                                    pass
+
+                            if "reply_age_sec" in payload and payload["reply_age_sec"] is not None:
+                                try:
+                                    metrics_store["e2e_slice2_reply_age_sec"] = float(payload["reply_age_sec"])
+                                except (ValueError, TypeError):
+                                    pass
 
                     for key in ("e2e_slice1_throughput_mbps", "e2e_slice1_jitter_ms",
-                                "e2e_slice2_latency_rtt_ms", "e2e_slice2_packet_loss_pct",
                                 "rapp_diagnosed_bottleneck", "rapp_confidence", "a1_policy_threshold"):
                         if key in payload:
                             if "slice1" in key:
                                 last_report_ue1 = time.time()
-                            elif "slice2" in key:
-                                last_report_ue2 = time.time()
-                            metrics_store[key] = float(payload[key])
+                            try:
+                                val = payload[key]
+                                metrics_store[key] = float(val) if (val is not None and str(val).lower() not in ("nan", "none", "null")) else float("nan")
+                            except (ValueError, TypeError):
+                                pass
 
                     # RAN Telemetry Ingestion
                     if "ran_cell_prb_utilization" in payload or "ran_cell_radio_stats" in payload:

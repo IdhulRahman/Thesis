@@ -81,8 +81,8 @@ Telemetry is harvested across five architectural domains at a nominal polling fr
 #### 1.1 Architectural Context & Standards Notes
 * **Sender vs. Receiver Throughput (RFC 2544 / iperf3 Docs):**
   In `iperf3 -u` (UDP client mode), the client log reports the **sender-side offered bitrate**. If packets are dropped downstream at the gNB or UPF, the client is unaware unless bidirectional control packets or receiver-side logs (`iperf3 -s` at EXT-DN) are captured. Consequently, `e2e_slice1_tput_mbps` represents offered load at the UE ingress.
-* **Canary Latency & Freshness Decay (RFC 2681):**
-  `e2e_slice2_rtt_ms` samples the latest ICMP echo reply from a continuous 100 ms canary probe stream directed at EXT-DN (`192.168.70.145`). When probing stops, metrics auto-decay to `NaN` after 3.5 seconds (accompanied by `e2e_probe_freshness = 0`), preventing offline probes from appearing as 0.0 ms / 0% loss (false healthy status). 
+* **Canary Latency, Age & Freshness Decay (RFC 2681):**
+  `e2e_slice2_rtt_ms` samples the latest ICMP echo reply from a continuous 100 ms canary probe stream directed at EXT-DN (`192.168.70.145`). If ping halts while `trafgen.sh` continues running, `trafgen.sh` detects zero new replies in the evaluation interval, increments measurement age (`reply_age_sec`), computes 100% loss for expected probes, and pushes `rtt_ms: null`. The collector exports `e2e_slice2_latency_rtt_ms NaN` and resets `e2e_probe_freshness = 0`, ensuring freshness measures actual measurement vitality rather than mere HTTP daemon reporting vitality. Auxiliary Prometheus metrics `e2e_slice2_reply_age_sec` and `e2e_slice2_last_seq` track probe age and sequence continuity. 
 
 #### 1.2 Manual Shell Extraction Procedure (VM-5)
 ```bash

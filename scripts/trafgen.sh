@@ -99,7 +99,10 @@ case "$ACTION" in
 
     prev_rtt="0.0"
     prev_eval_seq=0
+    last_rx_seq=0
     T_START=$(date +%s)
+    last_rx_ts=$T_START
+
     for ((sec=1; sec<=DURATION; sec++)); do
       sleep 1
 
@@ -109,15 +112,12 @@ case "$ACTION" in
         [[ -z "$tput" ]] && tput="0.0"
       fi
 
-      rtt="0.0"
+      rtt="NaN"
       jitter="0.00"
-      loss_pct="0.0"
-      if [[ -n "$PING_LOG" && -f "$PING_LOG" ]]; then
-        rtt=$(tail -n 15 "$PING_LOG" 2>/dev/null | grep 'bytes from' | grep -oP '(?<=time=)\d+(\.\d+)?' | tail -n 1 || echo "0.0")
-        [[ -z "$rtt" ]] && rtt="0.0"
+      loss_pct="100.0"
+      measurement_age=0
 
-        # Sequence-based packet loss tracking using icmp_seq with a 200ms (2-probe) grace period.
-        # Derived from actual wall-clock elapsed time to prevent loop jitter drift.
+      if [[ -n "$PING_LOG" && -f "$PING_LOG" ]]; then
         now_ts=$(date +%s)
         elapsed_sec=$(( now_ts - T_START ))
         (( elapsed_sec < 1 )) && elapsed_sec=sec
@@ -127,47 +127,82 @@ case "$ACTION" in
         fi
         expected_probes=$(( target_seq - prev_eval_seq ))
 
-        if (( expected_probes > 0 )); then
-          rx_probes=0
-          # Strict filter: ONLY count successful echo replies containing 'bytes from' and 'time='.
-          # Ignores ICMP error messages (e.g. Destination Host Unreachable) and deduplicates sequence numbers.
-          for s in $(tail -n 60 "$PING_LOG" 2>/dev/null | grep -E 'bytes from.*time=' | grep -oP 'icmp_seq=\K\d+' | sort -u); do
-            if (( s > prev_eval_seq && s <= target_seq )); then
-              rx_probes=$(( rx_probes + 1 ))
-            fi
-          done
+        rx_probes=0
+        window_rtt=""
+        window_max_seq=0
 
-          loss_pct=$(echo "scale=1; ($expected_probes - $rx_probes) * 100.0 / $expected_probes" | bc -l 2>/dev/null || echo "0.0")
-          if (( $(echo "$loss_pct < 0" | bc -l 2>/dev/null || echo 0) )); then
+        # Strict filter: ONLY count successful echo replies containing 'bytes from' and 'time='.
+        # Ignores ICMP error messages (e.g. Destination Host Unreachable) and deduplicates sequence numbers.
+        while read -r seq rtt_val; do
+          if [[ -n "$seq" && "$seq" =~ ^[0-9]+$ ]]; then
+            if (( seq > prev_eval_seq && seq <= target_seq )); then
+              rx_probes=$(( rx_probes + 1 ))
+              if (( seq > window_max_seq )); then
+                window_max_seq=$seq
+                window_rtt="$rtt_val"
+              fi
+            fi
+          fi
+        done < <(tail -n 60 "$PING_LOG" 2>/dev/null | awk '/bytes from.*time=/ {
+          s=0; r=0;
+          for(i=1;i<=NF;i++) {
+            if($i ~ /^icmp_seq=/) { split($i, a, "="); s=a[2]+0 }
+            if($i ~ /^time=/) { split($i, b, "="); r=b[2] }
+          }
+          if(s > 0) print s, r
+        }' | sort -k1,1n -u)
+
+        if (( rx_probes > 0 )); then
+          rtt="$window_rtt"
+          last_rx_seq=$window_max_seq
+          last_rx_ts=$now_ts
+          measurement_age=0
+
+          if (( expected_probes > 0 )); then
+            loss_pct=$(echo "scale=1; ($expected_probes - $rx_probes) * 100.0 / $expected_probes" | bc -l 2>/dev/null || echo "0.0")
+            if (( $(echo "$loss_pct < 0" | bc -l 2>/dev/null || echo 0) )); then
+              loss_pct="0.0"
+            fi
+          else
             loss_pct="0.0"
           fi
-          prev_eval_seq=$target_seq
-        fi
 
-        if [[ "$rtt" == "0.0" ]]; then
+          if (( $(echo "$prev_rtt > 0 && $rtt > 0" | bc -l 2>/dev/null || echo 0) )); then
+            jitter=$(echo "scale=2; sqrt(($rtt - $prev_rtt)^2)" | bc -l 2>/dev/null || echo "0.00")
+          fi
+          prev_rtt="$rtt"
+        else
+          # No new reply received in this window: mark RTT as NaN and record elapsed measurement age
+          rtt="NaN"
+          measurement_age=$(( now_ts - last_rx_ts ))
           loss_pct="100.0"
+          prev_rtt="0.0"
         fi
-
-        if (( $(echo "$prev_rtt > 0 && $rtt > 0" | bc -l 2>/dev/null || echo 0) )); then
-          jitter=$(echo "scale=2; sqrt(($rtt - $prev_rtt)^2)" | bc -l 2>/dev/null || echo "0.00")
-        fi
-        prev_rtt="$rtt"
+        prev_eval_seq=$target_seq
       fi
 
       sla="OK"
-      if (( $(echo "$rtt > 20.0" | bc -l 2>/dev/null || echo 0) )); then
+      if [[ "$rtt" == "NaN" ]]; then
+        sla="NO_REPLY"
+      elif (( $(echo "$rtt > 20.0" | bc -l 2>/dev/null || echo 0) )); then
         sla="VIOLATED"
-      elif [[ "$rtt" == "0.0" ]]; then
-        sla="WAIT"
       fi
 
       curl -s -m 1 -X POST -H "Content-Type: application/json" \
         -d "{\"slice\": 1, \"throughput_mbps\": $tput}" "$MONITOR_URL" >/dev/null 2>&1 &
-      curl -s -m 1 -X POST -H "Content-Type: application/json" \
-        -d "{\"slice\": 2, \"rtt_ms\": $rtt, \"packet_loss_pct\": $loss_pct}" "$MONITOR_URL" >/dev/null 2>&1 &
+
+      if [[ "$rtt" != "NaN" ]]; then
+        curl -s -m 1 -X POST -H "Content-Type: application/json" \
+          -d "{\"slice\": 2, \"rtt_ms\": $rtt, \"packet_loss_pct\": $loss_pct, \"last_seq\": $last_rx_seq, \"reply_age_sec\": $measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
+        disp_rtt="${rtt} ms"
+      else
+        curl -s -m 1 -X POST -H "Content-Type: application/json" \
+          -d "{\"slice\": 2, \"rtt_ms\": null, \"packet_loss_pct\": $loss_pct, \"last_seq\": $last_rx_seq, \"reply_age_sec\": $measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
+        disp_rtt="NO_NEW_REPLY"
+      fi
 
       printf "%4ds | %-17s | %-15s | %-12s | %-7s | %s\n" \
-        "$sec" "${tput} Mbps" "${rtt} ms" "${jitter} ms" "${loss_pct}%" "$sla"
+        "$sec" "${tput} Mbps" "$disp_rtt" "${jitter} ms" "${loss_pct}%" "$sla"
     done
 
     echo "------+-------------------+-----------------+------------+--------+-------------"
