@@ -297,6 +297,7 @@ Thesis/
 │   ├── a1-integration.md              # Complete A1 integration guide (VM-1 to VM-2)
 │   ├── e2-integration.md              # Complete E2 integration guide (VM-4 to VM-2)
 │   ├── thesis-system-technical-snapshot.md # Formal technical snapshot & telemetry provenance reference
+│   ├── bottleneck-list-regulator.md   # 3GPP Rel-17 & ETSI regulatory bottleneck taxonomy reference
 │   └── troubleshooting.md             # Solutions for 29+ validated operational failure modes
 ├── scripts/                           # Centralized multi-VM scripts repository
 │   └── README.md                      # Automation and telemetry daemon documentation
@@ -305,6 +306,7 @@ Thesis/
 
 ### Direct Links to Detailed Guides:
 - **System Technical Snapshot (Formal Reference):** [docs/thesis-system-technical-snapshot.md](docs/thesis-system-technical-snapshot.md)
+- **Regulatory Bottleneck Taxonomy (3GPP/ETSI):** [docs/bottleneck-list-regulator.md](docs/bottleneck-list-regulator.md)
 - **Architecture Specification:** [docs/architecture.md](docs/architecture.md)
 - **Baseline & Methodology Guide:** [docs/bottleneck-methodology.md](docs/bottleneck-methodology.md)
 - **Model Comparison Paper Draft:** [docs/Goals_Paper/paper-draft-model-comparison.md](docs/Goals_Paper/paper-draft-model-comparison.md)
