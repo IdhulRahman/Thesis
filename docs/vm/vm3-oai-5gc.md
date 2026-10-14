@@ -212,6 +212,7 @@ In OAI CN5G Federation `v2.1.0`, container services mount configuration files fr
 1. **Slice 1 Configuration (`conf/slicing_slice1_config.yaml`):**
    - Configures `oai-smf-slice1`, `oai-upf-slice1`, and `oai-nrf-slice12`:
    - `snssais`: `sst: 1, sd: 000001` (hex), DNN: `default`, IPv4 subnet: `12.1.1.0/24`.
+   - `smf.upfs`: Configures `enable_usage_reporting: yes` for NRF-discovered UPF node `192.168.70.142` to enable native user-plane usage reports (URR) via PFCP.
 
 2. **Slice 2 Configuration (`conf/slicing_slice2_config.yaml`):**
    - Configures `oai-smf-slice2` and `oai-upf-slice2`:
@@ -647,8 +648,13 @@ Architecturally (3GPP TS 23.288 §6.2), user-plane load analytics require teleme
 1. **Absence of SBI on UPF:** The C-based `oai-upf-slice1` and `oai-upf-slice2` containers (`open5gs-upf`/`bess`) lack an HTTP/2 Service-Based Interface (SBI) server to export kernel statistics to NWDAF.
 2. **Limited NWDAF SBI Event Subscriptions:** The SBI consumer container (`oai-nwdaf-sbi`) only implements HTTP/2 client connections to:
    - `oai-amf` (`namf-evts` on port `8080`): Listens for UE registration and mobility events.
-   - `oai-smf` (`nsmf-pdusession` on port `8080`): Listens for PDU session creation and termination events.
+   - `oai-smf` (`nsmf-pdusession` on port `8080`): Listens for PDU session lifecycle events (`PDU_SES_EST`, `UE_IP_CH`, `DDDS`).
 3. **Absence of Qdisc / Buffer Data in MongoDB:** The internal NWDAF database (`oai-nwdaf-database` / MongoDB) only stores control plane event documents (session counts). No collections or schemas exist to store queue buffer utilization (`tc qdisc backlog`) or packet drop statistics from physical UPF interfaces.
+4. **Empirical Verification of UPF Usage Reporting & QoS Monitoring:**
+   - **Configuration:** `enable_usage_reporting: yes` was enabled on `oai-smf-slice1` by matching the NRF-registered UPF host (`host: 192.168.70.142`), confirming successful association in SMF logs: `Found NRF UPF with host name 192.168.70.142 in configuration, take config from there` with `enable_usage_reporting: Yes`.
+   - **Continuous Traffic Evaluation:** A 60-second continuous ICMP traffic stream (300 packets, interval 0.2s, 0% loss, ~0.28ms RTT) was injected from UE 1 to the External DN (`192.168.70.145`).
+   - **Database Result:** MongoDB aggregation query `db.smf.aggregate([{$project: {qos_report_count: {$size: {$ifNull: ["$qosmonlist", []]}}}}])` confirmed that `qos_report_count` remained strictly **`0`** before and after traffic injection.
+   - **Binary Audit Confirmation:** Direct inspection of compiled symbols in the official OAI SMF release binary (`strings /openair-smf/bin/oai_smf | grep -i "QOS_MON"`) returned empty, proving that `oai-smf:v2.1.0` has not implemented the producer logic for `QOS_MON` event exposure notifications.
 
 #### 3. Testbed Live Verification Evidence (Live REST Output)
 When a 3GPP TS 29.520 analytics query is executed through the VM-3 Kong Gateway:
@@ -684,9 +690,9 @@ Even when artificial load or physical congestion is injected into the UPF (e.g.,
 
 #### 4. Scientific Implications for Thesis Research Methodology
 The findings above confirm that:
-1. **`absoluteNum` in OAI NWDAF v2.1.0 is now confirmed functional:** After correcting the multi-slice `oai-nwdaf-sbi` SBI endpoint configuration (see §9 Step 4), SMF event subscriptions succeed and MongoDB `testing.smf` is populated with real PDU session documents. `absoluteNum` correctly reflects `CountDocuments` output — returning `1` after the first successful PDU Session Establishment.
+1. **`absoluteNum` in OAI NWDAF v2.1.0 is confirmed functional for control-plane sessions:** After correcting the multi-slice `oai-nwdaf-sbi` SBI endpoint configuration (see §9 Step 4), SMF event subscriptions succeed and MongoDB `testing.smf` is populated with real PDU session documents. `absoluteNum` correctly reflects `CountDocuments` output — returning `1` after the first successful PDU Session Establishment.
 2. **`relativeRatio` and `confidence` remain hardcoded `0`:** The OAI development team has not yet implemented these calculations (`//TODO` in source). This is an upstream limitation, not a deployment error.
-3. **OAI NWDAF v2.1.0 cannot currently serve as a dynamic user-plane load telemetry source** for detecting real-time packet bottlenecks in the rApp control loop.
+3. **OAI NWDAF v2.1.0 cannot currently serve as a dynamic user-plane load telemetry source** for detecting real-time packet bottlenecks in the rApp control loop, as confirmed by both empirical traffic injection (`qos_report_count: 0`) and binary audit (absence of `QOS_MON` in `oai-smf`).
 4. **Requirement for a Standards-Aligned Dedicated Adapter:** Core network observability in this research is rigorously and legitimately achieved through the UPF host telemetry adapter (`core_adapter.py` v9), which extracts interface counters and Linux qdisc queue occupancy directly, strictly conforming to 3GPP Performance Management principles (TS 32.401, TS 28.552).
 
 ---

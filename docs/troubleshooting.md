@@ -2429,35 +2429,49 @@ In OAI SMF ([`smf_app.cpp`](https://github.com/openairinterface/oai-cn5g-smf/blo
 
 ### Solution
 
-Rolling back the manual configuration to the clean working `.bak` configuration restored working associations and UE connectivity:
+1. **Root Cause Resolution (Permanent Configuration):**
+   To configure UPF parameters such as `enable_usage_reporting: yes` alongside NRF dynamic discovery, the `host` parameter must match the exact host string registered in NRF (`192.168.70.142` for Slice 1 UPF) placed under `smf.upfs`:
+   ```yaml
+   smf:
+     support_features:
+       use_local_subscription_info: yes
+       use_local_pcc_rules: yes
+     upfs:
+       - host: 192.168.70.142
+         config:
+           enable_usage_reporting: yes
+   ```
+   Apply via force-recreate of the service (`oai_smf_slice1`):
+   ```bash
+   cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
+   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d --force-recreate oai_smf_slice1
+   ```
+   Verify successful matching and activation in logs without PFCP timeout:
+   ```bash
+   sudo docker logs --tail 35 oai-smf-slice1 | grep -i -E "NRF UPF|take config|enable_usage_reporting"
+   # Expected:
+   # Found NRF UPF with host name 192.168.70.142 in configuration, take config from there
+   # enable_usage_reporting.................: Yes
+   ```
 
-1. Restore from `.bak` backups (created before modification):
+2. **Rollback Procedure (Emergency Recovery):**
+   If an invalid host string or conflicting interface block causes PFCP association failure, restore the clean upstream configuration from `.bak`:
    ```bash
    cp /opt/oran/5gc/oai-cn5g-fed/docker-compose/conf/slicing_slice1_config.yaml.bak \
       /opt/oran/5gc/oai-cn5g-fed/docker-compose/conf/slicing_slice1_config.yaml
 
    cp /opt/oran/5gc/oai-cn5g-fed/docker-compose/conf/slicing_slice2_config.yaml.bak \
       /opt/oran/5gc/oai-cn5g-fed/docker-compose/conf/slicing_slice2_config.yaml
+
+   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d --force-recreate oai_smf_slice1 oai_smf_slice2
    ```
 
-2. Force-recreate both SMF instances so they load the clean config:
-   ```bash
-   cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
-   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d --force-recreate oai-smf-slice1 oai-smf-slice2
-   ```
-
-3. Verify PFCP Association success — look for `PFCP Association Setup Response` without timeout in logs:
-   ```bash
-   docker logs --tail 30 oai-smf-slice1 | grep -i "pfcp\|n4\|upf"
-   docker logs --tail 30 oai-smf-slice2 | grep -i "pfcp\|n4\|upf"
-   ```
-
-4. Verify end-to-end connectivity after PDU session re-establishment:
+3. Verify end-to-end connectivity after PDU session re-establishment:
    ```bash
    sudo ip netns exec ue1 ping -c 5 192.168.70.145
    ```
 
-> **Key Lesson:** The upstream OAI SMF `upfs:` block can be used alongside NRF discovery to configure advanced features like `enable_usage_reporting: yes`, provided that its `host` parameter matches the NRF-registered UPF profile exactly. For the immediate baseline deployment, reverting to the default upstream configuration files successfully restored working N4 PFCP associations.
+> **Key Lesson:** The upstream OAI SMF `upfs:` block can be used alongside NRF discovery to configure advanced features like `enable_usage_reporting: yes`, provided that its `host` parameter matches the NRF-registered UPF profile string exactly (`192.168.70.142` instead of container names like `oai-upf-slice1`). Additionally, note that docker compose service names use underscores (`oai_smf_slice1`), distinct from container names (`oai-smf-slice1`).
 
 ---
 

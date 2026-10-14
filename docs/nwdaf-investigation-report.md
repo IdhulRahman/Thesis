@@ -158,12 +158,56 @@ func nwPerfNumOfPdu(w http.ResponseWriter, r *http.Request) {
 
 ---
 
-### Bukti 4: Status Pelaporan Beban User-Plane: `enable_usage_reporting: No` pada PFCP Asosiasi UPF
+### Bukti 4: Investigasi Empiris Pelaporan User-Plane: Validasi `enable_usage_reporting` dan Audit Biner `QOS_MON`
 
-Pada penelusuran status asosiasi PFCP antara SMF dan UPF di VM-3:
-* Teramati bahwa asosiasi UPF memiliki parameter operasional: **`enable_usage_reporting: No`**.
-* **Implikasi Nyata:** Ketika *usage reporting* bernilai `No`, UPF tidak akan mengirimkan Usage Reports (URR) maupun metrik volume data ke SMF melalui antarmuka PFCP (N4).
-* Hal ini menjelaskan mengapa metrik *load user-plane* (volume/throughput dinamis) tidak tersedia melalui pipeline SMF-NWDAF. Namun untuk **notifikasi siklus hidup sesi bidang kendali (*control-plane session establishment*)**, SMF menanganinya secara mandiri via layanan `Nsmf_EventExposure` tanpa bergantung pada URR UPF.
+Untuk menguji apakah telemetri performa *user-plane* dapat dialirkan secara *native* dari UPF ke SMF lalu ke NWDAF, tim riset telah melakukan pengujian empiris terstruktur:
+
+#### 1. Keberhasilan Aktivasi `enable_usage_reporting: Yes` pada SMF-1
+Dengan mencocokkan identitas host UPF yang didaftarkan oleh NRF (`192.168.70.142`) pada blok `smf.upfs` di `slicing_slice1_config.yaml`:
+```yaml
+smf:
+  upfs:
+    - host: 192.168.70.142
+      config:
+        enable_usage_reporting: yes
+```
+SMF-1 berhasil mencocokkan node secara presisi saat inisialisasi:
+```text
+[smf_app] [debug] Found NRF UPF with host name 192.168.70.142 in configuration, take config from there
+...
+ + 192.168.70.142
+      + host...................................: 192.168.70.142
+      + port...................................: 8805
+      + enable_usage_reporting.................: Yes
+```
+Asosiasi PFCP N4 terbentuk sempurna tanpa *timeout*.
+
+#### 2. Uji Aliran Trafik Kontinu 60 Detik & Hasil Agregasi MongoDB
+Setelah sesi PDU baru terbentuk di SMF-1 (`/nsmf-pdusession/v1/sm-contexts/1`) dan langganan event NWDAF-SBI aktif (`QOS_MON`, `PDU_SES_EST`), trafik data kontinu diinjeksikan dari UE 1 (VM-5) ke External DN:
+* **Beban Trafik:** 300 paket ICMP (interval 0.2 detik = 60 detik pengujian), *packet loss* 0%, RTT rata-rata 0.28 ms.
+* **Hasil Kueri Agregasi MongoDB:**
+  ```javascript
+  db.smf.aggregate([
+    {$project: {_id: 1, qos_report_count: {$size: {$ifNull: ["$qosmonlist", []]}}}}
+  ]).forEach(printjson);
+  // Output: { _id: '208950000000001', qos_report_count: 0 }
+  ```
+  Nilai `qos_report_count` **tetap 0** sebelum dan sesudah trafik 60 detik dialirkan.
+
+#### 3. Audit Biner SMF: Bukti Ketiadaan Modul Produsen `QOS_MON`
+Pemeriksaan langsung pada simbol biner C++ kontainer resmi OAI SMF (`oaisoftwarealliance/oai-smf:v2.1.0`):
+```bash
+sudo docker exec oai-smf-slice1 strings /openair-smf/bin/oai_smf | grep -i "QOS_MON"
+# Hasil: KOSONG (tidak ditemukan)
+```
+* **Di Sisi NWDAF (`oai-nwdaf-sbi`):** Handler `getUpdateQOS_MON` ([`smf_service.go:231-252`](file:///opt/oran/5gc/oai-cn5g-nwdaf/components/oai-nwdaf-sbi/internal/sbi/smf_service.go)) sudah siap melakukan `$push` ke array `qosmonlist`.
+* **Di Sisi SMF (`oai-smf` v2.1.0):** Binary SMF resmi **belum mengimplementasikan logika produsen event `QOS_MON`** (3GPP TS 29.508 §5.2.2.3.6). Selain itu, laporan penggunaan PFCP (URR) dalam arsitektur 3GPP dialirkan untuk fungsi *Charging* (CHF) dan *Policy* (PCF), bukan dipaparkan sebagai event telemetri antrean/throughput instan ke NWDAF.
+
+#### 4. Implikasi Metodologis Tesis
+Temuan empiris ini membuktikan secara ilmiah dan definitif bahwa:
+1. NWDAF OAI v2.1.0 secara native hanya bertindak sebagai penyedia **observabilitas keandalan sesi bidang kendali (*Control-Plane Session Lifecycle*)** melalui event `PDU_SES_EST` (menghasilkan `absoluteNum: 1`).
+2. Observabilitas dinamika **antrean buffer, paket drop (*queue backlog*), dan throughput riil pada *User Plane*** secara metodologis **harus diperoleh melalui Dedicated UPF Host Adapter (`core_adapter.py`)** yang mengekstrak metrik qdisc kernel Linux sesuai prinsip 3GPP Performance Management (TS 28.552).
+
 
 ### Bukti 5: Status Database MongoDB — Terkonfirmasi Berisi Dokumen Nyata
 
