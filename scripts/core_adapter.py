@@ -544,7 +544,7 @@ def positive(value):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", help="JSON resource configuration; default: the two UPFs in VM-3")
-    parser.add_argument("--run-id", help="Independent experiment/run ID, e.g. PILOT_001")
+    parser.add_argument("--run-id", default="PILOT_RUN", help="Independent experiment/run ID, e.g. PILOT_001")
     parser.add_argument("--output-dir", default="./upf-telemetry", help="Parent directory of timestamped run archives")
     parser.add_argument("--interval", type=positive, default=1.0, help="Target sampling period in seconds, research choice")
     parser.add_argument("--command-timeout", type=positive, default=2.5)
