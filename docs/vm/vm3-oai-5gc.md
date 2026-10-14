@@ -219,9 +219,10 @@ In OAI CN5G Federation `v2.1.0`, container services mount configuration files fr
    - `snssais`: `sst: 222, sd: 00007B` (hex), DNN: `lowlatency`, IPv4 subnet: `12.1.2.0/24`.
 
 3. **NSSF Slice Mapping (`conf/nssf_slice_config.yaml`):**
-   - Routes slice selection queries from AMF to the appropriate NRF/SMF instance:
-   - `[SST: 1, SD: '000001']` -> `nsiId: '11'` (`oai-nrf-slice12`).
-   - `[SST: 222, SD: '00007B']` -> `nsiId: '12'` (`oai-nrf-slice12`).
+   - Routes slice selection queries from AMF to the appropriate NRF/SMF instance (3GPP TS 29.531 §6.1.6.2.3):
+   - `[SST: 1, SD: '000001']` -> `nsiId: '11'`, `nrfId: http://192.168.70.136:8080/nnrf-disc/v1/nf-instances`, `nrfNfMgtUri: http://192.168.70.136:8080/nnrf-nfm/v1/nf-instances`.
+   - `[SST: 222, SD: '00007B']` -> `nsiId: '12'`, `nrfId: http://192.168.70.136:8080/nnrf-disc/v1/nf-instances`, `nrfNfMgtUri: http://192.168.70.136:8080/nnrf-nfm/v1/nf-instances`.
+   - **Crucial Requirement:** In NSSF `nsiInfoList`, each entry must explicitly declare `nrfNfMgtUri` alongside `nrfId`. When AMF operates with `enable_nssf: yes`, it queries NSSF and consumes `nrfNfMgtUri` to determine its target NRF management registration endpoint. If omitted, AMF attempts NF registration toward an empty URI string (`Send HTTP message to <empty>`), failing startup registration.
 
 4. **Base Configuration (`conf/slicing_base_config.yaml`):**
    - Contains AMF configuration, PLMN support list, and SBI interface endpoints.
@@ -653,8 +654,7 @@ Architecturally (3GPP TS 23.288 §6.2), user-plane load analytics require teleme
 4. **Empirical Verification of UPF Usage Reporting & QoS Monitoring:**
    - **Configuration:** `enable_usage_reporting: yes` was enabled on `oai-smf-slice1` by matching the NRF-registered UPF host (`host: 192.168.70.142`), confirming successful association in SMF logs: `Found NRF UPF with host name 192.168.70.142 in configuration, take config from there` with `enable_usage_reporting: Yes`.
    - **Continuous Traffic Evaluation:** A 60-second continuous ICMP traffic stream (300 packets, interval 0.2s, 0% loss, ~0.28ms RTT) was injected from UE 1 to the External DN (`192.168.70.145`).
-   - **Database Result:** MongoDB aggregation query `db.smf.aggregate([{$project: {qos_report_count: {$size: {$ifNull: ["$qosmonlist", []]}}}}])` confirmed that `qos_report_count` remained strictly **`0`** before and after traffic injection.
-   - **Binary Audit Confirmation:** Direct inspection of compiled symbols in the official OAI SMF release binary (`strings /openair-smf/bin/oai_smf | grep -i "QOS_MON"`) returned empty, proving that `oai-smf:v2.1.0` has not implemented the producer logic for `QOS_MON` event exposure notifications.
+   - **Ongoing Failure Localization:** Although `enable_usage_reporting: Yes` is active and OAI SMF source code (`smf_context.cpp`) contains QoS monitoring hooks, `qos_report_count` currently remains 0. Tracing of N4/PFCP messages (Create URR vs. Usage Report) and verification that UE test traffic traverses the PDU tunnel (`oaitun_ue1`) rather than local host veth routes is currently in progress.
 
 #### 3. Testbed Live Verification Evidence (Live REST Output)
 When a 3GPP TS 29.520 analytics query is executed through the VM-3 Kong Gateway:

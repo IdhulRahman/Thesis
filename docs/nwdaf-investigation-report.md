@@ -194,19 +194,27 @@ Setelah sesi PDU baru terbentuk di SMF-1 (`/nsmf-pdusession/v1/sm-contexts/1`) d
   ```
   Nilai `qos_report_count` **tetap 0** sebelum dan sesudah trafik 60 detik dialirkan.
 
-#### 3. Audit Biner SMF: Bukti Ketiadaan Modul Produsen `QOS_MON`
-Pemeriksaan langsung pada simbol biner C++ kontainer resmi OAI SMF (`oaisoftwarealliance/oai-smf:v2.1.0`):
-```bash
-sudo docker exec oai-smf-slice1 strings /openair-smf/bin/oai_smf | grep -i "QOS_MON"
-# Hasil: KOSONG (tidak ditemukan)
-```
-* **Di Sisi NWDAF (`oai-nwdaf-sbi`):** Handler `getUpdateQOS_MON` ([`smf_service.go:231-252`](file:///opt/oran/5gc/oai-cn5g-nwdaf/components/oai-nwdaf-sbi/internal/sbi/smf_service.go)) sudah siap melakukan `$push` ke array `qosmonlist`.
-* **Di Sisi SMF (`oai-smf` v2.1.0):** Binary SMF resmi **belum mengimplementasikan logika produsen event `QOS_MON`** (3GPP TS 29.508 §5.2.2.3.6). Selain itu, laporan penggunaan PFCP (URR) dalam arsitektur 3GPP dialirkan untuk fungsi *Charging* (CHF) dan *Policy* (PCF), bukan dipaparkan sebagai event telemetri antrean/throughput instan ke NWDAF.
+#### 3. Status Lokalisasi Jalur Telemetri User-Plane
+* **Kondisi Terbukti:** Pengaturan `enable_usage_reporting: Yes` telah aktif pada asosiasi PFCP antara SMF-1 dan UPF-1. Namun, pengujian awal trafik kontinu belum menghasilkan pertambahan laporan pada array `qosmonlist` di MongoDB NWDAF (`qos_report_count: 0`).
+* **Klarifikasi Kode Sumber SMF:** Berbeda dari dugaan awal, kode sumber resmi OAI SMF ([`smf_context.cpp`](https://github.com/openairinterface/oai-cn5g-smf/blob/531b6d8755ee792e49122c57bbab047db88ec4b5/src/smf_app/smf_context.cpp)) memiliki pemrosesan *usage report* yang memanggil penanganan monitoring QoS:
+  ```cpp
+  ev_notif.setUsageReport(ur_model);
+  pc->trigger_qos_monitoring(req->seid, ev_notif, 1);
+  ```
+* **Klarifikasi Standar 3GPP:** Sesuai **3GPP TS 23.288 Tabel 6.5.2-2**, *traffic usage report* dari UPF secara eksplisit diakui sebagai salah satu data masukan untuk analitik beban jaringan (*UPF load analytics*) oleh NWDAF.
+* **Status Ilmiah:** Titik kegagalan pelaporan dari UPF ke NWDAF saat ini **belum terlokalisasi**. Sistem tidak boleh buru-buru menyimpulkan ketiadaan kapabilitas OAI atau meninggalkan jalur native.
 
-#### 4. Implikasi Metodologis Tesis
-Temuan empiris ini membuktikan secara ilmiah dan definitif bahwa:
-1. NWDAF OAI v2.1.0 secara native hanya bertindak sebagai penyedia **observabilitas keandalan sesi bidang kendali (*Control-Plane Session Lifecycle*)** melalui event `PDU_SES_EST` (menghasilkan `absoluteNum: 1`).
-2. Observabilitas dinamika **antrean buffer, paket drop (*queue backlog*), dan throughput riil pada *User Plane*** secara metodologis **harus diperoleh melalui Dedicated UPF Host Adapter (`core_adapter.py`)** yang mengekstrak metrik qdisc kernel Linux sesuai prinsip 3GPP Performance Management (TS 28.552).
+#### 4. Matriks Lokalisasi Titik Kegagalan N4/PFCP
+Untuk melokalisasi penyebab `qos_report_count: 0` secara sistematis, pengujian N4/PFCP ditelusuri dengan matriks diagnostik berikut:
+
+| Hasil Penelusuran | Titik Fokus Pemeriksaan |
+| :--- | :--- |
+| **Tidak ada `Create URR` saat sesi dibentuk** | SMF dan konfigurasi sesi efektif (QoS rule / PCC) |
+| **`Create URR` ada, tetapi tidak ada `Usage Report`** | Dukungan UPF, trigger pelaporan, dan kepastian rute trafik melewati tunnel UE |
+| **`Usage Report` diterima SMF, tetapi tidak ada notifikasi** | Logika event triggering SMF, status subscription, dan callback URI |
+| **Notifikasi mencapai NWDAF, tetapi database kosong** | Parser, skema JSON, dan logika penyimpanan di `oai-nwdaf-sbi` |
+
+Selain itu, jalur rute trafik pengujian di VM-5 harus diverifikasi secara ketat (`ip route get 192.168.70.145`) untuk memastikan paket benar-benar melewati terowongan `oaitun_ue1` (melewati gNB dan UPF), bukan di-route langsung via veth interface lokal host.
 
 
 ### Bukti 5: Status Database MongoDB — Terkonfirmasi Berisi Dokumen Nyata

@@ -2004,8 +2004,9 @@ On VM-3 (`oai-core`), update the configuration files to match the thesis multi-s
    - Set `snssais`: `sst: 222`, `sd: 00007B`
    - Set `dnn`: `lowlatency`, subnet `12.1.2.0/24`
 3. Update `conf/nssf_slice_config.yaml`:
-   - Map `sst: 1, sd: '000001'` to `nsiId: '11'` (NRF `192.168.70.136`).
-   - Map `sst: 222, sd: '00007B'` to `nsiId: '12'` (NRF `192.168.70.136`).
+   - Map `sst: 1, sd: '000001'` to `nsiId: '11'` with `nrfId: http://192.168.70.136:8080/nnrf-disc/v1/nf-instances` and `nrfNfMgtUri: http://192.168.70.136:8080/nnrf-nfm/v1/nf-instances`.
+   - Map `sst: 222, sd: '00007B'` to `nsiId: '12'` with `nrfId: http://192.168.70.136:8080/nnrf-disc/v1/nf-instances` and `nrfNfMgtUri: http://192.168.70.136:8080/nnrf-nfm/v1/nf-instances`.
+   - **Crucial:** In `configuration.nsiInfoList`, each slice must define `nrfNfMgtUri` alongside `nrfId`. When AMF has `enable_nssf: yes`, it retrieves the NRF Management URI from NSSF's `NsiInformation` response (3GPP TS 29.531 §6.1.6.2.3). If omitted, AMF registers toward an empty URI string (`Send HTTP message to <empty>`), triggering repeated registration warnings.
    - **Critical:** Preserve mandatory sections `taInfoList` (PLMN 208/95, TAC 40960) and `amfInfoList`, otherwise NSSF fails on startup with `[nssf_app] [error] Error parsing section : taInfoList`.
 4. In `conf/slicing_base_config.yaml`:
    - Add `nrf: host: oai-nrf-slice12` under `nfs:` so AMF successfully registers its NF profile.
