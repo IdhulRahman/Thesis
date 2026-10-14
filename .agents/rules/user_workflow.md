@@ -8,3 +8,6 @@
 
 3. **Observer Consultation with Concrete Evidence:**
    When encountering complex or architectural issues, formulate clear, structured questions and status reports to be submitted to the observer/reviewer. Always attach concrete, untruncated empirical evidence (exact log excerpts, JSON responses, command outputs, timestamps).
+
+4. **Always Push Commits:**
+   Whenever documentation or code changes are committed, always push the commits to the remote repository (`git push`) to ensure all documentation, code updates, and experiment logs are safely synchronized and tracked.
