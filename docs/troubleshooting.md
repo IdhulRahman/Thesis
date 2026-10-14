@@ -2352,6 +2352,117 @@ Even when standard 3GPP query parameters (`ana-req`, `event-filter`) are passed,
 
 ---
 
+## 49. UE 2 PDU Session Establishment Rejected — MySQL S-NSSAI Subscriber Profile Mismatch
+
+### Symptom
+
+UE 2 (`IMSI: 208950000000002`, Slice 2 URLLC) spawned via `spawn_multi_ue.sh` fails PDU Session Establishment. In `ue2.log`:
+
+```text
+[NAS] requested PDU session ID 10 type 1 NSSAI 222.123 DNN lowlatency
+[NAS] Send NAS_UPLINK_DATA_REQ message(PduSessionEstablishRequest)
+[NAS] Received NAS_DOWNLINK_DATA_IND type FGS_PDU_SESSION_ESTABLISHMENT_REJ with length 21
+[NAS] Received PDU Session Establishment reject
+```
+
+Meanwhile UE 1 (`IMSI: 208950000000001`, Slice 1 eMBB) connects successfully with `oaitun_ue1` UP and ping to DN (`192.168.70.145`) succeeding.
+
+### Cause
+
+The MySQL subscriber database (`oai_db`) had conflicting S-NSSAI provisioning for UE 2's IMSI in the `SessionManagementSubscriptionData` table. Specifically:
+
+1. The `singleNssai` column pointed to an incorrect slice ({SST: 1, SD: "000001"} — Slice 1 eMBB) instead of UE 2's intended Slice 2 ({SST: 222, SD: "00007B" / `123` decimal}).
+2. Because the subscriber's session management data did not reference the correct `defaultSingleNssais` or `dnn-configurations`, `oai-smf-slice2` could not find a matching DNN profile and rejected the session immediately with `FGS_PDU_SESSION_ESTABLISHMENT_REJ`.
+
+### Solution
+
+1. Connect to the `mysql` container on VM-3:
+   ```bash
+   sudo docker exec -it mysql mysql -u root -plinux oai_db
+   ```
+
+2. Verify the current (incorrect) subscription:
+   ```sql
+   SELECT * FROM SessionManagementSubscriptionData
+   WHERE ueid = '208950000000002' AND sst = 222;
+   ```
+
+3. Correct the `singleNssai` JSON and `dnn-configurations` to align with Slice 2 (SST: 222, SD: "00007B"):
+   ```sql
+   UPDATE SessionManagementSubscriptionData
+   SET singleNssai = '{"sst":222,"sd":"00007B"}'
+   WHERE ueid = '208950000000002' AND sst = 222;
+   ```
+
+4. Restart the affected core services to flush stale AMF/SMF state and allow re-registration:
+   ```bash
+   cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
+   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml restart oai-amf oai-smf-slice1 oai-smf-slice2 oai-nwdaf-sbi
+   ```
+
+5. Re-run the UE spawner and verify UE 2 obtains `oaitun_ue1` inside namespace `ue2`:
+   ```bash
+   sudo ip netns exec ue2 ip -4 addr show oaitun_ue1
+   ```
+
+---
+
+## 50. SMF N4/PFCP 1-Second Timeout — Manual `upfs:` Block Conflicts with NRF Discovery
+
+### Symptom
+
+After adding a manual `upfs:` block to SMF YAML config files to explicitly declare UPF endpoints, SMF logs show repeated 1-second PFCP timeouts:
+
+```text
+[smf_n4] PFCP Association Response from 192.168.70.142 (oai-upf-slice1) FAILED
+[smf_n4] TIME-OUT event timer id 1704
+[smf_n4] Retry PFCP heartbeat request failed, UPF unreachable
+```
+
+Both `oai-smf-slice1` and `oai-smf-slice2` cycle in a permanent retry loop and never establish working N4 associations with their respective UPFs, causing all PDU Session Establishment attempts from UE 1 and UE 2 to fail.
+
+### Cause
+
+OAI CN5G Slicing architecture (`docker-compose-slicing-basic-nrf.yaml`) uses **NRF-based dynamic UPF discovery** (3GPP TS 23.501 §6.3.3). In this mode:
+
+1. Each SMF instance (`oai-smf-slice1`, `oai-smf-slice2`) registers with the shared NRF (`oai-nrf-slice12`) and discovers its associated UPF dynamically via NRF profile lookup.
+2. When a manual `upfs:` block is added to `slicing_slice1_config.yaml` or `slicing_slice2_config.yaml`, the SMF Go/C++ code creates **two graph nodes** for the same UPF: one from NRF discovery and one from the static declaration.
+3. The duplicated topology entries cause N4 session establishment state machines to diverge — the SMF sends N4 Association Setup on one socket, but the confirmed heartbeat is attributed to the other node, triggering a 1-second PFCP timeout (`TIME-OUT event timer id`).
+
+### Solution
+
+Restore the upstream SMF configuration files to remove manual `upfs:` declarations. The upstream OAI default configs rely entirely on NRF discovery and must not have static UPF declarations:
+
+1. Restore from `.bak` backups (created before modification):
+   ```bash
+   cp /opt/oran/5gc/oai-cn5g-fed/docker-compose/conf/slicing_slice1_config.yaml.bak \
+      /opt/oran/5gc/oai-cn5g-fed/docker-compose/conf/slicing_slice1_config.yaml
+
+   cp /opt/oran/5gc/oai-cn5g-fed/docker-compose/conf/slicing_slice2_config.yaml.bak \
+      /opt/oran/5gc/oai-cn5g-fed/docker-compose/conf/slicing_slice2_config.yaml
+   ```
+
+2. Force-recreate both SMF instances so they load the clean config:
+   ```bash
+   cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
+   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d --force-recreate oai-smf-slice1 oai-smf-slice2
+   ```
+
+3. Verify PFCP Association success — look for `PFCP Association Setup Response` without timeout in logs:
+   ```bash
+   docker logs --tail 30 oai-smf-slice1 | grep -i "pfcp\|n4\|upf"
+   docker logs --tail 30 oai-smf-slice2 | grep -i "pfcp\|n4\|upf"
+   ```
+
+4. Verify end-to-end connectivity after PDU session re-establishment:
+   ```bash
+   sudo ip netns exec ue1 ping -c 5 192.168.70.145
+   ```
+
+> **Key Lesson:** Do not add static `upfs:` blocks to SMF slice config files in an NRF-based OAI slicing deployment. UPF association is governed exclusively by NRF profile registration and must not be duplicated via static configuration.
+
+---
+
 ## Related Documentation
 
 - [VM-1 — Non-RT RIC](vm/vm1-nonrt-ric.md)

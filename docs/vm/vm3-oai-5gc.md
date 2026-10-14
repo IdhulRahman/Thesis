@@ -374,6 +374,41 @@ echo "MySQL is healthy."
 sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d
 ```
 
+### Step 4: Configure `oai-nwdaf-sbi` for Multi-Slice Core Endpoints
+
+> **Required for multi-slice deployments.** The default `oai-nwdaf-sbi` image ships with single-slice SBI endpoints (port 80, HTTP/1.1) that do not match the multi-slice OAI CN5G architecture. Without this fix, `oai-nwdaf-sbi` will continuously fail to create AMF/SMF event subscriptions, leaving MongoDB `testing.amf` and `testing.smf` permanently empty.
+
+In `docker-compose-slicing-basic-nrf.yaml`, update the `oai-nwdaf-sbi` service environment variables:
+
+```yaml
+oai-nwdaf-sbi:
+    environment:
+        - AMF_IP_ADDR=http://192.168.70.138:8080
+        - AMF_HTTP_VERSION=2
+        - SMF_IP_ADDR=http://192.168.70.139:8080
+        - SMF_HTTP_VERSION=2
+```
+
+Key differences from defaults:
+| Variable | Default (Single-Slice) | Corrected (Multi-Slice) | Reason |
+|---|---|---|---|
+| `AMF_IP_ADDR` | `http://192.168.70.138` (port 80) | `http://192.168.70.138:8080` | OAI AMF SBI listens on 8080, not 80 |
+| `AMF_HTTP_VERSION` | `1` | `2` | 3GPP TS 29.500 mandates HTTP/2 for SBI |
+| `SMF_IP_ADDR` | `http://192.168.70.133` (old single-slice) | `http://192.168.70.139:8080` | Multi-slice SMF-1 is `oai-smf-slice1` at `.139` |
+| `SMF_HTTP_VERSION` | `1` | `2` | Same HTTP/2 requirement |
+
+After editing, force-recreate to apply:
+```bash
+cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
+sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d --force-recreate oai-nwdaf-sbi
+```
+
+Verify successful AMF & SMF event subscription handshake in logs:
+```bash
+sudo docker logs --tail 30 oai-nwdaf-sbi | grep -E "201 Created|subscription|error"
+# Expected: HTTP/2.0 201 Created with Location header
+```
+
 ---
 
 ## 10. Acceptance Criteria & Validation
@@ -400,6 +435,44 @@ All acceptance checks have passed on VM-3:
    ```bash
    docker logs oai-nssf | grep -i "slice"
    # Result: Slices [SST: 1, SD: 1] and [SST: 222, SD: 123] successfully registered.
+   ```
+
+5. **UE 2 Subscriber Profile in MySQL [VALIDATED]:**
+   Verify that UE 2 (`IMSI: 208950000000002`) has the correct S-NSSAI in `SessionManagementSubscriptionData`:
+   ```sql
+   -- Connect to MySQL
+   sudo docker exec -it mysql mysql -u root -plinux oai_db
+
+   -- Verify slice 2 subscriber record
+   SELECT ueid, sst, sd, defaultSingleNssais FROM SessionManagementSubscriptionData
+   WHERE ueid = '208950000000002';
+   -- Expected: sst=222, sd='00007B'
+   ```
+   If `sd` is wrong (e.g., `000001` instead of `00007B`), correct it:
+   ```sql
+   UPDATE SessionManagementSubscriptionData
+   SET singleNssai = '{"sst":222,"sd":"00007B"}'
+   WHERE ueid = '208950000000002' AND sst = 222;
+   ```
+   Then restart AMF and SMF to flush stale state:
+   ```bash
+   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml restart oai-amf oai-smf-slice1 oai-smf-slice2
+   ```
+
+6. **NWDAF Live Telemetry Pipeline [VALIDATED]:**
+   Verify the full 3GPP TS 29.520 analytics pipeline is functioning — `absoluteNum` must be `> 0`:
+   ```bash
+   curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
+     --data-urlencode "event-id=NETWORK_PERFORMANCE" \
+     --data-urlencode 'ana-req={"startTs":"2026-10-01T00:00:00Z","endTs":"2026-10-15T23:59:59Z"}' \
+     --data-urlencode 'event-filter={"snssais":[{"sst":1,"sd":"000001"}],"dnns":["default"],"nwPerfTypes":["SESS_SUCC_RATIO"]}' | jq '.nwPerfs[0].absoluteNum'
+   # Expected: 1 (or higher after multiple PDU sessions)
+   ```
+   Also verify MongoDB contains event documents:
+   ```bash
+   sudo docker exec oai-nwdaf-database mongosh --eval \
+     'db = db.getSiblingDB("testing"); print("amf:", db.amf.countDocuments(), "smf:", db.smf.countDocuments())'
+   # Expected: amf: >=1, smf: >=1
    ```
 
 ---
@@ -498,18 +571,27 @@ http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics
 - `event-id`: `NETWORK_PERFORMANCE` (supported values: `NETWORK_PERFORMANCE`, `UE_COMMUNICATION`, `UE_MOBILITY`)
 - `ana-req`: JSON string specifying observation window, e.g. `{"startTs": "2026-10-01T00:00:00Z", "endTs": "2026-10-01T23:59:59Z"}`
 - `event-filter`: JSON string specifying slice filter and metric type, e.g.:
-  - **Slice 1 (eMBB):** `{"snssais": [{"sst": 1, "sd": "000001"}], "dnns": ["oai"], "nwPerfTypes": ["SESS_SUCC_RATIO"]}`
-  - **Slice 2 (URLLC):** `{"snssais": [{"sst": 222, "sd": "00007B"}], "dnns": ["default"], "nwPerfTypes": ["SESS_SUCC_RATIO"]}`
+  - **Slice 1 (eMBB):** `{"snssais": [{"sst": 1, "sd": "000001"}], "dnns": ["default"], "nwPerfTypes": ["SESS_SUCC_RATIO"]}`
+  - **Slice 2 (URLLC):** `{"snssais": [{"sst": 222, "sd": "00007B"}], "dnns": ["lowlatency"], "nwPerfTypes": ["SESS_SUCC_RATIO"]}`
 - `supported-features`: `{}`
 - `tgt-ue`: `{}`
 
-#### Verified Response (HTTP 200 OK)
+#### Verified Response — After Data Pipeline Fix (HTTP 200 OK, `absoluteNum: 1`)
+
+Query (using Slice 1 eMBB, DNN `default`, window Oct 1–15 2026):
+```bash
+curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
+  --data-urlencode "event-id=NETWORK_PERFORMANCE" \
+  --data-urlencode 'ana-req={"startTs":"2026-10-01T00:00:00Z","endTs":"2026-10-15T23:59:59Z"}' \
+  --data-urlencode 'event-filter={"snssais":[{"sst":1,"sd":"000001"}],"dnns":["default"],"nwPerfTypes":["SESS_SUCC_RATIO"]}' | jq .
+```
+
 ```json
 {
   "anaMetaInfo": {
     "dataWindow": {
-      "startTime": "2022-08-01T09:15:33.018Z",
-      "stopTime": "2026-10-01T23:59:59Z"
+      "startTime": "2026-10-01T00:00:00Z",
+      "stopTime": "2026-10-15T23:59:59Z"
     },
     "strategy": {},
     "accuracy": {}
@@ -519,12 +601,14 @@ http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics
       "networkArea": {},
       "nwPerfType": "SESS_SUCC_RATIO",
       "relativeRatio": 0,
-      "absoluteNum": 0,
+      "absoluteNum": 1,
       "confidence": 0
     }
   ]
 }
 ```
+
+> **Note:** `absoluteNum: 1` is the result of `CountDocuments` on `testing.smf` in MongoDB — confirmed live from a real PDU session event, not a hardcode. `relativeRatio` and `confidence` remain `0` due to upstream `//TODO` in `network_performance.go` (Tahap 3 — implementation in progress; see [troubleshooting.md §48](../troubleshooting.md)).
 
 ### 12.4 Empirical Evidence: Unimplemented Dynamic User-Plane Load in OAI NWDAF v2.1.0
 
@@ -605,8 +689,10 @@ Even when artificial load or physical congestion is injected into the UPF (e.g.,
 
 #### 4. Scientific Implications for Thesis Research Methodology
 The findings above confirm that:
-1. **OAI NWDAF v2.1.0 cannot currently serve as a dynamic user-plane load telemetry source** for detecting real-time packet bottlenecks in the rApp control loop.
-2. **Requirement for a Standards-Aligned Dedicated Adapter:** Core network observability in this research is rigorously and legitimately achieved through the UPF host telemetry adapter (`core_adapter.py` v9), which extracts interface counters and Linux qdisc queue occupancy directly, strictly conforming to 3GPP Performance Management principles (TS 32.401, TS 28.552).
+1. **`absoluteNum` in OAI NWDAF v2.1.0 is now confirmed functional:** After correcting the multi-slice `oai-nwdaf-sbi` SBI endpoint configuration (see §9 Step 4), SMF event subscriptions succeed and MongoDB `testing.smf` is populated with real PDU session documents. `absoluteNum` correctly reflects `CountDocuments` output — returning `1` after the first successful PDU Session Establishment.
+2. **`relativeRatio` and `confidence` remain hardcoded `0`:** The OAI development team has not yet implemented these calculations (`//TODO` in source). This is an upstream limitation, not a deployment error.
+3. **OAI NWDAF v2.1.0 cannot currently serve as a dynamic user-plane load telemetry source** for detecting real-time packet bottlenecks in the rApp control loop.
+4. **Requirement for a Standards-Aligned Dedicated Adapter:** Core network observability in this research is rigorously and legitimately achieved through the UPF host telemetry adapter (`core_adapter.py` v9), which extracts interface counters and Linux qdisc queue occupancy directly, strictly conforming to 3GPP Performance Management principles (TS 32.401, TS 28.552).
 
 ---
 

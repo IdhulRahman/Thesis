@@ -266,8 +266,21 @@ uicc0 = {
 };
 ```
 
-> [!NOTE]
-> Ensure that subscriber `208950000000032` is registered in MySQL on VM-3 before launching UE 2. If using only one subscriber ID for initial testing, set `imsi = "208950000000031"` in `ue_slice2.conf` and launch sequentially.
+> [!WARNING]
+> **UE 2 MySQL Subscriber Profile must be verified before launch.** When spawning multi-UE via `spawn_multi_ue.sh` (Section 8 below), UE 1 is dynamically assigned IMSI `208950000000001` and UE 2 is assigned `208950000000002` from the VM-3 pre-provisioned pool (while Section 7 above shows the legacy static fallback template `...031`/`...032`).
+>
+> A known issue was encountered where `SessionManagementSubscriptionData` for IMSI `208950000000002` had an incorrect S-NSSAI (`sd: 000001` pointing to Slice 1 instead of `sd: 00007B` for Slice 2). This caused `FGS_PDU_SESSION_ESTABLISHMENT_REJ` immediately after attach.
+>
+> Verify and fix on VM-3 before spawning UE 2:
+> ```sql
+> sudo docker exec -it mysql mysql -u root -plinux oai_db
+> SELECT ueid, sst, sd FROM SessionManagementSubscriptionData WHERE ueid = '208950000000002';
+> -- Expected: sst=222, sd='00007B'
+> -- If wrong, run:
+> UPDATE SessionManagementSubscriptionData SET singleNssai = '{"sst":222,"sd":"00007B"}' WHERE ueid = '208950000000002' AND sst = 222;
+> ```
+> After correcting, restart `oai-amf` and `oai-smf-slice2` on VM-3 to flush stale state.
+> See [Troubleshooting #49](../troubleshooting.md#49-ue-2-pdu-session-establishment-rejected--mysql-s-nssai-subscriber-profile-mismatch) for full root-cause analysis.
 
 ---
 
@@ -289,6 +302,22 @@ sudo /opt/oran/ue/scripts/spawn_multi_ue.sh -s1 1 -s2 1
 # Or run interactively:
 sudo /opt/oran/ue/scripts/spawn_multi_ue.sh
 ```
+
+#### Post-Spawn Verification:
+```bash
+# Verify UE 1 tunnel interface is UP inside its namespace:
+sudo ip netns exec ue1 ip -4 addr show oaitun_ue1
+# Expected: inet 12.1.1.X/24 scope global oaitun_ue1
+
+# Verify UE 2 tunnel interface is UP inside its namespace:
+sudo ip netns exec ue2 ip -4 addr show oaitun_ue1
+# Expected: inet 12.2.1.X/24 scope global oaitun_ue1
+
+# Quick end-to-end ping test from UE 1 to External DN:
+sudo ip netns exec ue1 ping -c 5 192.168.70.145
+```
+
+If UE 2 does NOT obtain `oaitun_ue1`, check for `FGS_PDU_SESSION_ESTABLISHMENT_REJ` in `/opt/oran/ue/logs/ue2.log` — most likely cause is the MySQL subscriber profile mismatch (see warning above).
 
 ---
 
