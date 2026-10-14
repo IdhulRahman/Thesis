@@ -1,0 +1,5 @@
+timestamp_utc,run_id,event_type,scenario_id,target_domain,target_component,mechanism,parameters,notes
+2026-10-14T07:35:12.326183+00:00,PILOT_RUN_01,START_SCENARIO,S1_NORMAL_LIGHT,BASELINE,NONE,NONE,load=10M,Normal ringan (35% Cran UL)
+2026-10-14T07:37:04.226455+00:00,PILOT_RUN_01,INJECT_FAULT,S3_RAN_OVERLOAD,RAN,DU-1_Cell-1,OFFERED_LOAD,load=40M,RAN overload melebihi kapasitas radio 28.4M
+2026-10-14T07:38:32.455584+00:00,PILOT_RUN_01,INJECT_FAULT,S6_CORE_QUEUE_TBF,CORE,UPF-1_Slice-1,TBF_RATELIMIT,"rate=12M,latency=200ms",Core queue bottleneck via UPF-1 TBF
+2026-10-14T07:40:40.077260+00:00,PILOT_RUN_01,CLEAR_FAULT,S1_NORMAL_LIGHT,BASELINE,ALL,NONE,load=10M,Seluruh gangguan dinonaktifkan
