@@ -409,6 +409,9 @@ sudo docker logs --tail 30 oai-nwdaf-sbi | grep -E "201 Created|subscription|err
 # Expected: HTTP/2.0 201 Created with Location header
 ```
 
+> [!NOTE]
+> **Single SMF Endpoint Scope:** The current OAI compose configuration for `oai-nwdaf-sbi` provides a single `SMF_IP_ADDR` environment variable pointing to SMF-1 (`oai-smf-slice1` at `192.168.70.139:8080`). Consequently, `oai-nwdaf-sbi` actively subscribes to and ingests event notifications from Slice 1 SMF. Ingestion for SMF-2 (`oai-smf-slice2` at `192.168.70.140:8080` for Slice 2 URLLC) requires either multi-SMF dynamic discovery or multiple SBI consumer endpoints, which remains an open validation scope.
+
 ---
 
 ## 10. Acceptance Criteria & Validation
@@ -615,37 +618,29 @@ curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
 This section presents empirical evidence and a source code audit confirming that the official release of **OpenAirInterface NWDAF v2.1.0 (`oai-cn5g-nwdaf`)** has not yet implemented dynamic *user-plane* performance/load metric calculations on the `NETWORK_PERFORMANCE` endpoint, instead constantly returning a static value of `0`.
 
 #### 1. Analytics Engine Source Code Audit (The "Smoking Gun")
-Inspection of Go source code in the `oai-nwdaf-engine` module at `/opt/oran/5gc/oai-cn5g-nwdaf/components/oai-nwdaf-engine/internal/engine/network_performance.go`:
+Inspection of the actual Go source code in the `oai-nwdaf-engine` module at `/opt/oran/5gc/oai-cn5g-nwdaf/components/oai-nwdaf-engine/internal/engine/network_performance.go`:
 
-* **Line 53 (Main Handler Function):**
-  ```go
-  // File: network_performance.go (Lines 50-58)
-  func (e *Engine) GetNetworkPerformanceAnalytics(...) {
-      // ...
-      //TODO - Implement relative ratio and confidence
-      relativeRatio, confidence := int32(0), int32(0)
-      // ...
-  }
-  ```
+```go
+// File: network_performance.go (Lines 44-58)
+absoluteNum, err := collection.CountDocuments(context.Background(), filter)
+if err != nil {
+    log.Printf("Error counting documents: %v", err)
+    http.Error(w, "Error counting documents", http.StatusInternalServerError)
+    return
+}
+relativeRatio, confidence := int32(0), int32(0) //TODO
+nwPerf := models.NetworkPerf{
+    NwPerfType:    models.NwPerfType(engineReqData.NwPerfTypes[0]),
+    RelativeRatio: relativeRatio, // Hardcoded to 0 by upstream OAI developers
+    AbsoluteNum:   int32(absoluteNum),
+    Confidence:    confidence,    // Hardcoded to 0 by upstream OAI developers
+}
+```
 
-* **Line 102 (Slice Metric Calculation Function):**
-  ```go
-  // File: network_performance.go (Lines 99-106)
-  func calculateSliceNetworkPerformance(...) {
-      // ...
-      //TODO - Implement relative ratio and confidence
-      relativeRatio, confidence := int32(0), int32(0)
-      
-      networkPerf := models.NetworkPerf{
-          NwPerfType:    models.NwPerfType(perfType),
-          RelativeRatio: relativeRatio, // Hardcoded to 0 by OAI developers
-          Confidence:    confidence,    // Hardcoded to 0 by OAI developers
-      }
-      return networkPerf
-  }
-  ```
-
-*Technical Notes:* The OpenAirInterface development team explicitly flagged the calculation of `relativeRatio` (an indicator of slice load ratio or performance degradation) and `confidence` (statistical confidence level) with `//TODO` comments. Both variables are hardcoded to the integer value `0`. Consequently, the OAI NWDAF analytics engine deterministically outputs `relativeRatio: 0` regardless of the presence or intensity of physical user-plane traffic.
+*Technical Notes:* 
+1. **`absoluteNum` reflects database state:** `absoluteNum` is calculated dynamically via MongoDB `CountDocuments(context.Background(), filter)` on the SMF collection (`testing.smf`). When valid PDU session establishment records exist, `absoluteNum` increments accordingly (returning `1` after UE 1 session establishment).
+2. **`relativeRatio` and `confidence` are uncalculated upstream placeholders:** The OpenAirInterface development team left the calculation of `relativeRatio` and `confidence` as `//TODO`, hardcoding them to `int32(0)`.
+3. **Semantic Distinction:** Under 3GPP TS 29.520 `SESS_SUCC_RATIO`, `relativeRatio` represents the **PDU Session Establishment Success Ratio** (percentage of successful control-plane sessions over total attempts or capacity). It is **not** a measure of user-plane packet throughput, buffer congestion, or queue drop dynamics. Consequently, calculating `SESS_SUCC_RATIO` provides session lifecycle success metrics but does not yield user-plane bottleneck observability.
 
 #### 2. Data Collection Architecture Limitations (SBI vs. User Plane)
 Architecturally (3GPP TS 23.288 §6.2), user-plane load analytics require telemetry from the UPF or via a DCCF (Data Collection Coordination Function) / OAM. However, in the current OAI CN5G implementation:

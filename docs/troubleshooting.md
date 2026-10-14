@@ -2407,11 +2407,11 @@ The MySQL subscriber database (`oai_db`) had conflicting S-NSSAI provisioning fo
 
 ---
 
-## 50. SMF N4/PFCP 1-Second Timeout — Manual `upfs:` Block Conflicts with NRF Discovery
+## 50. SMF N4/PFCP 1-Second Timeout After Manual `upfs:` Configuration Edit
 
 ### Symptom
 
-After adding a manual `upfs:` block to SMF YAML config files to explicitly declare UPF endpoints, SMF logs show repeated 1-second PFCP timeouts:
+After adding a manual `upfs:` block to SMF YAML config files (in an attempt to configure UPF parameters such as usage reporting), SMF logs showed repeated 1-second PFCP timeouts:
 
 ```text
 [smf_n4] PFCP Association Response from 192.168.70.142 (oai-upf-slice1) FAILED
@@ -2419,19 +2419,17 @@ After adding a manual `upfs:` block to SMF YAML config files to explicitly decla
 [smf_n4] Retry PFCP heartbeat request failed, UPF unreachable
 ```
 
-Both `oai-smf-slice1` and `oai-smf-slice2` cycle in a permanent retry loop and never establish working N4 associations with their respective UPFs, causing all PDU Session Establishment attempts from UE 1 and UE 2 to fail.
+Both `oai-smf-slice1` and `oai-smf-slice2` cycled in a permanent retry loop and failed to establish working N4 associations with their respective UPFs, causing all PDU Session Establishment attempts from UE 1 and UE 2 to fail.
 
 ### Cause
 
-OAI CN5G Slicing architecture (`docker-compose-slicing-basic-nrf.yaml`) uses **NRF-based dynamic UPF discovery** (3GPP TS 23.501 §6.3.3). In this mode:
+The manual `upfs:` entries added to `slicing_slice1_config.yaml` and `slicing_slice2_config.yaml` introduced configuration mismatches with the NRF-discovered UPF profiles. 
 
-1. Each SMF instance (`oai-smf-slice1`, `oai-smf-slice2`) registers with the shared NRF (`oai-nrf-slice12`) and discovers its associated UPF dynamically via NRF profile lookup.
-2. When a manual `upfs:` block is added to `slicing_slice1_config.yaml` or `slicing_slice2_config.yaml`, the SMF Go/C++ code creates **two graph nodes** for the same UPF: one from NRF discovery and one from the static declaration.
-3. The duplicated topology entries cause N4 session establishment state machines to diverge — the SMF sends N4 Association Setup on one socket, but the confirmed heartbeat is attributed to the other node, triggering a 1-second PFCP timeout (`TIME-OUT event timer id`).
+In OAI SMF ([`smf_app.cpp`](https://github.com/openairinterface/oai-cn5g-smf/blob/531b6d8755ee792e49122c57bbab047db88ec4b5/src/smf_app/smf_app.cpp) and [official SMF `config.yaml`](https://github.com/openairinterface/oai-cn5g-smf/blob/531b6d8755ee792e49122c57bbab047db88ec4b5/etc/config.yaml)), the `upfs:` block is designed to configure local parameters (such as `enable_usage_reporting`) even when dynamic UPF discovery via NRF is enabled, matching local entries against NRF profiles by host identifier. However, if the local declaration's host/IP/FQDN parameters do not resolve or match the NRF profile expected by the SMF state machine during startup, the PFCP Association Setup handshake times out after 1000ms (`TIME-OUT event timer id 1704`), leaving the UPF marked unreachable.
 
 ### Solution
 
-Restore the upstream SMF configuration files to remove manual `upfs:` declarations. The upstream OAI default configs rely entirely on NRF discovery and must not have static UPF declarations:
+Rolling back the manual configuration to the clean working `.bak` configuration restored working associations and UE connectivity:
 
 1. Restore from `.bak` backups (created before modification):
    ```bash
@@ -2459,7 +2457,7 @@ Restore the upstream SMF configuration files to remove manual `upfs:` declaratio
    sudo ip netns exec ue1 ping -c 5 192.168.70.145
    ```
 
-> **Key Lesson:** Do not add static `upfs:` blocks to SMF slice config files in an NRF-based OAI slicing deployment. UPF association is governed exclusively by NRF profile registration and must not be duplicated via static configuration.
+> **Key Lesson:** The upstream OAI SMF `upfs:` block can be used alongside NRF discovery to configure advanced features like `enable_usage_reporting: yes`, provided that its `host` parameter matches the NRF-registered UPF profile exactly. For the immediate baseline deployment, reverting to the default upstream configuration files successfully restored working N4 PFCP associations.
 
 ---
 

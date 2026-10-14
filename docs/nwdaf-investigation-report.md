@@ -14,7 +14,10 @@ Dalam pengujian awal (*pilot run*) pengumpulan dataset telemetri multi-domain un
 1. Kolom `nwdaf_load_embb` dan `nwdaf_load_urllc` pada dataset berstatus `NaN` (100% missing values).
 2. Ketika antarmuka resmi 3GPP `Nnwdaf_AnalyticsInfo` diuji langsung melalui Kong API Gateway di port 8080 VM-3, layanan merespons dengan status **HTTP 200 OK**, namun nilai `relativeRatio` dan `absoluteNum` bernilai konstan **`0`**.
 
-**Pembaruan (v3):** Setelah perbaikan aliran data NWDAF (Tahap 1 & 2 selesai), `absoluteNum` kini mengembalikan **`1`** — dikonfirmasi berasal dari dokumen nyata di MongoDB `testing.smf`. Nilai `relativeRatio` dan `confidence` masih `0` karena kalkulasinya berstatus `//TODO` dalam kode sumber upstream OAI (Tahap 3 — dalam proses).
+**Pembaruan (v3):** Berdasarkan pengujian terbaru:
+* **Ingesti Event Control-Plane (PDU_SES_EST) Berhasil (✅):** Setelah perbaikan konfigurasi subscriber dan pemulihan SMF, notifikasi event berhasil masuk ke MongoDB `testing.smf` dan query API NWDAF mengembalikan **`absoluteNum: 1`** (nyata dari `CountDocuments`, bukan hardcode).
+* **Pelaporan User-Plane & QoS Monitoring Belum Selesai (⏳):** Asosiasi PFCP masih berstatus `enable_usage_reporting: No`. Pelaporan user-plane belum dapat dinyatakan selesai sampai terdapat laporan penggunaan (*usage report* / URR) dan dokumen dengan `qosmonlist` yang bertambah dinamis saat trafik data mengalir.
+* **Cakupan Multi-Slice SMF-2 Terbuka (⏳):** Konfigurasi `oai-nwdaf-sbi` saat ini baru menunjuk SMF-1 (`192.168.70.139`), sehingga penyerapan event dari SMF-2 (`192.168.70.140` untuk Slice 2) masih memerlukan verifikasi lebih lanjut.
 
 Laporan ini menyajikan hasil penelusuran teknis komprehensif (*root-cause analysis*) langsung pada *source code*, kontainer runtime, basis data MongoDB, asosiasi PFCP, dan pipeline telemetri. Laporan ini telah **direvisi secara menyeluruh berdasarkan telaah kritis pengamat teknis** untuk memastikan kepatuhan penuh terhadap standar **3GPP TS 23.288, TS 29.520, dan TS 29.244**, serta menetapkan peta jalan rekayasa terstruktur **tanpa jalan pintas (*no shortcuts*)**.
 
@@ -199,43 +202,57 @@ req = urllib.request.Request(
 Berdasarkan koreksi kritis dari pengamat, urutan perbaikan yang benar harus mengikuti alur data dari hulu ke hilir (*upstream to downstream*):
 
 ```
-[Tahap 1: Hulu UPF-SMF] ✅   [Tahap 2: Ingesti Data] ✅   [Tahap 3: Engine Analitik] 🔄   [Tahap 4: Konsumsi] ⏳
-N4 PFCP berfungsi,        ->  SMF → MongoDB terisi     ->  Implementasi relativeRatio  ->  rApp & Collector
-subscriber profile benar      (testing.smf: 1 doc)         dan confidence (TODO)           (Korelasi Bottleneck)
+[Tahap 1: Kontrol-Plane Hulu] ✅    [Tahap 2: Ingesti Event CP] ✅    [Tahap 3: Pembuktian User-Plane & Analitik] 🔄    [Tahap 4: Konsumsi rApp] ⏳
+N4 PFCP aktif, UE terkoneksi   ->   Dokumen testing.smf terisi   ->   Buktikan URR / qosmonlist saat trafik        ->   Korelasi Bottleneck RAN vs Core
+PDU_SES_EST tertangkap              (absoluteNum: 1)                  + evaluasi SMF-2 + TODO relativeRatio             (NWDAF + E2SM-KPM)
 ```
 
-### Tahap 1: Aktifkan dan Buktikan Pelaporan Native di Hulu (UPF & SMF via PFCP) ✅ SELESAI
+### Tahap 1: Pembuktian Kontrol-Plane Hulu (UPF & SMF via PFCP) ✅ SELESAI
 
-**Status:** Selesai. N4/PFCP association antara SMF dan UPF berfungsi penuh setelah:
+**Status:** Selesai untuk kontrol-plane sesi. N4/PFCP association antara SMF dan UPF berfungsi setelah:
 - Subscriber profile UE 2 di MySQL dikoreksi (S-NSSAI mismatch → [Kasus #49](file:///d:/Idhul/Program/Thesis/docs/troubleshooting.md#49-ue-2-pdu-session-establishment-rejected--mysql-s-nssai-subscriber-profile-mismatch)).
-- Konfigurasi SMF dipulihkan ke upstream default tanpa `upfs:` block manual (→ [Kasus #50](file:///d:/Idhul/Program/Thesis/docs/troubleshooting.md#50-smf-n4pfcp-1-second-timeout--manual-upfs-block-conflicts-with-nrf-discovery)).
+- Konfigurasi SMF dipulihkan ke upstream default tanpa modifikasi `upfs:` yang tidak cocok dengan profil NRF (→ [Kasus #50](file:///d:/Idhul/Program/Thesis/docs/troubleshooting.md#50-smf-n4pfcp-1-second-timeout-after-manual-upfs-configuration-edit)).
 - `oai-nwdaf-sbi` dikonfigurasi dengan port dan HTTP version yang benar (→ [Kasus #47](file:///d:/Idhul/Program/Thesis/docs/troubleshooting.md#47-oai-nwdaf-sbi-fails-subscribing-to-smf-due-to-incorrect-port-or-http-version)).
 
 **Bukti:** UE 1 berhasil mendapatkan `oaitun_ue1` dengan IP `12.1.1.4/24` dan ping ke External DN (`192.168.70.145`) dengan packet loss 0%.
 
-### Tahap 2: Pastikan Data Mengalir dan Masuk ke Basis Data NWDAF ✅ SELESAI
+### Tahap 2: Ingesti Event Sesi Kontrol-Plane ke NWDAF ✅ SELESAI (User-Plane Masih Terbuka)
 
-**Status:** Selesai. Terkonfirmasi:
-1. `oai-nwdaf-sbi` menerima notifikasi dari AMF (`Namf_EventExposure`) dan SMF (`Nsmf_EventExposure`) untuk event `PDU_SES_EST`.
-2. Database `testing` telah terbuat di MongoDB. Koleksi `testing.amf` dan `testing.smf` terisi dokumen event.
-3. Query `Nnwdaf_AnalyticsInfo` via Kong Gateway mengembalikan `absoluteNum: 1` — diambil dari `CountDocuments` pada `testing.smf`.
+**Status:** 
+* **Event Sesi Kontrol-Plane:** Selesai. `oai-nwdaf-sbi` menerima notifikasi dari AMF (`Namf_EventExposure`) dan SMF (`Nsmf_EventExposure`) untuk event `PDU_SES_EST`. Database `testing` telah terbuat dan koleksi `testing.smf` terisi 1 dokumen nyata. Query `Nnwdaf_AnalyticsInfo` mengembalikan `absoluteNum: 1`.
+* **Pelaporan User-Plane (Usage Reporting & QoS Monitoring):** Belum selesai. Asosiasi PFCP saat ini masih mencatat `enable_usage_reporting: No`. Pelaporan user-plane belum terbukti sampai ada *usage report* (URR) dan dokumen dengan `qosmonlist` yang bertambah saat trafik data mengalir.
+* **Cakupan Multi-Slice SMF-2:** Masih terbuka. `oai-nwdaf-sbi` baru mengonsumsi event dari SMF-1 (`.139`), sementara subscription untuk SMF-2 (`.140`) belum divalidasi.
 
-### Tahap 3: Implementasikan Analitik Core yang Sesuai & Terapkan dengan Benar
-1. **Pemisahan Semantik Analitik:**
-   * Jangan mengubah makna `SESS_SUCC_RATIO` (tetap sebagai rasio sukses sesi PDU).
-   * Implementasikan handler analitik yang relevan untuk performa irisan (misalnya mengaktifkan atau melengkapi analitik `SLICE_LOAD_LEVEL` sesuai **3GPP TS 23.288 §6.3** atau mengekstrak performa latensi/beban dari dokumen `QOS_MON` di database).
-2. **Prosedur Pembaruan Kontainer Docker yang Benar:**
-   Setelah kode Go pada `oai-nwdaf-engine` dikompilasi ulang menjadi image baru, kontainer **harus dibuat ulang (*recreate*)**, bukan sekadar di-restart:
+### Tahap 3: Pembuktian Data User-Plane di NWDAF & Penyempurnaan Analitik
+
+Berdasarkan telaah pengamat, prioritas utama bukanlah sekadar menghitung rasio keberhasilan sesi (`SESS_SUCC_RATIO`) karena rasio tersebut tidak memberikan visibilitas antrean, drops, atau throughput UPF untuk control loop tesis. Tahap 3 difokuskan pada:
+
+1. **Uji Validasi Penentu Ingesti User-Plane (*The Golden Query*):**
+   Eksekusi query penentu di MongoDB VM-3 saat trafik data dialirkan:
    ```bash
-   cd /opt/oran/5gc/oai-cn5g-nwdaf
-   sudo docker build -t oai-nwdaf-engine:latest -f components/oai-nwdaf-engine/docker/Dockerfile.engine components/oai-nwdaf-engine/
-   
-   # Gunakan force-recreate agar kontainer baru memuat image baru:
-   cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
-   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d --force-recreate oai-nwdaf-engine
+   sudo docker exec oai-nwdaf-database mongosh testing --quiet --eval '
+     print("Dokumen SMF:", db.smf.countDocuments({}));
+     print("Dokumen dengan QOS_MON:", db.smf.countDocuments({"qosmonlist.0": {$exists: true}}));
+   '
    ```
+   * Jika `qosmonlist` bertambah saat trafik berjalan, data user-plane native terbukti mengalir ke NWDAF.
+   * Jika tetap 0, investigasi aktivasi `enable_usage_reporting: yes` pada konfigurasi SMF yang cocok dengan profil NRF, atau konfirmasi batas arsitektural container UPF vpp/open5gs.
 
-### Tahap 4: Konsumsi dan Validasi End-to-End
+2. **Evaluasi Dukungan Multi-SMF pada `oai-nwdaf-sbi`:**
+   Memeriksa apakah `oai-nwdaf-sbi` dapat mengonsumsi event exposure dari kedua SMF (`oai-smf-slice1` .139 dan `oai-smf-slice2` .140) agar analitik mencakup kedua slice (eMBB dan URLLC).
+
+3. **Penyelesaian Kode Go Analitik `network_performance.go` (Tugas Sekunder):**
+   * Mengganti `//TODO` pada baris 53 dan 102 dengan perhitungan `relativeRatio` (persentase sukses sesi PDU) dan `confidence` sesuai standar 3GPP TS 29.520.
+   * Melakukan build ulang Docker image dan menerapkan dengan *force recreate*:
+     ```bash
+     cd /opt/oran/5gc/oai-cn5g-nwdaf
+     sudo docker build -t oai-nwdaf-engine:latest -f components/oai-nwdaf-engine/docker/Dockerfile.engine components/oai-nwdaf-engine/
+     
+     cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
+     sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d --force-recreate oai-nwdaf-engine
+     ```
+
+### Tahap 4: Konsumsi Telemetri dan Validasi Closed-Loop rApp
 1. Perbarui fungsi `poll_external_nfs` di [`telemetry_collector.py`](file:///d:/Idhul/Program/Thesis/scripts/telemetry_collector.py) agar memanggil endpoint resmi yang diekspos dan mem-parsing skema respons JSON dengan benar.
 2. Hubungkan metrik analitik NWDAF ini ke Non-RT RIC rApp (VM-1) untuk dikorelasikan dengan utilisasi PRB RAN (dari E2SM-KPM Near-RT RIC) dalam pengambilan keputusan *closed-loop traffic steering*.
 
@@ -245,7 +262,7 @@ subscriber profile benar      (testing.smf: 1 doc)         dan confidence (TODO)
 
 Laporan revisi v3 ini menegaskan bahwa:
 1. Analisis awal telah diperbaiki: `SESS_SUCC_RATIO` tidak lagi disalahartikan sebagai beban slice, dan `absoluteNum` diklarifikasi bersumber dari `CountDocuments`.
-2. **Tahap 1 & 2 telah selesai:** Aliran data end-to-end dari 5GC (UE → SMF → oai-nwdaf-sbi → MongoDB) terkonfirmasi berfungsi. `absoluteNum` mengembalikan nilai nyata `1` dari database, bukan hardcode.
-3. **Masalah yang diselesaikan dalam iterasi ini:** (a) Subscriber profile UE 2 di MySQL dikoreksi; (b) Konfigurasi SMF dipulihkan dari `.bak` untuk menghapus `upfs:` block yang menyebabkan konflik N4 topology; (c) Semua core service di-restart untuk membersihkan state stale.
-4. **Tahap 3 (dalam proses):** Implementasi kalkulasi `relativeRatio` (Session Establishment Success Ratio nyata) dan `confidence` pada `network_performance.go`, diikuti rebuild image Docker dan validasi akhir.
-5. Rencana rekayasa tidak lagi mengasumsikan "cukup ganti TODO dan URL", melainkan mengikuti alur 4 tahap komprehensif: **Mengaktifkan & memvalidasi N4 PFCP $\to$ Memvalidasi ingesti di MongoDB ✅ $\to$ Mengimplementasikan analitik dan me-recreate kontainer 🔄 $\to$ Mengonsumsi hasil di rApp ⏳.**
+2. **Status Ingesti:** Ingesti event *control-plane* (PDU_SES_EST) telah berhasil dibuktikan dengan dokumen nyata di MongoDB dan respons `absoluteNum: 1`. Namun, pelaporan *user-plane* (Usage Report / QoS Monitoring) secara jujur dinyatakan **belum selesai** sampai ada bukti `qosmonlist` dan usage report yang bertambah saat trafik dialirkan.
+3. **Koreksi Konfigurasi SMF:** Masalah timeout N4 PFCP sebelumnya dipicu oleh ketidakcocokan parameter pada konfigurasi lokal `upfs:`. Spesifikasi OAI SMF (`smf_app.cpp`) sebenarnya mendukung blok `upfs:` bersamaan dengan NRF discovery untuk mengatur usage reporting, asalkan identitas host cocok dengan profil NRF. Revert ke konfigurasi baseline berhasil memulihkan koneksi operasional.
+4. **Prioritas Tahap Berikutnya:** Prioritas dialihkan ke pembuktian data user-plane masuk NWDAF, terus diperbarui saat trafik berjalan, dan mencakup kedua slice. Penyelesaian TODO rasio sesi PDU dikerjakan sebagai pelengkap kontrol-plane terpisah.
+5. Alur kerja rekayasa tetap berpegang teguh pada prinsip keterbukaan ilmiah, rigor standar 3GPP, dan bebas dari klaim prematur.
