@@ -2476,6 +2476,44 @@ In OAI SMF ([`smf_app.cpp`](https://github.com/openairinterface/oai-cn5g-smf/blo
 
 ---
 
+## 51. OAI AMF Automated NRF Registration Failure (Missing `/{nfInstanceId}` in Dynamic Resource URI)
+
+### Symptom
+When `oai-amf` starts in slicing mode (`enable_nssf: yes`), it successfully queries NSSF and receives `nrfNfMgtUri` (e.g., `http://192.168.70.136:8080/nnrf-nfm/v1/nf-instances`).  
+However, AMF repeatedly logs registration failures after a 3000 ms timeout:
+```text
+[amf_sbi] [debug] Send NF Instance Registration to NRF, NRF URI (RegisterNFInstance API) http://192.168.70.136:8080/nnrf-nfm/v1/nf-instances
+[amf_sbi] [info] Send HTTP message to http://192.168.70.136:8080/nnrf-nfm/v1/nf-instances
+[amf_app] [warning] NF Instance Registration, got issue when registering to NRF, try again ...
+```
+Because AMF remains unregistered in NRF, it cannot be resolved for N11 PDU Session Handling, causing UE PDU session establishment (`requested PDU session ID 10`) to stall and preventing the creation of `oaitun_ue1`.
+
+### Cause
+1. **Standards Specification Violation in Upstream AMF Binary:**
+   - Under **3GPP TS 29.510 §6.1.3.3.2**, the resource URI for an Individual NF Instance is:
+     $$\texttt{http://<nrf>:<port>/nnrf-nfm/v1/nf-instances/\{nfInstanceId\}}$$
+   - Under **3GPP TS 29.510 §6.1.3.3.3.2**, registration (`NFRegister`) strictly requires an HTTP `PUT` targeting this instance resource URI.
+   - In OAI AMF v2.1.0 (`HEAD` hash `58f77cfb`), `amf_app.cpp` directly passes the `nrfNfMgtUri` string obtained from NSSF without dynamically appending the runtime UUID `/{nfInstanceId}`. The resulting HTTP `PUT` to `.../nf-instances` is invalid.
+2. **Hash-Based NRF Iteration:**
+   - Slices are stored internally in `std::unordered_set<std::string>`, resulting in non-deterministic iteration order when registering across multiple slice NRFs (e.g., Slice 3 `.137` followed by Slice 1-2 `.136`).
+
+### Empirical Verification
+Executing a manual HTTP/2 prior-knowledge `PUT` from VM-3 host with the complete instance URI:
+```bash
+UUID="9509d2b9-9049-4dc7-9243-a38c3b605c2f"
+curl -v --http2-prior-knowledge -X PUT \
+  -H "Content-Type: application/json" \
+  -d '{"nfInstanceId":"'"$UUID"'", "nfType":"AMF", ...}' \
+  "http://192.168.70.136:8080/nnrf-nfm/v1/nf-instances/$UUID"
+```
+Returns **`HTTP/2 201 Created`** and `oai-nrf-slice12` logs:
+```text
+[nrf_app] [info] Added/Updated NF Instance, NF info: {"amfInfo": ..., "nfStatus": "REGISTERED", ...}
+```
+This confirms that NRF functions correctly and strictly adheres to 3GPP TS 29.510, accepting the AMF registration when the resource URI is well-formed.
+
+---
+
 ## Related Documentation
 
 - [VM-1 — Non-RT RIC](vm/vm1-nonrt-ric.md)
