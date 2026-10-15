@@ -42,3 +42,43 @@ scp scripts/spawn_multi_ue.sh scripts/stop_multi_ue.sh scripts/trafgen.sh script
 scp scripts/telemetry_collector.py five-g@10.102.0.67:/opt/oran/monitoring/collector/
 scp scripts/record_dual_stream.py scripts/log_event.py scripts/analyze_dataset.py five-g@10.102.0.67:/opt/oran/monitoring/scripts/
 ```
+
+---
+
+## 3. Core Research Telemetry Adapter (`core_adapter.py` v9) Operational Guide
+
+The UPF host telemetry adapter operates under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM services") and 3GPP TS 32.401 / TS 28.552 PM principles:
+
+### CLI Options Reference
+
+| Parameter | Required / Default | Purpose |
+|---|---|---|
+| `--run-id <ID>` | **Mandatory** | Unique alphanumeric experiment run identifier (`[A-Za-z0-9_.-]{1,64}`). |
+| `--inspect-qdiscs` | Optional flag | Read-only inspection of UPF container Linux qdiscs, returning JSON structures. |
+| `--standards` | Optional flag | Dumps official 3GPP standardization references (TS 32.401, TS 28.552, etc.). |
+| `--interval <SEC>` | Default: `1.0` | Target sampling cadence in seconds (research slow-loop choice). |
+| `--output-dir <DIR>` | Default: `./upf-telemetry` | Directory for local JSONL and CSV run archives. |
+| `--url <URL>` | Default: `http://10.102.0.67:9100/report` | Target VM-6 telemetry collector HTTP ingestion endpoint. |
+| `--local-only` | Optional flag | Disables HTTP push, archiving telemetry exclusively to local disk. |
+| `--once` | Optional flag | Gathers a single baseline sample for field validation. |
+| `--samples <N>` | Optional integer | Stops automatically after $N$ valid samples. |
+
+### Operational Commands (VM-3 Host)
+
+```bash
+# 1. Verify kernel qdiscs on running UPF containers:
+python3 /opt/oran/5gc/scripts/core_adapter.py --inspect-qdiscs
+
+# 2. Launch adapter daemon in background:
+sudo nohup python3 -u /opt/oran/5gc/scripts/core_adapter.py \
+  --run-id pilot-run-01 \
+  --output-dir /opt/oran/5gc/telemetry_archive \
+  --url http://10.102.0.67:9100/report \
+  > /opt/oran/5gc/scripts/core_adapter.log 2>&1 &
+
+# 3. Monitor live telemetry streaming:
+tail -f /opt/oran/5gc/scripts/core_adapter.log
+
+# 4. Stop daemon:
+sudo pkill -f core_adapter.py
+```
