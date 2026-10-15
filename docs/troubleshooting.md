@@ -2610,6 +2610,12 @@ Simultaneously, PFCP Heartbeat exchanges between SMF-1 and UPF-1 (`192.168.70.14
 2. **Silent Packet Drop:**
    - When the C++ exception is thrown in `3gpp_29.244.hpp:219`, `openair-upf` aborts packet processing immediately. It drops the request without transmitting any error response (such as a `PFCP Session Establishment Response` with Cause `Rule creation/modification failure`).
    - Consequently, SMF-1 remains waiting for an acknowledgement until its internal 1-second timeout expires (`timer id 897`), triggering retransmission and eventual session abandonment.
+3. **Absence of Datapath and Session Logic for URR in `openair-upf:v2.1.0`:**
+   - Detailed source code audit of `component/oai-upf/src/upf_app/simpleswitch/pfcp_switch.cpp` (lines 703–745, 954–1028) revealed that session establishment and modification strictly process `create_fars`, `create_pdrs`, and `create_qers`. **There is zero processing of `create_urrs`** in the application switch.
+   - The session manager class (`pfcp_session.cpp`) contains no method or storage structure to manage or track URRs.
+   - In `src/pfcp/msg_pfcp.hpp` (lines 648–656), `get()` and `set()` for `measurement_method_t` explicitly throw `pfcp_msg_illegal_ie_exception`.
+   - Upstream git commit history confirms that URR was only ever initiated in an experimental development branch (`0168012 origin/feature_urr_implementation: Init: Start the implementation of the URR`) and was never completed or merged into release `v2.1.0`.
+   - Consequently, even patching the IE 62 parser would result in silent omission of URR handling: UPF would maintain no counters and emit zero Usage Reports.
 
 ### Empirical Verification
 
@@ -2665,9 +2671,10 @@ Simultaneously, PFCP Heartbeat exchanges between SMF-1 and UPF-1 (`192.168.70.14
 
 ### Architectural & Thesis Implications
 
-This empirical discovery proves that native 3GPP User-Plane Usage Reporting (URR) via N4/PFCP to SMF and NWDAF is strictly bounded by the `openair-upf:v2.1.0` binary implementation (missing IE Type 62).  
-This conclusively justifies the architectural design of the thesis platform, which leverages the dedicated **Core Telemetry Adapter (`core_adapter.py`)** to directly sample kernel socket statistics and interface `tc qdisc` queue telemetry on VM-3 for end-to-end multi-slice observability.
+This empirical discovery proves that native 3GPP User-Plane Usage Reporting (URR) via N4/PFCP to SMF is completely absent from the `openair-upf:v2.1.0` datapath.  
+Attempting to implement URR natively would require re-architecting the entire UPF forwarding engine and session management subsystem.
 
+Instead, in full alignment with **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM services"), the thesis platform leverages the dedicated **Core Telemetry Adapter (`core_adapter.py` v9)** on VM-3 to directly sample physical kernel queue telemetry (`tc qdisc` backlog bytes and drop rates) and interface throughput. These ground-truth metrics are bridged to NWDAF, allowing NWDAF's analytics engine to compute canonical slice load analytics for closed-loop coordination with the Non-RT RIC rApp.
 ---
 
 ## Related Documentation
