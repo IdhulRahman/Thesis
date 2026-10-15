@@ -709,9 +709,9 @@ The findings above confirm that:
 1. **`absoluteNum` in OAI NWDAF v2.1.0 is confirmed functional for control-plane sessions:** After correcting the multi-slice `oai-nwdaf-sbi` SBI endpoint configuration (see §9 Step 4), SMF event subscriptions succeed and MongoDB `testing.smf` is populated with real PDU session documents. `absoluteNum` correctly reflects `CountDocuments` output — dynamically returning `1`.
 2. **`relativeRatio` and `confidence` remain hardcoded `0`:** The OAI development team has not yet implemented these calculations (`//TODO` in source). This is an upstream limitation, not a deployment error.
 3. **Dual-Track Core Telemetry Architecture:**
-   - **Track 1 (Native 3GPP PFCP URR Track):** Successfully validated via the patched UPF PoC (`oai-upf:poc-develop-ie43-compat-v1`) to verify session-level volume and duration reporting via 3GPP standard N4 $\to$ SMF $\to$ NWDAF interfaces.
-   - **Track 2 (Custom OAM Host Telemetry Track):** Operates under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM services") via `core_adapter.py` v9 on VM-3, capturing physical kernel queue dynamics (`tc qdisc` backlog bytes and drop rates) that 3GPP URR does not natively measure.
-   - **Complementary Synthesis:** Both telemetry streams feed NWDAF, empowering its analytics engine to provide robust, multi-dimensional slice load intelligence to the Non-RT RIC rApp for closed-loop control.
+   - **Track 1 (Native 3GPP PFCP URR Track — PoC Session Established; Reporting Under Active Validation):** PoC session establishment verified with `Linked URR: 1` via the patched UPF PoC (`oai-upf:poc-develop-ie43-compat-v1`). End-to-end telemetry propagation to NWDAF (UPF Usage Report $\to$ SMF $\to$ NWDAF `qosmonlist` or volume counters) is under active validation.
+   - **Track 2 (Custom OAM Host Telemetry Track — Operational to VM-6):** Operates under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM services") via `core_adapter.py` v9 on VM-3, capturing physical kernel queue dynamics (`tc qdisc` backlog bytes and drop rates) that 3GPP URR does not natively measure, streaming directly to VM-6 (`:9100/report`).
+   - **Architectural Implementation Target:** Directing both telemetry streams into NWDAF represents the system's architectural implementation target; currently, Track 2 streams directly to VM-6 while Track 1's upstream reporting chain to NWDAF is being finalized.
 
 ---
 
