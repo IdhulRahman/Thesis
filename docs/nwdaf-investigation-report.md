@@ -3,7 +3,7 @@
 **Research Title:** *Bottleneck-Aware Closed-Loop Traffic Steering via O-RAN RIC–NWDAF Coordination in Multi-Slice 5G Networks*  
 **Authors:** Student Research Team / System Developers  
 **Target Audience:** Thesis Advisors, Examination Committee, and Technical Reviewers (Observer)  
-**Evaluation & Revision Date:** October 15, 2026 (Revision v4 — Definitive Localization & End-to-End User Plane Activation)  
+**Evaluation & Revision Date:** October 15, 2026 (Revision v7 — Definitive 5-Layer End-to-End User Plane Telemetry Activation & Northbound API Validation)  
 **Target Nodes:** VM-3 — 5G Core & NWDAF Host (`10.102.0.164`), VM-6 — Telemetry Collector (`10.102.0.67`), VM-5 — nrUE (`10.102.0.165`)
 
 ---
@@ -14,11 +14,16 @@ During initial pilot evaluations of the cross-domain multi-slice telemetry pipel
 1. The `nwdaf_load_embb` and `nwdaf_load_urllc` columns in the TSDB collector dataset contained `NaN` values (100% missing).
 2. When the official 3GPP `Nnwdaf_AnalyticsInfo` interface was queried directly through the Kong API Gateway (port 8080 on VM-3), the service responded with **HTTP 200 OK**, but both `relativeRatio` and `absoluteNum` remained constant at **`0`**.
 
-**Current Status (Revision v6 Updates):**
-* **End-to-End Native 3GPP User-Plane Telemetry Ingestion Confirmed (✅):** Following the restart of `oai-nwdaf-sbi` to resynchronize event subscriptions with SMF-1, `Nsmf_EventExposure` (`QOS_MON`, Event 98) successfully captures live usage reports from SMF-1. UPF datapath volume and packet metrics (SEID 4, Periodic Reporting) are actively persisted into MongoDB `testing.smf` under the `qosmonlist` array (`CustomUsageReport` with volume counters, packet counts, duration, and UR-SEQN).
+**Current Status (Revision v7 Updates):**
+* **Complete 5-Layer User-Plane Telemetry & Northbound API Exposure Confirmed (✅):** The full native 3GPP telemetry chain is verified end-to-end:
+  1. *Layer 1 (UPF Datapath):* URR 1 bound to PDR 1 accumulates datapath octets and packets on `simpleswitch`.
+  2. *Layer 2 (N4 PFCP):* UPF transmits periodic N4 Session Report Requests (`msg type 56`, 109 bytes).
+  3. *Layer 3 (SMF Ingestion & Exposure):* SMF-1 extracts volume/packet counters and emits `Nsmf_EventExposure` (`QOS_MON`, Event 98) HTTP/2 notifications.
+  4. *Layer 4 (NWDAF SBI & Database):* `oai-nwdaf-sbi` receives notifications and persists `CustomUsageReport` structures into MongoDB `testing.smf` under `qosmonlist`.
+  5. *Layer 5 (NWDAF Engine & Northbound 3GPP REST API):* Querying Kong API Gateway (`:8080/nnwdaf-analyticsinfo/v1/analytics`) for `UE_COMMUNICATION` returns HTTP 200 with dynamic volume and duration metrics (`commDur: 2842s`, `ulVol: 1680B`, `dlVol: 1680B`), precisely matching the cumulative sum of ingested URR reports.
 * **Control-Plane Event Ingestion Confirmed (✅):** AMF dynamic NRF registration ([Case #51](troubleshooting.md#51-oai-amf-automated-nrf-registration-failure-missing-nfinstanceid-in-dynamic-resource-uri)), `Namf_EventExposure`, and `Nsmf_EventExposure` session establishment records are verified, with `Nnwdaf_AnalyticsInfo` returning dynamic `absoluteNum: 1`.
 * **Host Adapter Observability Operational (✅):** Core user-plane buffer queue occupancy (`tc qdisc`) and drop rate telemetry are actively streaming via `core_adapter.py` on VM-3 to VM-6 (`10.102.0.67`).
-* **Complete Dual-Track Telemetry Architecture Operational (✅):** Both Track 1 (Native 3GPP PFCP URR $\to$ SMF $\to$ NWDAF SBI $\to$ MongoDB `qosmonlist`) and Track 2 (OAM Host Adapter via `core_adapter.py` under 3GPP TS 23.288 §6.2.3) are verified and running simultaneously in the testbed.
+* **Complete Dual-Track Telemetry Architecture Operational (✅):** Both Track 1 (Native 3GPP PFCP URR $\to$ SMF $\to$ NWDAF SBI $\to$ MongoDB `qosmonlist` $\to$ NWDAF Engine $\to$ Northbound API) and Track 2 (OAM Host Adapter via `core_adapter.py` under 3GPP TS 23.288 §6.2.3) are verified and running simultaneously in the testbed.
 
 ---
 
@@ -242,13 +247,81 @@ Querying the MongoDB database `testing` on VM-3:
 
 ---
 
+### Evidence 6: Live 3GPP TS 29.520 REST API Output for User-Plane Telemetry (`UE_COMMUNICATION`)
+
+Following the persistent ingestion of UPF URR metrics into MongoDB `testing.smf` (`qosmonlist`), the Northbound Analytics API (`Nnwdaf_AnalyticsInfo`) was queried via the Kong API Gateway (port 8080 on VM-3) for event ID `UE_COMMUNICATION` under 3GPP TS 29.520 §5.1.6.3.2:
+
+```bash
+curl -s -G "http://localhost:8080/nnwdaf-analyticsinfo/v1/analytics" \
+  --data-urlencode "event-id=UE_COMMUNICATION" \
+  --data-urlencode 'ana-req={"startTs":"2026-10-01T00:00:00Z","endTs":"2026-10-20T23:59:59Z"}' | jq .
+```
+
+**Live System Response (HTTP 200 OK):**
+```json
+{
+  "anaMetaInfo": {
+    "dataWindow": {
+      "startTime": "2026-10-01T00:00:00Z",
+      "stopTime": "2026-10-20T23:59:59Z"
+    },
+    "strategy": {},
+    "accuracy": {}
+  },
+  "ueComms": [
+    {
+      "commDur": 2842,
+      "ts": "2026-10-01T00:00:00Z",
+      "recurringTime": {},
+      "trafChar": {
+        "ulVol": 1680,
+        "ulVolVariance": 588,
+        "dlVol": 1680,
+        "dlVolVariance": 588
+      },
+      "anaOfAppList": {
+        "startTime": "0001-01-01T00:00:00Z",
+        "spatialValidity": {}
+      },
+      "sessInactTimer": {}
+    }
+  ]
+}
+```
+
+**Live Engine Query Verification (`oai-nwdaf-engine` container logs):**
+```text
+2026/10/15 07:28:28 Getting Ue Communication from DB
+2026/10/15 07:28:28 Constructing Ue Communication filter for DB search ...
+2026/10/15 07:28:28 Case 3. Both startTs and endTs present -> documents during period
+2026/10/15 07:28:28 Case 3. Both startTs and endTs present -> documents during period
+```
+
+**Mathematical Proof of End-to-End Aggregation:**
+1. **Communication Duration (`commDur`):**
+   $$\text{commDur} = \text{duration}_{\text{Report 2}} (1406\text{s}) + \text{duration}_{\text{Report 3}} (1436\text{s}) = 2842\text{s}$$
+   Matches exactly the `commDur: 2842` emitted by NWDAF.
+2. **Uplink Volume (`ulVol`):**
+   $$\text{ulVol} = \text{vol\_ul}_{\text{Report 2}} (1428\text{ B}) + \text{vol\_ul}_{\text{Report 3}} (252\text{ B}) = 1680\text{ B}$$
+   Matches exactly `ulVol: 1680`.
+3. **Downlink Volume (`dlVol`):**
+   $$\text{dlVol} = \text{vol\_dl}_{\text{Report 2}} (1428\text{ B}) + \text{vol\_dl}_{\text{Report 3}} (252\text{ B}) = 1680\text{ B}$$
+   Matches exactly `dlVol: 1680`.
+4. **Volume Variance:**
+   $$\text{ulVolVariance} = \text{dlVolVariance} = 588$$
+   Computed dynamically across the discrete reporting intervals.
+
+> **Key Milestone:** This empirical result definitively proves that Track 1 (Native 3GPP User-Plane Telemetry) is 100% operational across all five architectural layers: UPF datapath $\rightarrow$ N4 PFCP periodic reporting $\rightarrow$ SMF N11 event exposure $\rightarrow$ NWDAF SBI MongoDB storage (`qosmonlist`) $\rightarrow$ NWDAF Engine $\rightarrow$ Northbound 3GPP Analytics API (`Nnwdaf_AnalyticsInfo`).
+
+---
+
 ## 4. Structured Engineering Roadmap & Verification Status
 
 ```
 [Phase 1: Control Plane Core] ✅     [Phase 2: CP Event Ingestion] ✅       [Phase 3A: Adapter Observability] ✅     [Phase 4: rApp Loop] ⏳
 AMF-NRF registered (Case #51)    ->  testing.amf & testing.smf active    -> core_adapter.py (VM-3 -> VM-6)        -> Cross-domain correlation
-PDU Session established (Case #52)   absoluteNum: 1 returned                [Phase 3B: NWDAF UP Integration] ⏳      (RAN PRB vs Core Queue)
-                                                                            UPF IE 62 patch / NWDAF UP exposure
+PDU Session established (Case #52)   absoluteNum: 1 returned                [Phase 3B: NWDAF UP Integration] ✅      (RAN PRB vs Core Queue)
+                                                                            5-Layer URR->NWDAF Verified
 ```
 
 ### Phase 1: Upstream Control Plane Verification ✅ COMPLETED
@@ -311,13 +384,13 @@ PDU Session established (Case #52)   absoluteNum: 1 returned                [Pha
          ]
        }
        ```
+     - **Northbound 3GPP Analytics Exposure:** Querying the Kong API Gateway (`:8080/nnwdaf-analyticsinfo/v1/analytics`) for `UE_COMMUNICATION` returns HTTP 200 with dynamic aggregations (`commDur: 2842s`, `ulVol: 1680B`, `dlVol: 1680B`), fully matching the sum of ingested reports in `qosmonlist`.
      - **Data Plane Connectivity:** Concurrently, UE 1 softmodem transmits and receives traffic across `oaitun_ue1` to External DN with **0% packet loss** (`ping -I oaitun_ue1 -c 20 192.168.70.145`, avg RTT 26.012 ms).
   2. **Track 2 (Custom OAM Host Telemetry Adapter via `core_adapter.py` v9 — ✅ OPERATIONAL):**
      - Under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM"), NWDAF is formally designed to ingest network performance and user-plane metrics through management services.
      - While 3GPP URR provides session-level volume and duration counters, bottleneck indicators such as physical egress queue backlog, bufferbloat, and packet drop surges occur at the Linux kernel packet scheduler (`tc qdisc`). These metrics are sampled non-intrusively by `core_adapter.py` v9 on VM-3 and pushed directly to VM-6 (`:9100/report`).
-  3. **Architectural Implementation Target:**
-     - The two tracks are complementary: native URR provides 3GPP session volume/duration telemetry, while the OAM adapter captures physical queue dynamics and congestion.
-     - Directing both metric streams into NWDAF represents the architectural design target; currently, Track 2 feeds VM-6 directly while Track 1's end-to-end reporting chain to NWDAF is under active validation.
+  3. **Architectural Implementation Status:**
+     - Both tracks are now fully functional and verified in the testbed: Track 1 provides standard 3GPP session volume/duration telemetry aggregated through NWDAF, while Track 2 captures physical Linux kernel queue dynamics and packet drops, streaming directly to VM-6 (`:9100/report`).
 
 ### Phase 4: Closed-Loop rApp Integration ⏳ READY FOR EXECUTION
 - Correlate NWDAF session statistics and Core user-plane queue telemetry with O-RAN E2SM-KPM PRB metrics in the Non-RT RIC rApp (VM-1).
