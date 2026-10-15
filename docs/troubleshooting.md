@@ -2717,18 +2717,27 @@ To enable native 3GPP PFCP Usage Reporting Rules (URR) while maintaining full in
      1. `smf.upfs[].config.enable_usage_reporting: yes`: Instructs SMF to construct and attach 3GPP TS 29.244 IE Type 62 within `Create URR` linked to PDR 1.
      2. `upf.support_features.enable_urr: yes`: Instructs UPF `simpleswitch` (`pfcp_switch.cpp:1030`) to initialize internal URR datapath structures and spawn `thread_usage_report_ = std::thread(&pfcp_switch::usage_report_loop, this)`.
 
-     Once configured and restarted, UPF banner confirmed `+ Enable Usage Reporting (URR): Yes`. UPF `usage_report_loop()` periodically builds and transmits PFCP Session Report Requests (`msg type 56`, 109 bytes) containing `Usage Report Trigger: Periodic Reporting` over N4. SMF-1 logs verify successful reception and downstream event dispatch:
+     Once configured and restarted, UPF banner confirmed `+ Enable Usage Reporting (URR): Yes`. UPF `usage_report_loop()` periodically builds and transmits PFCP Session Report Requests (`msg type 56`, 109 bytes) containing `Usage Report Trigger: Periodic Reporting` over N4. SMF-1 logs verify successful reception, packet/volume extraction, and downstream event dispatch:
      ```text
      [smf_n4 ] [info] handle_receive(109 bytes)
      [smf_n4 ] [debug] handle_receive_pfcp_msg msg type 56 length 105
      [smf_n4 ] [info] Received N4 SESSION REPORT REQUEST from an UPF
      [smf_app] [info]               Trigger         -> Periodic Reporting
+     [smf_app] [info]                      Uplink   -> 30
+     [smf_app] [info]                      Downlink -> 30
+     [smf_app] [info]               Volume Total    -> 5040
+     [smf_app] [info]                      Uplink   -> 2520
+     [smf_app] [info]                      Downlink -> 2520
      [smf_app] [debug] Send request to N11 to trigger QoS Monitoring (Usage Report) Event, SMF Context-related SEID  0x4
+     [smf_app] [debug] No subscription available for this event
      [smf_app] [info] Sending ITTI message 31itti_n4_session_report_response to task TASK_SMF_N4
      ```
-     This empirically confirms that the UPF $\to$ SMF leg of Track 1 is fully functional.
-   - **Reporting Chain Boundary:**
-     While UPF $\to$ SMF N4 Usage Reporting and SMF N11 event triggering are verified, the downstream propagation from SMF/AMF to NWDAF (updating MongoDB schema fields and exposing QoS metrics via NWDAF NBI API) remains under active validation.
+     This empirically confirms that the UPF $\to$ SMF leg of Track 1 is fully functional: UPF actively tracks datapath packets/bytes, transmits PFCP Session Reports over N4, and SMF successfully ingests them.
+   - **Downstream Root Cause Analysis (SMF $\to$ NWDAF Ingestion Boundary):**
+     Inspection of the downstream Core & NWDAF layers revealed the precise boundary:
+     1. **Unsubscribed Event in SMF:** SMF logs explicitly state `[smf_app] [debug] No subscription available for this event`. Because `oai-nwdaf-sbi` only creates subscriptions for session lifecycle events (`PDU_SES_EST`, `UE_IP_CH`, `DDDS`) and mobility events on AMF, no subscriber exists on SMF for QoS Monitoring / Usage Report events. Consequently, SMF does not dispatch HTTP/2 event notifications downstream.
+     2. **Limited Database Schema in OAI NWDAF:** Direct examination of the MongoDB `testing` database confirmed that only two collections exist: `amf` and `smf`. In `db.smf`, documents only contain `ueipchlist`, `dddslist`, and `pdusesestlist`. There is no schema or collection in `oai-nwdaf-database` for URR data volume or QoS monitoring. Furthermore, `oai-nwdaf-sbi` logs show that even standard AMF reports like `REACHABILITY_REPORT` and `CONNECTIVITY_STATE_REPORT` log `report type ... is not supported currently`.
+     3. **Architectural Justification for Track 2:** This empirical boundary proves why the thesis **Dual-Track Core Telemetry Architecture** is essential: standard 3GPP SBI event exposure in OAI CN5G is limited to control-plane session counters (`absoluteNum: 1`), while real-time user-plane buffer queuing (`tc qdisc backlog`) and packet drops are captured holistically by `core_adapter.py` (Track 2) under 3GPP TS 23.288 §6.2.3.
 
 #### Approach 2: Fallback Workaround (Baseline `v2.1.0` Rollback)
 

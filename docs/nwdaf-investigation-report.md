@@ -273,10 +273,12 @@ PDU Session established (Case #52)   absoluteNum: 1 returned                [Pha
        - UPF startup banner confirms `+ Enable Usage Reporting (URR): Yes`.
        - PDU session establishment succeeds with `Linked URR: 1` on PDR 1, and UE 1 softmodem passes data traffic with 0% packet loss (`ping -I oaitun_ue1 -c 10 192.168.70.145`, avg RTT 0.257 ms).
        - UPF `usage_report_loop()` actively transmits PFCP Session Report Requests (`msg type 56`, 109 bytes) with `Trigger: Periodic Reporting` over N4.
-       - SMF-1 logs verify successful reception: `Received N4 SESSION REPORT REQUEST from an UPF`, responds with `itti_n4_session_report_response`, and executes `Send request to N11 to trigger QoS Monitoring (Usage Report) Event, SMF Context-related SEID 0x4`.
-     - **Validation Still Required (Downstream Telemetry Propagation to NWDAF):**
-       - Verification that SMF/AMF dispatches the QoS Monitoring event to `oai-nwdaf-sbi` via HTTP/2 and persists records into MongoDB `testing` database.
-       - Verification of user-plane analytics exposure via NWDAF NBI API (`Nnwdaf_AnalyticsInfo`).
+       - SMF-1 logs verify successful reception and packet/byte parsing: `Received N4 SESSION REPORT REQUEST from an UPF`, `Uplink -> 30`, `Downlink -> 30`, `Volume Total -> 5040`, and sends `itti_n4_session_report_response`.
+       - SMF-1 attempts event dispatch: `Send request to N11 to trigger QoS Monitoring (Usage Report) Event, SMF Context-related SEID 0x4`, but logs `No subscription available for this event`.
+     - **Downstream Root Cause Analysis (SMF $\to$ NWDAF Ingestion Boundary):**
+       - **Unsubscribed Event in SMF:** `oai-nwdaf-sbi` creates event subscriptions for session lifecycle events (`PDU_SES_EST`, `UE_IP_CH`, `DDDS`) on SMF and mobility events on AMF, but does not subscribe to QoS Monitoring / Usage Report events. Consequently, SMF does not dispatch HTTP/2 event notifications downstream.
+       - **MongoDB Schema Scope:** Inspection of MongoDB `testing` database confirmed that only two collections exist (`amf` and `smf`), with `db.smf` exclusively tracking `ueipchlist`, `dddslist`, and `pdusesestlist`. No collection or schema exists in OAI NWDAF for URR data volume or QoS metrics.
+       - **Scientific Implication:** Leg UPF $\to$ SMF of Track 1 (Native 3GPP URR) is 100% operational and verified. The absence of user-plane queue telemetry in NWDAF is an upstream implementation boundary in `oai-nwdaf-sbi`, formally justifying the thesis deployment of Track 2 (`core_adapter.py` under 3GPP TS 23.288 §6.2.3) for kernel queue and congestion observability.
   2. **Track 2 (Custom OAM Host Telemetry Adapter via `core_adapter.py` v9 — ✅ OPERATIONAL):**
      - Under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM"), NWDAF is formally designed to ingest network performance and user-plane metrics through management services.
      - While 3GPP URR provides session-level volume and duration counters, bottleneck indicators such as physical egress queue backlog, bufferbloat, and packet drop surges occur at the Linux kernel packet scheduler (`tc qdisc`). These metrics are sampled non-intrusively by `core_adapter.py` v9 on VM-3 and pushed directly to VM-6 (`:9100/report`).
