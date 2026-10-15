@@ -75,6 +75,19 @@ def main():
     with open(EVENT_CSV, "a", newline="") as f:
         csv.writer(f).writerow([now_utc, RUN_ID, ev_type, scen_id, domain, comp, mech, param, notes])
 
+    run_dir = os.path.join(DATA_DIR, "raw", RUN_ID)
+    if os.path.exists(run_dir):
+        raw_event_csv = os.path.join(run_dir, f"experiment_events_{RUN_ID}.csv")
+        write_header = not os.path.exists(raw_event_csv)
+        try:
+            with open(raw_event_csv, "a", newline="") as rf:
+                writer = csv.writer(rf)
+                if write_header:
+                    writer.writerow(HEADERS)
+                writer.writerow([now_utc, RUN_ID, ev_type, scen_id, domain, comp, mech, param, notes])
+        except Exception:
+            pass
+
     print(f"[EVENT LOGGED] {now_utc} | Run: {RUN_ID} | {scen_id} | {domain} | {comp} | {param}")
 
 

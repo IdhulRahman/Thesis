@@ -1,0 +1,453 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Cross-domain 5G O-RAN RIC-NWDAF Telemetry Dashboard adhering to 3GPP TS 23.288 AnLF provenance and OAI DU scheduler demarcation.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "1. Experiment Overview & Pipeline Status",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "DISCONNECTED (Down)" }, "1": { "color": "green", "text": "OPERATIONAL (HTTP 200)" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "id": 1,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "pluginVersion": "10.1.0",
+      "targets": [{ "expr": "nwdaf_api_status", "refId": "A" }],
+      "title": "NWDAF Kong Gateway Status",
+      "description": "3GPP TS 29.520 NBI REST API connectivity (:8080/nnwdaf-analyticsinfo/...)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "options": { "0": { "color": "orange", "text": "STALE / UNCHANGED (>45s)" }, "1": { "color": "green", "text": "FRESH URR REPORT (<=45s)" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "id": 2,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "pluginVersion": "10.1.0",
+      "targets": [{ "expr": "nwdaf_comm_freshness", "refId": "A" }],
+      "title": "NWDAF AnLF Data Freshness",
+      "description": "Heuristic change indicator: 1 if source URR volume changed within 45s, else 0.",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "STALE / PROBE DOWN" }, "1": { "color": "green", "text": "ACTIVE (<=3.5s)" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "id": 3,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "pluginVersion": "10.1.0",
+      "targets": [{ "expr": "e2e_probe_freshness", "refId": "A" }],
+      "title": "URLLC Canary Probe Freshness",
+      "description": "True QoS canary probe indicator: 1 if valid reply received within 3.5s, else 0.",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "pluginVersion": "10.1.0",
+      "targets": [{ "expr": "e2e_slice2_reply_age_sec", "refId": "A" }],
+      "title": "URLLC Reply Age",
+      "description": "Elapsed seconds since latest valid ICMP canary reply from EXT-DN.",
+      "type": "stat"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 200,
+      "title": "2. Primary 3GPP NWDAF AnLF Analytics (TS 29.520 UE_COMMUNICATION)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 15, "lineWidth": 2, "spanNulls": false },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 6 },
+      "id": 5,
+      "options": { "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "nwdaf_comm_ul_bytes", "legendFormat": "Uplink Volume (UL)", "refId": "A" },
+        { "expr": "nwdaf_comm_dl_bytes", "legendFormat": "Downlink Volume (DL)", "refId": "B" }
+      ],
+      "title": "NWDAF Cumulative User-Plane Volume",
+      "description": "Cumulative bytes aggregated across session records in MongoDB by ue_communication.go (~30s cadence).",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 15, "lineWidth": 2, "spanNulls": false },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 6 },
+      "id": 6,
+      "options": { "tooltip": { "mode": "single" } },
+      "targets": [
+        { "expr": "nwdaf_comm_vol_std_bytes", "legendFormat": "Std Dev (ulVolVariance)", "refId": "A" }
+      ],
+      "title": "NWDAF Volume Standard Deviation",
+      "description": "Standard deviation of volume computed via math.Sqrt in upstream OAI engine.",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 15, "lineWidth": 2, "spanNulls": false },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 6 },
+      "id": 7,
+      "options": { "tooltip": { "mode": "single" } },
+      "targets": [
+        { "expr": "nwdaf_comm_duration_sec", "legendFormat": "Duration", "refId": "A" }
+      ],
+      "title": "NWDAF Aggregated Report Duration",
+      "description": "Sum of session reporting window durations ingested from SMF/UPF.",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 20, "lineWidth": 2, "spanNulls": false },
+          "unit": "Mbps"
+        }
+      },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 13 },
+      "id": 8,
+      "options": { "tooltip": { "mode": "single" } },
+      "targets": [
+        { "expr": "rate(nwdaf_comm_ul_bytes[60s]) * 8 / 1e6", "legendFormat": "Consumer Derived Throughput (rate[60s])", "refId": "A" }
+      ],
+      "title": "Consumer-Derived Uplink Throughput from AnLF Cumulative Volume",
+      "description": "Consumer Feature Engineering: Derived derivative rate from NWDAF TS 29.520 cumulative volume (~30s cadence).",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 },
+      "id": 300,
+      "title": "3. Radio Access Network (OAI DU Scheduler-Derived Telemetry ~1 Hz)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 20, "lineWidth": 2, "spanNulls": false },
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "#EAB839", "value": 75 },
+              { "color": "red", "value": 90 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 20 },
+      "id": 9,
+      "options": { "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "ran_cell_prb_utilization{cell_id=\"1\"}", "legendFormat": "Cell-1 PRB (eMBB Slice-1)", "refId": "A" },
+        { "expr": "ran_cell_prb_utilization{cell_id=\"2\"}", "legendFormat": "Cell-2 PRB (URLLC Slice-2)", "refId": "B" }
+      ],
+      "title": "RAN PRB Allocation Ratio (NPRB / 106)",
+      "description": "Instantaneous PRB allocation ratio sampled at ~1 Hz from OAI DU scheduler logs by ran_adapter.py.",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 15, "lineWidth": 2, "spanNulls": false }
+        }
+      },
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 20 },
+      "id": 10,
+      "options": { "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "ran_cell_mcs{cell_id=\"1\"}", "legendFormat": "Cell-1 MCS", "refId": "A" },
+        { "expr": "ran_cell_mcs{cell_id=\"2\"}", "legendFormat": "Cell-2 MCS", "refId": "B" }
+      ],
+      "title": "RAN Uplink Modulation & Coding Scheme (MCS)",
+      "description": "UL-SCH MCS allocated to active UE (0-28).",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 15, "lineWidth": 2, "spanNulls": false },
+          "unit": "dB"
+        }
+      },
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 20 },
+      "id": 11,
+      "options": { "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "ran_cell_snr_db{cell_id=\"1\"}", "legendFormat": "Cell-1 SNR", "refId": "A" },
+        { "expr": "ran_cell_snr_db{cell_id=\"2\"}", "legendFormat": "Cell-2 SNR", "refId": "B" }
+      ],
+      "title": "RAN Uplink Signal-to-Noise Ratio (SNR)",
+      "description": "Radio channel quality in dB.",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "id": 400,
+      "title": "4. End-to-End Service & QoS Impact (Validation Stream)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 20, "lineWidth": 2, "spanNulls": false },
+          "unit": "Mbps"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 28 },
+      "id": 12,
+      "options": { "tooltip": { "mode": "single" } },
+      "targets": [
+        { "expr": "e2e_slice1_throughput_mbps", "legendFormat": "eMBB Offered Load (Sender)", "refId": "A" }
+      ],
+      "title": "eMBB Slice-1 Offered Load (Sender VM-5)",
+      "description": "Client-side UDP offered rate generated by trafgen.sh via iperf3 -u.",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 15, "lineWidth": 2, "spanNulls": false },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 20 }
+            ]
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 28 },
+      "id": 13,
+      "options": { "tooltip": { "mode": "single" } },
+      "targets": [
+        { "expr": "e2e_slice2_latency_rtt_ms", "legendFormat": "URLLC Canary RTT (ms)", "refId": "A" }
+      ],
+      "title": "URLLC Slice-2 Round-Trip Latency (SLA: 20 ms)",
+      "description": "High-precision 10 Hz canary ICMP ping RTT from UE-2 to EXT-DN.",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 20, "lineWidth": 2, "spanNulls": false },
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 28 },
+      "id": 14,
+      "options": { "tooltip": { "mode": "single" } },
+      "targets": [
+        { "expr": "e2e_slice2_packet_loss_pct", "legendFormat": "URLLC Loss %", "refId": "A" }
+      ],
+      "title": "URLLC Slice-2 Packet Loss (SLA: 1%)",
+      "description": "Sequence-matched packet loss percentage.",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
+      "id": 500,
+      "title": "5. Core Validation & Ground-Truth Baseline (Linux Kernel Sensors - NOT NWDAF AnLF)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 20, "lineWidth": 2, "spanNulls": false },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 36 },
+      "id": 15,
+      "options": { "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "upf_queue_backlog_bytes{snssai=\"01000001\"}", "legendFormat": "UPF-1 (eMBB) Backlog", "refId": "A" },
+        { "expr": "upf_queue_backlog_bytes{snssai=\"de00007b\"}", "legendFormat": "UPF-2 (URLLC) Backlog", "refId": "B" }
+      ],
+      "title": "UPF Kernel Qdisc Queue Backlog",
+      "description": "Linux tc qdisc show dev eth0 backlog bytes on UPF containers (core_adapter.py audit baseline).",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 20, "lineWidth": 2, "spanNulls": false },
+          "unit": "pps"
+        }
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 36 },
+      "id": 16,
+      "options": { "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "upf_packet_drops_per_sec{snssai=\"01000001\"}", "legendFormat": "UPF-1 Drops (eMBB)", "refId": "A" },
+        { "expr": "upf_packet_drops_per_sec{snssai=\"de00007b\"}", "legendFormat": "UPF-2 Drops (URLLC)", "refId": "B" }
+      ],
+      "title": "UPF Kernel Qdisc Packet Drop Rate",
+      "description": "Direct drop rate in packets/sec (strictly un-rated gauge).",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": true,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 43 },
+      "id": 600,
+      "title": "6. Non-RT RIC rApp Cross-Domain Bottleneck Diagnosis (Awaiting Model Training)",
+      "type": "row",
+      "panels": [
+        {
+          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                {
+                  "options": {
+                    "-1": { "color": "dark-gray", "text": "UNINITIALIZED" },
+                    "0": { "color": "green", "text": "NORMAL (No Bottleneck)" },
+                    "1": { "color": "#EAB839", "text": "RAN BOTTLENECK" },
+                    "2": { "color": "orange", "text": "CORE BOTTLENECK" },
+                    "3": { "color": "red", "text": "JOINT BOTTLENECK" }
+                  },
+                  "type": "value"
+                }
+              ]
+            }
+          },
+          "gridPos": { "h": 5, "w": 12, "x": 0, "y": 44 },
+          "id": 17,
+          "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "pluginVersion": "10.1.0",
+          "targets": [{ "expr": "rapp_diagnosed_bottleneck", "refId": "A" }],
+          "title": "rApp Predicted Bottleneck Class",
+          "description": "Awaiting ML model training on fused RAN + NWDAF AnLF dataset.",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "max": 1,
+              "min": 0,
+              "unit": "percentunit"
+            }
+          },
+          "gridPos": { "h": 5, "w": 12, "x": 12, "y": 44 },
+          "id": 18,
+          "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "pluginVersion": "10.1.0",
+          "targets": [{ "expr": "rapp_confidence", "refId": "A" }],
+          "title": "rApp Diagnosis Confidence",
+          "description": "Confidence probability score of the active prediction.",
+          "type": "stat"
+        }
+      ]
+    }
+  ],
+  "refresh": "1s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["5g", "oran", "thesis", "ric", "nwdaf", "anlf"],
+  "time": { "from": "now-5m", "to": "now" },
+  "timezone": "browser",
+  "title": "5G O-RAN RIC-NWDAF Closed-Loop & Bottleneck Telemetry",
+  "uid": "oran-thesis-dashboard",
+  "version": 2
+}

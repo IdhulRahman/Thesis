@@ -29,7 +29,11 @@ RUN_ID = sys.argv[1] if len(sys.argv) > 1 else f"PILOT_{RUN_TIMESTAMP}"
 with open(RUN_STATE_FILE, "w") as f:
     f.write(RUN_ID + "\n")
 
-CSV_FILE = os.path.join(DATA_DIR, f"telemetry_raw_{RUN_ID}_{os.getpid()}.csv")
+RUN_DIR = os.path.join(DATA_DIR, "raw", RUN_ID)
+os.makedirs(RUN_DIR, exist_ok=True)
+
+CSV_FILE = os.path.join(RUN_DIR, f"telemetry_{RUN_ID}.csv")
+LEGACY_CSV_FILE = os.path.join(DATA_DIR, f"telemetry_raw_{RUN_ID}_{os.getpid()}.csv")
 
 HEADERS = [
     "timestamp_utc", "elapsed_sec", "run_id", "scrape_ok", "scrape_latency_ms",
@@ -217,9 +221,23 @@ def main():
         json.dump({"scenario": "UNINITIALIZED", "domain": "UNINITIALIZED", "component": "NONE"}, f)
     os.replace(tmp_init, ACTIVE_EVENT_FILE)
 
-    with open(CSV_FILE, "x", newline="") as f:
+    # Initialize manifest.json in RUN_DIR
+    manifest = {
+        "run_id": RUN_ID,
+        "start_time_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "schema_version": "v1.0",
+        "csv_filename": f"telemetry_{RUN_ID}.csv",
+        "cadence_hz": 1.0,
+        "status": "RECORDING"
+    }
+    with open(os.path.join(RUN_DIR, "manifest.json"), "w") as mf:
+        json.dump(manifest, mf, indent=2)
+
+    with open(CSV_FILE, "x", newline="") as f, open(LEGACY_CSV_FILE, "x", newline="") as f_legacy:
         writer = csv.writer(f)
         writer.writerow(HEADERS)
+        writer_legacy = csv.writer(f_legacy)
+        writer_legacy.writerow(HEADERS)
 
         start_mono = time.monotonic()
         next_tick = start_mono
@@ -253,6 +271,8 @@ def main():
             ]
             writer.writerow(row)
             f.flush()
+            writer_legacy.writerow(row)
+            f_legacy.flush()
 
             if sec_idx % 5 == 0:
                 print(f"[{elapsed:>6.1f}s] Skenario: {scen:<18} | eMBB: {telemetry['e2e_slice1_tput_mbps']:>6}M | UPF-1 Backlog: {telemetry['upf_backlog_bytes_embb']:>6}B | Drops: {telemetry['upf_drops_embb']:>3} | Scrape: {'OK' if scrape_ok else 'FAIL'}", flush=True)
@@ -263,9 +283,16 @@ def main():
             if sleep_wait > 0:
                 time.sleep(sleep_wait)
 
+    manifest["end_time_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    manifest["total_rows"] = sec_idx
+    manifest["status"] = "COMPLETED"
+    with open(os.path.join(RUN_DIR, "manifest.json"), "w") as mf:
+        json.dump(manifest, mf, indent=2)
+
     print("=" * 90)
     print(f"[+] Perekaman selesai. Total baris: {sec_idx}")
     print(f"[+] File tersimpan: {CSV_FILE}")
+    print(f"[+] Manifest: {os.path.join(RUN_DIR, 'manifest.json')}")
 
 
 if __name__ == "__main__":
