@@ -45,13 +45,15 @@ PRESETS = {
     "S9": ("INJECT_FAULT", "S9_JOINT_OVERLOAD", "JOINT", "Cell-1+UPF-1", "LOAD+TBF", "ran=40M,core_tbf=12M", "Joint bottleneck (RAN + Core bersamaan)"),
     "S10_A": ("STEP_RECOVERY", "S10_A_RELEASE_RAN", "CORE", "UPF-1_Slice-1", "TRAFFIC_DROP_TO_20M", "load=20M,core_tbf=12M", "Transisi S10: Turunkan offered load ke 20M, amati Core bottleneck berlanjut"),
     "S10_B": ("STEP_RECOVERY", "S10_B_RELEASE_CORE", "BASELINE", "NONE", "CLEAR_TBF", "load=20M,tbf=none", "Transisi S10: Hapus limit TBF UPF-1, amati backlog drain ke Normal"),
+    "RECOVERY": ("STEP_RECOVERY", "RECOVERY_TRANSITION", "TRANSITION", "ALL", "DRAIN", "load=10M,tbf=none", "Transisi pemulihan: Gangguan dilepas, menunggu drain antrean ke Normal"),
+    "ABORT": ("ABORT_RUN", "RUN_ABORTED", "INVALID", "NONE", "NONE", "none", "Eksperimen dibatalkan sebelum selesai"),
     "CLEAR": ("CLEAR_FAULT", "S1_NORMAL_LIGHT", "BASELINE", "ALL", "NONE", "load=10M", "Seluruh gangguan dinonaktifkan")
 }
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Penggunaan: python3 log_event.py <S1|S2|S3|S6|S9|S10_A|S10_B|CLEAR> [catatan]")
+        print("Penggunaan: python3 log_event.py <S1|S2|S3|S6|S9|S10_A|S10_B|RECOVERY|CLEAR|ABORT> [catatan]")
         sys.exit(1)
 
     key = sys.argv[1].upper()
@@ -65,28 +67,29 @@ def main():
 
     now_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-    # 1. Update atomik ke active_event.json
-    tmp_file = ACTIVE_EVENT_FILE + ".tmp"
-    with open(tmp_file, "w") as f:
-        json.dump({"scenario": scen_id, "domain": domain, "component": comp, "param": param}, f)
-    os.replace(tmp_file, ACTIVE_EVENT_FILE)
+    try:
+        # 1. Update atomik ke active_event.json
+        tmp_file = ACTIVE_EVENT_FILE + ".tmp"
+        with open(tmp_file, "w") as f:
+            json.dump({"scenario": scen_id, "domain": domain, "component": comp, "param": param}, f)
+        os.replace(tmp_file, ACTIVE_EVENT_FILE)
 
-    # 2. Catat event ke CSV
-    with open(EVENT_CSV, "a", newline="") as f:
-        csv.writer(f).writerow([now_utc, RUN_ID, ev_type, scen_id, domain, comp, mech, param, notes])
+        # 2. Catat event ke CSV
+        with open(EVENT_CSV, "a", newline="") as f:
+            csv.writer(f).writerow([now_utc, RUN_ID, ev_type, scen_id, domain, comp, mech, param, notes])
 
-    run_dir = os.path.join(DATA_DIR, "raw", RUN_ID)
-    if os.path.exists(run_dir):
-        raw_event_csv = os.path.join(run_dir, f"experiment_events_{RUN_ID}.csv")
-        write_header = not os.path.exists(raw_event_csv)
-        try:
+        run_dir = os.path.join(DATA_DIR, "raw", RUN_ID)
+        if os.path.exists(run_dir):
+            raw_event_csv = os.path.join(run_dir, f"experiment_events_{RUN_ID}.csv")
+            write_header = not os.path.exists(raw_event_csv)
             with open(raw_event_csv, "a", newline="") as rf:
                 writer = csv.writer(rf)
                 if write_header:
                     writer.writerow(HEADERS)
                 writer.writerow([now_utc, RUN_ID, ev_type, scen_id, domain, comp, mech, param, notes])
-        except Exception:
-            pass
+    except Exception as e:
+        print(f"[FATAL ERROR] Gagal mencatat event: {e}", file=sys.stderr)
+        sys.exit(1)
 
     print(f"[EVENT LOGGED] {now_utc} | Run: {RUN_ID} | {scen_id} | {domain} | {comp} | {param}")
 
