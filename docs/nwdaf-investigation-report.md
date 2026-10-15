@@ -315,6 +315,45 @@ curl -s -G "http://localhost:8080/nnwdaf-analyticsinfo/v1/analytics" \
 
 ---
 
+### Evidence 7: Upstream OAI Source Code Audit — Semantic Quirks & Multi-Slice Boundary Constraints
+
+While the successful execution of the 5-layer pipeline proves that the native data flow from UPF datapath to NWDAF NBI is fully functional on PoC Slice-1, detailed source code auditing of the UPF and NWDAF Engine components reveals four critical semantic findings that must be accounted for prior to utilizing these metrics as machine learning features:
+
+1. **`commDur: 2842` Semantic Analysis (Cumulative Elapsed Time Double-Counting):**
+   - In UPF source code ([`pfcp_switch.cpp:1030`](https://github.com/openairinterface/oai-cn5g-upf/blob/c51cae2324e79a65e96f48ef8a00365de06bcb96/src/upf_app/simpleswitch/pfcp_switch.cpp)), `duration` inside each Usage Report represents the monotonic elapsed time from the start of the session measurement ($t_{\text{now}} - t_{\text{start}}$). Thus Report 2 reported $1406\text{s}$ and Report 3 reported $1436\text{s}$.
+   - In NWDAF engine ([`ue_communication.go`](https://github.com/openairinterface/oai-cn5g-nwdaf/blob/9d82b7547586a6e04dc0719ef18910ea01fcd9e7/components/oai-nwdaf-engine/internal/engine/ue_communication.go)), the engine iterates through all reports in `qosmonlist` and executes:
+     ```go
+     commDur += report.Duration
+     ```
+   - Result: $1406 + 1436 = 2842\text{s}$. The arithmetic proves that the aggregation loop processes each document in `qosmonlist`; however, from a semantic perspective, summing elapsed times double-counts the overlapping first 1406 seconds. The true elapsed communication duration is $\max(\text{duration}) = 1436\text{s}$ or an incremental $\Delta t = 30\text{s}$.
+
+2. **`ulVolVariance` / `dlVolVariance` Represents Standard Deviation ($\sigma$), Not Variance ($\sigma^2$):**
+   - In `ue_communication.go`, the variance calculation executes:
+     $$\text{variance} = \sqrt{\frac{\sum (x_i - \bar{x})^2}{N}}$$
+     which mathematically represents the **sample standard deviation** ($\sigma$), not the true variance ($\sigma^2$).
+   - For Report 2 ($1428\text{ B}$) and Report 3 ($252\text{ B}$), the mean is $\bar{x} = 840\text{ B}$.
+   - The absolute deviations are $|1428 - 840| = 588\text{ B}$ and $|252 - 840| = 588\text{ B}$.
+   - The true statistical variance is $\sigma^2 = 588^2 = 345,744\text{ B}^2$.
+   - The engine returns $588$, confirming that `ulVolVariance` and `dlVolVariance` in the OAI NWDAF implementation contain the standard deviation $\sigma = 588\text{ B}$.
+
+3. **Aggregation Scope: Filtered by Time Window Only (Lacks SUPI & S-NSSAI Partitioning):**
+   - In `ue_communication.go:getFilterUeComm()`, the MongoDB filter constructs a query matching:
+     `Case 3. Both startTs and endTs present -> documents during period`
+   - The query matches any document in `testing.smf` whose `timestamp` falls within $[startTs, endTs]$, without projecting or filtering by SUPI (`_id`) or S-NSSAI (`snssai`).
+   - For the single-slice PoC (Slice 1, IMSI `208950000000001`), this correctly captures the active session.
+   - For multi-UE or multi-slice deployments (Slice 1 + Slice 2), all UEs' usage reports would be merged into a single `ueComms` record, indicating an upstream limitation in slice-isolated analytics.
+
+4. **Temporal Cadence Mismatch (30-second URR Reporting Loop vs. 1 Hz Collector Sampling):**
+   - In UPF `pfcp_switch.cpp`, `usage_report_loop()` executes periodically with a 30-second sleep (`std::this_thread::sleep_for(std::chrono::seconds(30))`).
+   - Consequently, N4 Session Report Requests and downstream `Nsmf_EventExposure` notifications occur at ~30-second intervals.
+   - A dataset logger sampling at 1.000 Hz (`record_dual_stream.py`) will therefore record NWDAF metrics as a step function with a 30-second hold, rather than novel per-second measurements.
+
+5. **Calibrated Scope of Claim:**
+   - The technical milestone achieved is formally specified as: **"Native telemetry data flow is verified on PoC Slice-1"** (*Alur telemetri native terverifikasi pada PoC Slice-1*).
+   - This demarcates the complete verification of the 5-layer transport and ingestion pipeline while maintaining scientific transparency regarding upstream OAI analytics calculation semantics.
+
+---
+
 ## 4. Structured Engineering Roadmap & Verification Status
 
 ```

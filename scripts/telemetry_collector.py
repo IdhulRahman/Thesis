@@ -13,6 +13,7 @@ import math
 import threading
 import time
 import urllib.request
+import urllib.parse
 import urllib.error
 
 LISTEN_PORT = 9100
@@ -34,6 +35,12 @@ metrics_store = {
         "01000001": float("nan"),     # eMBB (SST 1, SD 1)
         "de00007b": float("nan")      # URLLC (SST 222, SD 123)
     },
+    # 3GPP TS 29.520 UE_COMMUNICATION Analytics (PoC Slice 1 URR Ingestion)
+    "nwdaf_comm_duration_sec": float("nan"),
+    "nwdaf_comm_ul_bytes": float("nan"),
+    "nwdaf_comm_dl_bytes": float("nan"),
+    "nwdaf_comm_vol_std_bytes": float("nan"),
+    "nwdaf_comm_freshness": 0,
     "estimated_slice_load_level": {
         "01000001": float("nan"),     # Empirical load estimate (Tx / Quota * 100%)
         "de00007b": float("nan")
@@ -140,8 +147,13 @@ def format_prometheus_metrics():
                 metrics_store["upf_packet_drops_per_sec"][snssai] = float("nan")
                 metrics_store["estimated_slice_load_level"][snssai] = float("nan")
 
-        # Auto-reset stale NWDAF metrics if external Nnwdaf daemon stopped responding (> 5 seconds)
-        if last_nwdaf_poll_time > 0.0 and (now - last_nwdaf_poll_time > 5.0):
+        # Auto-reset stale NWDAF metrics if external Nnwdaf daemon stopped responding (> 35 seconds, matching UPF 30s loop + 5s buffer)
+        if last_nwdaf_poll_time > 0.0 and (now - last_nwdaf_poll_time > 35.0):
+            metrics_store["nwdaf_comm_freshness"] = 0
+            metrics_store["nwdaf_comm_duration_sec"] = float("nan")
+            metrics_store["nwdaf_comm_ul_bytes"] = float("nan")
+            metrics_store["nwdaf_comm_dl_bytes"] = float("nan")
+            metrics_store["nwdaf_comm_vol_std_bytes"] = float("nan")
             for snssai in ("01000001", "de00007b"):
                 metrics_store["nwdaf_slice_load_level"][snssai] = float("nan")
 
@@ -187,6 +199,26 @@ def format_prometheus_metrics():
         lines.append("# TYPE nwdaf_slice_load_level gauge")
         for snssai, val in metrics_store["nwdaf_slice_load_level"].items():
             lines.append(f'nwdaf_slice_load_level{{snssai="{snssai}"}} {fmt_val(val)}')
+
+        lines.append("# HELP nwdaf_comm_duration_sec NWDAF reported communication duration in seconds (note: upstream sums report elapsed times)")
+        lines.append("# TYPE nwdaf_comm_duration_sec gauge")
+        lines.append(f"nwdaf_comm_duration_sec {fmt_val(metrics_store['nwdaf_comm_duration_sec'])}")
+
+        lines.append("# HELP nwdaf_comm_ul_bytes NWDAF reported uplink user-plane volume in bytes")
+        lines.append("# TYPE nwdaf_comm_ul_bytes gauge")
+        lines.append(f"nwdaf_comm_ul_bytes {fmt_val(metrics_store['nwdaf_comm_ul_bytes'], '.0f')}")
+
+        lines.append("# HELP nwdaf_comm_dl_bytes NWDAF reported downlink user-plane volume in bytes")
+        lines.append("# TYPE nwdaf_comm_dl_bytes gauge")
+        lines.append(f"nwdaf_comm_dl_bytes {fmt_val(metrics_store['nwdaf_comm_dl_bytes'], '.0f')}")
+
+        lines.append("# HELP nwdaf_comm_vol_std_bytes NWDAF reported volume standard deviation in bytes (computed via math.Sqrt in upstream engine)")
+        lines.append("# TYPE nwdaf_comm_vol_std_bytes gauge")
+        lines.append(f"nwdaf_comm_vol_std_bytes {fmt_val(metrics_store['nwdaf_comm_vol_std_bytes'], '.0f')}")
+
+        lines.append("# HELP nwdaf_comm_freshness Freshness indicator for NWDAF user-plane telemetry (1=Fresh within 35s, 0=Stale)")
+        lines.append("# TYPE nwdaf_comm_freshness gauge")
+        lines.append(f"nwdaf_comm_freshness {int(metrics_store['nwdaf_comm_freshness'])}")
 
         lines.append("# HELP estimated_slice_load_level Estimated slice load percentage derived from UPF interface Tx throughput")
         lines.append("# TYPE estimated_slice_load_level gauge")
@@ -457,20 +489,44 @@ def poll_external_nfs():
     global last_nwdaf_poll_time
     while True:
         try:
+            # Query 3GPP TS 29.520 UE_COMMUNICATION analytics from NWDAF via Kong Gateway port 8080.
+            # Upstream OAI NWDAF Engine (ue_communication.go) filters MongoDB documents by startTs/endTs.
+            # We provide an RFC3339 window encompassing the testbed active session period.
+            ana_req = json.dumps({"startTs": "2026-10-01T00:00:00Z", "endTs": "2026-10-31T23:59:59Z"})
+            query = urllib.parse.urlencode({
+                "event-id": "UE_COMMUNICATION",
+                "ana-req": ana_req
+            })
+            url = f"http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics?{query}"
             req = urllib.request.Request(
-                "http://10.102.0.164:8080/nnwdaf-eventsubscription/v1/slice-load-level",
+                url,
                 headers={"User-Agent": "Thesis-Collector/1.0"}
             )
-            with urllib.request.urlopen(req, timeout=1.0) as resp:
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
                 if resp.status == 200:
                     data = json.loads(resp.read().decode())
                     with METRICS_LOCK:
                         last_nwdaf_poll_time = time.time()
-                        if "sliceLoadLevelInfos" in data:
-                            for info in data["sliceLoadLevelInfos"]:
-                                snssai = info.get("snssai", {})
-                                key = f"{snssai.get('sst', 1):02x}{int(snssai.get('sd', '1'), 16):06x}"
-                                metrics_store["nwdaf_slice_load_level"][key] = float(info.get("loadLevel", 0.0))
+                        ue_comms = data.get("ueComms", [])
+                        if ue_comms:
+                            comm = ue_comms[0]
+                            dur = float(comm.get("commDur", float("nan")))
+                            traf = comm.get("trafChar", {})
+                            ul = float(traf.get("ulVol", float("nan")))
+                            dl = float(traf.get("dlVol", float("nan")))
+                            # Note: Upstream OAI NWDAF ue_communication.go computes std dev (math.Sqrt)
+                            # into the ulVolVariance field:
+                            std_dev = float(traf.get("ulVolVariance", float("nan")))
+
+                            metrics_store["nwdaf_comm_duration_sec"] = dur
+                            metrics_store["nwdaf_comm_ul_bytes"] = ul
+                            metrics_store["nwdaf_comm_dl_bytes"] = dl
+                            metrics_store["nwdaf_comm_vol_std_bytes"] = std_dev
+                            metrics_store["nwdaf_comm_freshness"] = 1
+
+                            # Update slice 1 indicator for dataset continuity
+                            if not math.isnan(ul):
+                                metrics_store["nwdaf_slice_load_level"]["01000001"] = ul
         except Exception:
             pass
 

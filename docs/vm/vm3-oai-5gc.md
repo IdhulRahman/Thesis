@@ -744,17 +744,20 @@ curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
 }
 ```
 
-> **Live Empirical Verification:**
-> - `commDur: 2842` is the exact sum of duration counters across live URR reports in `qosmonlist` (Report 2: 1406s + Report 3: 1436s = 2842s).
+> **Live Empirical Verification & Semantic Audit Notes:**
+> - `commDur: 2842` is the arithmetic sum of duration fields across live URR reports in `qosmonlist` (Report 2: 1406s + Report 3: 1436s = 2842s). In UPF `pfcp_switch.cpp`, `duration` represents elapsed time from measurement start; because `oai-nwdaf-engine/ue_communication.go` sums durations across reports, this double-counts overlapping elapsed time from the start of the session.
 > - `ulVol: 1680` and `dlVol: 1680` are the exact sums of uplink and downlink byte counters (1428 B + 252 B = 1680 B).
+> - `ulVolVariance: 588` and `dlVolVariance: 588` represent the sample standard deviation ($\sigma = 588\text{ B}$), because the upstream engine computes variance via `math.Sqrt(...)`. The true statistical variance is $\sigma^2 = 345,744\text{ B}^2$.
 > - `oai-nwdaf-engine` log records confirm: `Getting Ue Communication from DB` $\rightarrow$ `Constructing Ue Communication filter for DB search ...` querying `qosmonlist` in MongoDB.
+> - **Temporal Resolution:** UPF `usage_report_loop()` emits reports every 30 seconds (`sleep(30)`); hence NWDAF volume metrics update on a 30s step function rather than continuous per-second telemetry.
+> - **Scope of Claim:** The verified milestone is strictly designated as **"Native telemetry data flow verified on PoC Slice-1"** (*Alur telemetri native terverifikasi pada PoC Slice-1*), acknowledging functioning 5-layer plumbing while noting upstream calculation semantics.
 
 #### 4. Scientific Implications for Thesis Research Methodology
 The findings above confirm that:
 1. **`absoluteNum` in OAI NWDAF v2.1.0 is confirmed functional for control-plane sessions:** After correcting the multi-slice `oai-nwdaf-sbi` SBI endpoint configuration (see §9 Step 4), SMF event subscriptions succeed and MongoDB `testing.smf` is populated with real PDU session documents. `absoluteNum` correctly reflects `CountDocuments` output — dynamically returning `1`.
 2. **`relativeRatio` and `confidence` remain hardcoded `0`:** The OAI development team has not yet implemented these calculations (`//TODO` in source). This is an upstream limitation, not a deployment error.
 3. **Dual-Track Core Telemetry Architecture:**
-   - **Track 1 (Native 3GPP PFCP URR Track — 100% Empirically Verified End-to-End Across All 5 Layers):** PoC session establishment with `Linked URR: 1`, periodic N4 Usage Reporting (msg type 56 emitted to SMF), downstream ingestion into MongoDB `testing.smf` (`qosmonlist` array populated live with volume and packet counters), and Northbound REST API exposure (`UE_COMMUNICATION`: `commDur: 2842s`, `ulVol: 1680B`, `dlVol: 1680B` via Kong port 8080) are 100% verified across the entire chain.
+   - **Track 1 (Native 3GPP PFCP URR Track — Native Data Flow Verified on PoC Slice-1):** PoC session establishment with `Linked URR: 1`, periodic N4 Usage Reporting (msg type 56 emitted to SMF every 30s), downstream ingestion into MongoDB `testing.smf` (`qosmonlist` array populated live with volume and packet counters), and Northbound REST API exposure (`UE_COMMUNICATION`: `commDur: 2842s`, `ulVol: 1680B`, `dlVol: 1680B` via Kong port 8080) are 100% verified across the entire chain on Slice 1.
    - **Track 2 (Custom OAM Host Telemetry Track — Operational to VM-6):** Operates under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM services") via `core_adapter.py` v9 on VM-3, capturing physical kernel queue dynamics (`tc qdisc` backlog bytes and drop rates) that 3GPP URR does not natively measure, streaming directly to VM-6 (`:9100/report`).
    - **Architectural Implementation Status:** Both telemetry streams are fully operational and verified in the testbed: Track 1 captures standardized 3GPP session volume/duration counters into NWDAF MongoDB and Northbound REST API, while Track 2 provides sub-second kernel queue bufferbloat and drop telemetry directly to the Non-RT RIC / TSDB collector on VM-6.
 
