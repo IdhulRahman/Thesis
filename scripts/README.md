@@ -14,15 +14,15 @@ This directory contains the operational daemons, automation scripts, fault injec
 | **VM-3** | `10.102.0.164` | [`core_adapter.py`](core_adapter.py) | Reads Linux kernel `tc qdisc` backlog and packet drops from UPF containers via Netlink. | Continuous daemon (1.0 Hz); pushes JSON to VM-6 `:9100/report` and archives local JSONL. |
 | **VM-4** | `10.102.0.167` | [`start_ran.sh`](start_ran.sh) | Orchestrates background startup of OAI gNB CU (N2/E2), DU-1 (Cell-1 `:4043`), and DU-2 (Cell-2 `:4044`). | Bash launcher; writes `cu.log`, `du1.log`, `du2.log`. |
 | **VM-4** | `10.102.0.167` | [`stop_ran.sh`](stop_ran.sh) | Gracefully terminates all running OAI softmodem processes on VM-4. | Bash teardown utility; kills CU and DUs. |
-| **VM-4** | `10.102.0.167` | [`ran_adapter.py`](ran_adapter.py) | Tails `du1.log` & `du2.log`, extracts live MAC PRB allocation (`NPRB / 106`), UL-SCH SNR, MCS, and BLER. | Continuous daemon (1.0 Hz); pushes JSON to VM-6 `:9100/report`. |
+| **VM-4** | `10.102.0.167` | [`ran_adapter.py`](ran_adapter.py) | Tails `du1.log` & `du2.log`, extracts live MAC PRB allocation (`NPRB / 106`), UL-SCH SNR, MCS, and BLER with file progression and staleness tracking. | Continuous daemon (1.0 Hz); pushes JSON to VM-6 `:9100/report`. |
 | **VM-5** | `10.102.0.165` | [`spawn_multi_ue.sh`](spawn_multi_ue.sh) | Spawns isolated UE softmodems inside Linux netns (`ue1` on Cell-1, `ue2` on Cell-2), configures veth, NAT, and verifies canary ping. | Bash automation; writes `active_ues.txt` and UE softmodem logs. |
 | **VM-5** | `10.102.0.165` | [`stop_multi_ue.sh`](stop_multi_ue.sh) | Terminates UE softmodems, tears down veth interfaces, and cleans network namespaces. | Bash teardown utility. |
 | **VM-5** | `10.102.0.165` | [`enter_ue.sh`](enter_ue.sh) | Interactive helper to enter a designated UE namespace (`sudo ip netns exec ue<N> bash`). | Diagnostic CLI utility. |
 | **VM-5** | `10.102.0.165` | [`trafgen.sh`](trafgen.sh) | Generates UDP offered load on Slice 1 (`iperf3`) and canary probes on Slice 2 (`ping 100ms`). | Background loop (1.0 Hz); pushes throughput and RTT/loss to `:9100/report`. |
-| **VM-6** | `10.102.0.67` | [`telemetry_collector.py`](telemetry_collector.py) | Ingests `/report` payloads from adapters, polls NWDAF NBI (`:8080`), and exports Prometheus gauges on `:9100/metrics`. | HTTP server listening on `:9100`. |
+| **VM-6** | `10.102.0.67` | [`telemetry_collector.py`](telemetry_collector.py) | Ingests `/report` payloads from adapters, polls NWDAF NBI (`:8080`) with isolated run window, and exports Prometheus gauges on `:9100/metrics`. | HTTP server listening on `:9100`. |
 | **VM-6** | `10.102.0.67` | [`record_dual_stream.py`](record_dual_stream.py) | Scrapes `:9100/metrics` at 1.000 Hz using monotonic time, exporting the definitive 37-column CSV dataset. | Monotonic recorder; outputs `telemetry_raw_<RUN_ID>_<PID>.csv`. |
 | **VM-6** | `10.102.0.67` | [`log_event.py`](log_event.py) | Injects ground-truth event markers (S1, S2, S3, S6, S9, S10_A, S10_B, CLEAR) with atomic sync to `active_event.json`. | CLI utility; appends to `experiment_events_<RUN_ID>.csv`. |
-| **VM-6** | `10.102.0.67` | [`analyze_dataset.py`](analyze_dataset.py) | Post-experiment data auditor verifying PRB, backlog, drops, throughput, and SLA violation ratios. | Statistical CLI auditor. |
+| **VM-6** | `10.102.0.67` | [`analyze_dataset.py`](analyze_dataset.py) | Post-experiment data auditor verifying PRB, backlog, drops, throughput, measurement coverage, and SLA violation ratios. | Statistical CLI auditor. |
 
 ---
 

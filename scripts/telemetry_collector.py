@@ -7,9 +7,11 @@ Ingests telemetry from VM-3 (UPF Core), VM-4 (RAN E2/FlexRIC), and VM-5 (UE QoS)
 exposing Prometheus metrics on http://10.102.0.67:9100/metrics and ingesting on /report.
 """
 
+from datetime import datetime, timezone, timedelta
 import http.server
 import json
 import math
+import os
 import threading
 import time
 import urllib.request
@@ -18,6 +20,8 @@ import urllib.error
 
 LISTEN_PORT = 9100
 LISTEN_HOST = "0.0.0.0"
+RUN_STATE_FILE = "/opt/oran/monitoring/data/active_run_id.txt"
+COLLECTOR_START_TIME = datetime.now(timezone.utc)
 
 METRICS_LOCK = threading.Lock()
 metrics_store = {
@@ -467,14 +471,15 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
                             except (ValueError, TypeError):
                                 pass
 
-                    # Dynamic estimation of slice load derived from UPF Tx throughput
+                    # Dynamic estimation of slice load derived from UPF Tx throughput (empirical research proxy)
+                    # Uses max(0.0, ...) to ensure 0 Mbps maps accurately to 0.0% without synthetic minimum floors
                     if "upf_interface_tx_mbps" in payload and isinstance(payload["upf_interface_tx_mbps"], dict):
                         tx1 = payload["upf_interface_tx_mbps"].get("01000001")
-                        load1 = round(min(100.0, max(5.0, (float(tx1) / 25.0) * 100.0)), 2) if tx1 is not None else float("nan")
+                        load1 = round(min(100.0, max(0.0, (float(tx1) / 25.0) * 100.0)), 2) if tx1 is not None else float("nan")
                         metrics_store["estimated_slice_load_level"]["01000001"] = load1
 
                         tx2 = payload["upf_interface_tx_mbps"].get("de00007b")
-                        load2 = round(min(100.0, max(5.0, (float(tx2) / 5.0) * 100.0)), 2) if tx2 is not None else float("nan")
+                        load2 = round(min(100.0, max(0.0, (float(tx2) / 5.0) * 100.0)), 2) if tx2 is not None else float("nan")
                         metrics_store["estimated_slice_load_level"]["de00007b"] = load2
 
 
@@ -497,14 +502,34 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
 
 
+def get_nwdaf_query_window():
+    """Calculates an isolated RFC3339 query window for NWDAF NBI analytics."""
+    env_start = os.getenv("NWDAF_START_TIME")
+    if env_start:
+        start_ts = env_start
+    elif os.path.exists(RUN_STATE_FILE):
+        try:
+            mtime = os.path.getmtime(RUN_STATE_FILE)
+            run_dt = datetime.fromtimestamp(mtime, timezone.utc) - timedelta(seconds=60)
+            start_ts = run_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception:
+            start_ts = (COLLECTOR_START_TIME - timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    else:
+        start_ts = (COLLECTOR_START_TIME - timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    end_ts = (datetime.now(timezone.utc) + timedelta(seconds=300)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return start_ts, end_ts
+
+
 def poll_external_nfs():
     global last_nwdaf_poll_time, last_nwdaf_data_change_time, last_nwdaf_signature
     while True:
         try:
             # Query 3GPP TS 29.520 UE_COMMUNICATION analytics from NWDAF via Kong Gateway port 8080.
             # Upstream OAI NWDAF Engine (ue_communication.go) filters MongoDB documents by startTs/endTs.
-            # We provide an RFC3339 window encompassing the testbed active session period.
-            ana_req = json.dumps({"startTs": "2026-10-01T00:00:00Z", "endTs": "2026-10-31T23:59:59Z"})
+            # Using an isolated per-run window prevents aggregation of historical metrics from prior experiments.
+            start_ts, end_ts = get_nwdaf_query_window()
+            ana_req = json.dumps({"startTs": start_ts, "endTs": end_ts})
             query = urllib.parse.urlencode({
                 "event-id": "UE_COMMUNICATION",
                 "ana-req": ana_req
@@ -533,7 +558,11 @@ def poll_external_nfs():
                             std_dev = float(traf.get("ulVolVariance", float("nan")))
 
                             sig = (dur, ul, dl, std_dev)
-                            if sig != last_nwdaf_signature:
+                            if last_nwdaf_signature is None:
+                                # Initial poll baseline: establish signature without falsely asserting freshness
+                                last_nwdaf_signature = sig
+                            elif sig != last_nwdaf_signature:
+                                # Authentic data change detected during this active session
                                 last_nwdaf_signature = sig
                                 last_nwdaf_data_change_time = now
 
@@ -542,7 +571,7 @@ def poll_external_nfs():
                             metrics_store["nwdaf_comm_dl_bytes"] = dl
                             metrics_store["nwdaf_comm_vol_std_bytes"] = std_dev
 
-                            # Freshness is 1 if data was modified within 45 seconds (exceeding UPF 30s URR loop)
+                            # Freshness is 1 only if authentic new data was received within 45 seconds (exceeding UPF 30s URR loop)
                             if last_nwdaf_data_change_time > 0 and (now - last_nwdaf_data_change_time <= 45.0):
                                 metrics_store["nwdaf_comm_freshness"] = 1
                             else:

@@ -45,71 +45,105 @@ def main():
             scen = row.get("event_scenario", row.get("scenario", "UNKNOWN"))
             if scen not in scen_data:
                 scen_data[scen] = {
-                    "tput": [], "rtt": [], "prb_c1": [], "prb_c2": [],
-                    "backlog": [], "drops": [], "mcs_c1": [], "bler_c1": [], "snr_c1": [],
-                    "sla_violated": 0
+                    "total_rows": 0,
+                    "valid_rtt_rows": 0,
+                    "valid_tput_rows": 0,
+                    "outage_rows": 0,
+                    "sla_violated_rows": 0,
+                    "tput": [],
+                    "rtt": [],
+                    "loss": [],
+                    "prb_c1": [],
+                    "prb_c2": [],
+                    "backlog": [],
+                    "drops": [],
+                    "mcs_c1": [],
+                    "bler_c1": [],
+                    "snr_c1": []
                 }
 
-            def parse_val(col):
-                val = row.get(col, "")
-                if val in ("", "NaN", "nan", None):
-                    return math.nan
-                try:
-                    return float(val)
-                except ValueError:
-                    return math.nan
+            d = scen_data[scen]
+            d["total_rows"] += 1
 
-            tput = parse_val("e2e_slice1_tput_mbps")
+            def parse_val(*cols):
+                for col in cols:
+                    val = row.get(col, "")
+                    if val not in ("", "NaN", "nan", "None", "null", None):
+                        try:
+                            return float(val)
+                        except ValueError:
+                            pass
+                return math.nan
+
+            tput = parse_val("e2e_slice1_tput_mbps", "e2e_slice1_throughput_mbps")
             if not math.isnan(tput):
-                scen_data[scen]["tput"].append(tput)
+                d["tput"].append(tput)
+                d["valid_tput_rows"] += 1
 
-            rtt = parse_val("e2e_slice2_rtt_ms")
+            rtt = parse_val("e2e_slice2_rtt_ms", "e2e_slice2_latency_rtt_ms")
+            loss = parse_val("e2e_slice2_loss_pct", "e2e_slice2_packet_loss_pct")
+
+            is_outage = math.isnan(rtt) or (not math.isnan(loss) and loss >= 100.0)
+            if is_outage:
+                d["outage_rows"] += 1
+
             if not math.isnan(rtt):
-                scen_data[scen]["rtt"].append(rtt)
-                if rtt > 20.0:
-                    scen_data[scen]["sla_violated"] += 1
+                d["rtt"].append(rtt)
+                d["valid_rtt_rows"] += 1
 
-            prb1 = parse_val("ran_prb_cell1")
+            if not math.isnan(loss):
+                d["loss"].append(loss)
+
+            # SLA violation: RTT > 20ms OR packet loss > 0% OR complete outage
+            if is_outage or (not math.isnan(rtt) and rtt > 20.0) or (not math.isnan(loss) and loss > 0.0):
+                d["sla_violated_rows"] += 1
+
+            prb1 = parse_val("ran_prb_cell1", "ran_cell_prb_utilization_1")
             if not math.isnan(prb1):
-                scen_data[scen]["prb_c1"].append(prb1)
+                d["prb_c1"].append(prb1)
 
-            b_log = parse_val("upf_backlog_bytes_embb")
+            b_log = parse_val("upf_backlog_bytes_embb", "upf_queue_backlog_bytes_01000001")
             if not math.isnan(b_log):
-                scen_data[scen]["backlog"].append(b_log)
+                d["backlog"].append(b_log)
 
-            drop = parse_val("upf_drops_embb")
+            drop = parse_val("upf_drops_embb", "upf_packet_drops_01000001")
             if not math.isnan(drop):
-                scen_data[scen]["drops"].append(drop)
+                d["drops"].append(drop)
 
-            mcs1 = parse_val("ran_mcs_cell1")
+            mcs1 = parse_val("ran_mcs_cell1", "ran_cell_mcs_1")
             if not math.isnan(mcs1):
-                scen_data[scen]["mcs_c1"].append(mcs1)
+                d["mcs_c1"].append(mcs1)
 
-            bler1 = parse_val("ran_bler_cell1")
+            bler1 = parse_val("ran_bler_cell1", "ran_cell_bler_1")
             if not math.isnan(bler1):
-                scen_data[scen]["bler_c1"].append(bler1)
+                d["bler_c1"].append(bler1)
 
-            snr1 = parse_val("ran_snr_cell1")
+            snr1 = parse_val("ran_snr_cell1", "ran_cell_snr_db_1")
             if not math.isnan(snr1):
-                scen_data[scen]["snr_c1"].append(snr1)
+                d["snr_c1"].append(snr1)
 
-    print(f"{'Skenario Event':<20} | {'Sampel':<6} | {'Tput Avg':<9} | {'PRB C1':<8} | {'MCS C1':<7} | {'BLER C1':<8} | {'SNR C1':<8} | {'Backlog Max':<12} | {'URLLC RTT':<11} | {'SLA Viol %'}")
-    print("-" * 125)
+    print(f"{'Skenario Event':<16} | {'Total':<5} | {'Valid':<5} | {'Coverage':<8} | {'Loss Avg':<8} | {'RTT Mean':<10} | {'RTT Max':<9} | {'SLA Viol %':<10} | {'Tput Avg':<9} | {'PRB C1':<7} | {'Backlog Max'}")
+    print("-" * 132)
 
     for scen, d in sorted(scen_data.items()):
-        n = len(d["rtt"]) or len(d["tput"]) or 1
-        avg_tput = (sum(d["tput"]) / len(d["tput"])) if d["tput"] else 0.0
-        avg_prb = (sum(d["prb_c1"]) / len(d["prb_c1"])) if d["prb_c1"] else 0.0
-        avg_mcs = (sum(d["mcs_c1"]) / len(d["mcs_c1"])) if d["mcs_c1"] else 0.0
-        avg_bler = (sum(d["bler_c1"]) / len(d["bler_c1"])) if d["bler_c1"] else 0.0
-        avg_snr = (sum(d["snr_c1"]) / len(d["snr_c1"])) if d["snr_c1"] else 0.0
-        max_b = max(d["backlog"]) if d["backlog"] else 0.0
-        avg_rtt = (sum(d["rtt"]) / len(d["rtt"])) if d["rtt"] else 0.0
-        sla_pct = (d["sla_violated"] / len(d["rtt"]) * 100.0) if d["rtt"] else 0.0
+        n_total = d["total_rows"]
+        n_valid_rtt = d["valid_rtt_rows"]
+        coverage_pct = (n_valid_rtt / n_total * 100.0) if n_total > 0 else 0.0
 
-        print(f"{scen:<20} | {n:<6} | {avg_tput:>7.2f} M | {avg_prb:>6.1f} % | {avg_mcs:>7.1f} | {avg_bler:>8.4f} | {avg_snr:>6.1f}dB | {max_b:>10,.0f} B | {avg_rtt:>8.2f} ms | {sla_pct:>8.1f} %")
+        avg_loss = (sum(d["loss"]) / len(d["loss"])) if d["loss"] else (100.0 if n_valid_rtt == 0 else 0.0)
+        avg_rtt_str = f"{sum(d['rtt']) / len(d['rtt']):>7.2f} ms" if d["rtt"] else f"{'N/A':>10}"
+        max_rtt_str = f"{max(d['rtt']):>6.2f} ms" if d["rtt"] else f"{'N/A':>9}"
+        sla_pct = (d["sla_violated_rows"] / n_total * 100.0) if n_total > 0 else 0.0
 
-    print("=" * 125)
+        avg_tput_str = f"{sum(d['tput']) / len(d['tput']):>6.2f} M" if d["tput"] else f"{'N/A':>9}"
+        avg_prb_str = f"{sum(d['prb_c1']) / len(d['prb_c1']):>5.1f} %" if d["prb_c1"] else f"{'N/A':>7}"
+        max_b_str = f"{max(d['backlog']):>10,.0f} B" if d["backlog"] else f"{'0 B':>12}"
+
+        loss_str = f"{avg_loss:>6.1f} %"
+
+        print(f"{scen:<16} | {n_total:<5} | {n_valid_rtt:<5} | {coverage_pct:>7.1f}% | {loss_str} | {avg_rtt_str} | {max_rtt_str} | {sla_pct:>9.1f}% | {avg_tput_str} | {avg_prb_str} | {max_b_str}")
+
+    print("=" * 132)
     print(f"Total Sampel Dievaluasi: {total_rows} baris")
 
 
