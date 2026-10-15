@@ -16,8 +16,9 @@ During initial pilot evaluations of the cross-domain multi-slice telemetry pipel
 
 **Current Status (Revision v4 Updates):**
 * **Control-Plane Event Ingestion Confirmed (✅):** Following the resolution of AMF dynamic NRF registration ([Case #51](troubleshooting.md#51-oai-amf-automated-nrf-registration-failure-missing-nfinstanceid-in-dynamic-resource-uri)), `Namf_EventExposure` and `Nsmf_EventExposure` events are successfully ingested by `oai-nwdaf-sbi` into MongoDB (`testing.amf` and `testing.smf`). The NWDAF analytics API returns **`absoluteNum: 1`** derived dynamically from `CountDocuments`.
-* **User-Plane UPF Limitation Definitively Localized (✅):** Empirical packet capture and container log traces proved that `oaisoftwarealliance/oai-upf:v2.1.0` lacks parser support for 3GPP TS 29.244 IE Type 62 (`Measurement Method`), which is mandatory in `Create URR` when `enable_usage_reporting: yes` is enabled. UPF threw a C++ TLV length exception and silently discarded the session establishment request ([Case #52](troubleshooting.md#52-oai-upf-n4pfcp-session-establishment-silent-drop-unsupported-3gpp-ts-29244-ie-type-62-measurement-method)). Restoring SMF configuration to baseline enabled immediate PDU session establishment (`oaitun_ue1` with IP `12.1.1.2`, 0% packet loss to External DN `192.168.70.145`).
-* **Architectural Justification (✅):** Because native UPF v2.1.0 binary limitations prevent PFCP URR usage reporting, Core user-plane buffer occupancy and drop rate telemetry are definitively and objectively monitored via the **Core Telemetry Adapter (`core_adapter.py`)** on VM-3, sampling physical `tc qdisc` states.
+* **User-Plane UPF Parser Limitation Definitively Localized (✅):** Empirical packet capture and container log traces proved that `oaisoftwarealliance/oai-upf:v2.1.0` lacks parser support for 3GPP TS 29.244 IE Type 62 (`Measurement Method`), which is mandatory in `Create URR` when `enable_usage_reporting: yes` is enabled. Upstream UPF source inspection (`3gpp_29.244.cpp`) confirms that `PFCP_IE_MEASUREMENT_METHOD` is commented out. UPF threw a C++ TLV length exception and silently discarded the session establishment request ([Case #52](troubleshooting.md#52-oai-upf-n4pfcp-session-establishment-silent-drop-unsupported-3gpp-ts-29244-ie-type-62-measurement-method)). Restoring SMF configuration to baseline enabled immediate PDU session establishment (`oaitun_ue1` with IP `12.1.1.2`, 0% packet loss to External DN `192.168.70.145`).
+* **Host Adapter Observability Operational (✅):** While native UPF PFCP URR to NWDAF is bounded by the upstream binary, Core user-plane buffer queue occupancy and drop rate telemetry are actively and accurately extracted via the **Core Telemetry Adapter (`core_adapter.py`)** on VM-3, streaming physical `tc qdisc` measurements directly to the telemetry collector on VM-6 (`10.102.0.67`).
+* **NWDAF User-Plane Telemetry Integration Pending (⏳):** Because the thesis architectural agreement specifies using NWDAF as the canonical core analytics entity, user-plane telemetry must ultimately be processed and exposed through NWDAF. The localized IE 62 finding forms the foundation for evaluating either a custom UPF patch (enabling `PFCP_IE_MEASUREMENT_METHOD`), an upstream UPF upgrade, or integrating adapter-collected metrics via a custom NWDAF DCCF/OAM ingestion pipeline.
 
 ---
 
@@ -172,6 +173,10 @@ Querying the MongoDB database `testing` on VM-3:
 }
 
 // db.smf.findOne({_id: "208950000000001"})
+// NOTE (Temporal Context): This SMF document reflects an earlier successful PDU session recorded on
+// Oct 14 at 17:26:06 WIB (timestamp: 1791973566), whereas the AMF document above is from Oct 15 at 09:28 WIB.
+// Live re-verification of event reception in db.smf for the latest Oct 15 session (IP 12.1.1.2)
+// is pending verification of active oai-nwdaf-sbi event exposure subscriptions across container restarts.
 {
   _id: '208950000000001',
   ueipchlist: [ { adipv4addr: '12.1.1.4', pduseid: 10, timestamp: Long('1791973566') } ],
@@ -194,9 +199,10 @@ Querying the MongoDB database `testing` on VM-3:
 ## 4. Structured Engineering Roadmap & Verification Status
 
 ```
-[Phase 1: Control Plane Core] ✅     [Phase 2: Event Ingestion] ✅       [Phase 3: User-Plane Telemetry] ✅       [Phase 4: rApp Loop] ⏳
-AMF-NRF registered (Case #51)    ->  testing.amf & testing.smf active ->  core_adapter.py (tc qdisc/drops)     ->  Cross-domain correlation
-PDU Session established (Case #52)   absoluteNum: 1 returned              Physical bottleneck S1-S8 verified       (RAN PRB vs Core Queue)
+[Phase 1: Control Plane Core] ✅     [Phase 2: CP Event Ingestion] ✅       [Phase 3A: Adapter Observability] ✅     [Phase 4: rApp Loop] ⏳
+AMF-NRF registered (Case #51)    ->  testing.amf & testing.smf active    -> core_adapter.py (VM-3 -> VM-6)        -> Cross-domain correlation
+PDU Session established (Case #52)   absoluteNum: 1 returned                [Phase 3B: NWDAF UP Integration] ⏳      (RAN PRB vs Core Queue)
+                                                                            UPF IE 62 patch / NWDAF UP exposure
 ```
 
 ### Phase 1: Upstream Control Plane Verification ✅ COMPLETED
@@ -209,9 +215,14 @@ PDU Session established (Case #52)   absoluteNum: 1 returned              Physic
 - Documents are persistently indexed in MongoDB `testing` database.
 - `Nnwdaf_AnalyticsInfo` queries return HTTP 200 with dynamic `absoluteNum: 1`.
 
-### Phase 3: User-Plane Telemetry & Bottleneck Observability ✅ COMPLETED
-- Investigated native PFCP URR support; confirmed binary limitation on `openair-upf:v2.1.0` (missing IE Type 62 parser).
-- Implemented and verified the dedicated **Core Telemetry Adapter (`core_adapter.py`)** on VM-3 to sample interface queue occupancy (`tc qdisc`) and packet drops directly, enabling bottleneck evaluation across S1–S8.
+### Phase 3A: Host/Kernel Adapter Observability ✅ OPERATIONAL
+- The dedicated **Core Telemetry Adapter (`core_adapter.py` v9)** on VM-3 directly inspects physical/veth interface queue occupancy (`tc qdisc`) and packet drops on `oai-upf-slice1` and `oai-upf-slice2`, exporting telemetry directly to the collector on VM-6 (`10.102.0.67`) for baseline bottleneck evaluation across S1–S8.
+
+### Phase 3B: User-Plane Telemetry Integration via NWDAF ⏳ PENDING / UNDER EVALUATION
+- The thesis architectural agreement specifies that user-plane load telemetry must be processed and exposed through NWDAF.
+- Having definitively localized the UPF binary limitation (unsupported IE Type 62 in `openair-upf:v2.1.0`), two technical paths are currently under evaluation:
+  1. **UPF Source Patch / Upgrade:** Patch `openair-upf` (`src/pfcp/3gpp_29.244.cpp`) by uncommenting and implementing the `PFCP_IE_MEASUREMENT_METHOD` parser block, then building a custom UPF image to validate native URR $\to$ SMF $\to$ NWDAF propagation.
+  2. **Adapter-to-NWDAF Ingestion Bridge:** Ingest physical queue and drop metrics collected by `core_adapter.py` into NWDAF via custom DCCF / OAM mechanisms, allowing the NWDAF engine to compute slice user-plane load metrics canonically.
 
 ### Phase 4: Closed-Loop rApp Integration ⏳ READY FOR EXECUTION
 - Correlate NWDAF session statistics and Core user-plane queue telemetry with O-RAN E2SM-KPM PRB metrics in the Non-RT RIC rApp (VM-1).
@@ -223,4 +234,4 @@ PDU Session established (Case #52)   absoluteNum: 1 returned              Physic
 
 1. **Definitive Root Cause Resolution:** The investigation progressed methodically through empirical tracing (source code audit, binary debugging, packet capture, and live REST queries) without ungrounded assumptions.
 2. **Standard-Compliant Architecture:** `SESS_SUCC_RATIO` is properly preserved as a session reliability indicator under 3GPP TS 29.520, while user-plane queue dynamics are monitored through verified system interfaces.
-3. **Full System Reproducibility:** All configuration parameters, image build procedures, and verification commands are committed to the public repository with active unit and integration tests.
+3. **Committed Reproduction Artifacts:** The repository now directly provides the AMF NRF resource URI patch ([`patches/amf/0001-fix-amf-nrf-resource-uri.patch`](../patches/amf/0001-fix-amf-nrf-resource-uri.patch)), custom builder Dockerfile ([`patches/amf/Dockerfile.amf.ubuntu`](../patches/amf/Dockerfile.amf.ubuntu)), and Docker Compose override ([`deploy/compose.amf-nrf-uri.yaml`](../deploy/compose.amf-nrf-uri.yaml)) to enable complete reproducibility of the resolved testbed state.

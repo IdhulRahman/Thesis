@@ -1,0 +1,67 @@
+#---------------------------------------------------------------------
+# Custom Dockerfile for patched OAI AMF with NRF URI fix
+# Image: oai-amf:thesis-nrf-uri-v1
+# Based on: components/oai-amf/docker/Dockerfile.amf.ubuntu (v2.1.0)
+#---------------------------------------------------------------------
+FROM ubuntu:jammy AS oai-amf-builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Paris
+ENV MAKEFLAGS="-j2"
+ENV CMAKE_BUILD_PARALLEL_LEVEL=2
+
+# Configure APT retries for transient DNS/network fluctuations
+RUN echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        psmisc \
+        git \
+        build-essential \
+        cmake \
+        libsystemd0 \
+        libsystemd-dev \
+        libssl-dev \
+        libboost-all-dev \
+        libgflags-dev \
+        libgoogle-glog-dev \
+        pkg-config \
+        ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /openair-amf
+COPY . /openair-amf
+
+# Apply patch if present
+RUN if [ -f /openair-amf/0001-fix-amf-nrf-resource-uri.patch ]; then \
+        git apply /openair-amf/0001-fix-amf-nrf-resource-uri.patch; \
+    fi
+
+WORKDIR /openair-amf/build/scripts
+RUN ./build_amf --clean --Verbose --jobs 2
+
+#---------------------------------------------------------------------
+# Target runtime image
+#---------------------------------------------------------------------
+FROM ubuntu:jammy AS oai-amf
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Paris
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        net-tools \
+        iputils-ping \
+        tcpdump \
+        libsystemd0 \
+        libssl3 \
+        libboost-all-dev \
+        ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /openair-amf/bin
+COPY --from=oai-amf-builder /openair-amf/build/amf/build/amf /openair-amf/bin/oai_amf
+
+EXPOSE 80/tcp 8080/tcp 38412/sctp
+ENTRYPOINT ["/openair-amf/bin/oai_amf", "-c"]
+CMD ["/openair-amf/etc/amf.conf", "-o"]

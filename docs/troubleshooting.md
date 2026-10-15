@@ -2515,7 +2515,7 @@ This confirms that NRF functions correctly and strictly adheres to 3GPP TS 29.51
 ### Solution
 
 1. **Patch Upstream AMF Source Code (`amf_app.cpp`):**
-   In `component/oai-amf/src/amf-app/amf_app.cpp` around line 1614 (inside `get_nrfs`), update the NSSF response parsing logic to dynamically append `"/" + amf_instance_id` to `nrfNfMgtUri`:
+   In `component/oai-amf/src/amf-app/amf_app.cpp` around line 1614 (inside `get_nrfs`), update the NSSF response parsing logic to dynamically append `"/" + amf_instance_id` to `nrfNfMgtUri` (see committed patch [`patches/amf/0001-fix-amf-nrf-resource-uri.patch`](../patches/amf/0001-fix-amf-nrf-resource-uri.patch)):
    ```cpp
    // Before:
    nrfs.insert(nsi_information.getNrfNfMgtUri());
@@ -2526,8 +2526,7 @@ This confirms that NRF functions correctly and strictly adheres to 3GPP TS 29.51
 
 2. **Rebuild Custom AMF Image (`oai-amf:thesis-nrf-uri-v1`):**
    - Ensure the build environment has sufficient RAM ($\ge 8$ GB or restrict parallel jobs with `MAKEFLAGS="-j2"` / `CMAKE_BUILD_PARALLEL_LEVEL=2`).
-   - Add `libsystemd-dev` to Stage 1 dependencies in `docker/Dockerfile.amf.ubuntu` to prevent version locking conflicts with `libsystemd0`.
-   - Add APT retry configuration (`Acquire::Retries "3";`) to handle transient DNS/network fluctuations.
+   - Use the customized Dockerfile [`patches/amf/Dockerfile.amf.ubuntu`](../patches/amf/Dockerfile.amf.ubuntu), which adds `libsystemd-dev` to Stage 1 dependencies (preventing version locking conflicts with `libsystemd0`) and adds APT retry configuration (`Acquire::Retries "3";`).
    - Build using host network:
      ```bash
      cd /opt/oran/5gc/oai-cn5g-fed/component/oai-amf
@@ -2539,17 +2538,18 @@ This confirms that NRF functions correctly and strictly adheres to 3GPP TS 29.51
        -t oai-amf:thesis-nrf-uri-v1 .
      ```
 
-3. **Deploy Patched Image in Docker Compose:**
-   In `/opt/oran/5gc/oai-cn5g-fed/docker-compose/docker-compose-slicing-basic-nrf.yaml`, update the `oai_amf` service definition:
+3. **Deploy Patched Image via Docker Compose:**
+   Use the committed Docker Compose override file [`deploy/compose.amf-nrf-uri.yaml`](../deploy/compose.amf-nrf-uri.yaml):
    ```yaml
-   oai_amf:
-     container_name: "oai-amf"
-     image: oai-amf:thesis-nrf-uri-v1
+   services:
+     oai_amf:
+       container_name: "oai-amf"
+       image: oai-amf:thesis-nrf-uri-v1
    ```
-   Recreate the container:
+   Apply and recreate the container:
    ```bash
    cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
-   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d --force-recreate oai_amf
+   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml -f compose.amf-nrf-uri.yaml up -d --force-recreate oai_amf
    ```
 
 4. **Verification & Live Empirical Evidence:**

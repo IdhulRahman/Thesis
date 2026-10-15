@@ -1,0 +1,8 @@
+# Docker Compose override file for patched OAI AMF
+# Usage:
+#   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml -f compose.amf-nrf-uri.yaml up -d --force-recreate oai_amf
+
+services:
+  oai_amf:
+    container_name: "oai-amf"
+    image: oai-amf:thesis-nrf-uri-v1
