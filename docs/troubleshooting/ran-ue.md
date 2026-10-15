@@ -541,6 +541,7 @@ Follow the strict 3-VM startup sequence to achieve complete end-to-end synchroni
 
 ---
 
+<a id="case-49"></a>
 ## Case 49 — UE 2 PDU Session Establishment Rejected — MySQL S-NSSAI Subscriber Profile Mismatch
 
 ### Symptom
@@ -586,7 +587,7 @@ The MySQL subscriber database (`oai_db`) had conflicting S-NSSAI provisioning fo
 4. Restart the affected core services to flush stale AMF/SMF state and allow re-registration:
    ```bash
    cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
-   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml restart oai-amf oai-smf-slice1 oai-smf-slice2 oai-nwdaf-sbi
+   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml restart oai_amf oai_smf_slice1 oai_smf_slice2 oai-nwdaf-sbi
    ```
 
 5. Re-run the UE spawner and verify UE 2 obtains `oaitun_ue1` inside namespace `ue2`:

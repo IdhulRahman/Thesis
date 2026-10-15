@@ -66,6 +66,7 @@ Deploy and run `/opt/oran/5gc/scripts/core_adapter.py` on VM-3 (`oai-core`):
 
 ---
 
+<a id="case-47"></a>
 ## Case 47 — OAI NWDAF SBI Subscription `connection refused` on Multi-Slice Core
 
 ### Symptom
@@ -103,6 +104,7 @@ The NWDAF SBI consumer repeatedly fails to register event subscriptions with AMF
 
 ---
 
+<a id="case-48"></a>
 ## Case 48 — OAI NWDAF Analytics `"missing Network Performance Data"` vs Hardcoded Relative Ratio
 
 ### Symptom

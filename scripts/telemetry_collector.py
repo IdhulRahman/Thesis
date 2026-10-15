@@ -112,6 +112,9 @@ last_report_ran = 0.0
 last_nwdaf_poll_time = 0.0
 last_nwdaf_data_change_time = 0.0
 last_nwdaf_signature = None
+active_run_id = None
+active_run_mtime = 0.0
+active_run_start_dt = None
 
 
 def fmt_val(v, fmt=".2f"):
@@ -502,21 +505,54 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
 
 
-def get_nwdaf_query_window():
-    """Calculates an isolated RFC3339 query window for NWDAF NBI analytics."""
+def check_run_state_change():
+    """Detects active run_id changes and resets NWDAF state/freshness on run transitions."""
+    global active_run_id, active_run_mtime, active_run_start_dt
+    global last_nwdaf_signature, last_nwdaf_data_change_time
+
     env_start = os.getenv("NWDAF_START_TIME")
     if env_start:
-        start_ts = env_start
-    elif os.path.exists(RUN_STATE_FILE):
-        try:
-            mtime = os.path.getmtime(RUN_STATE_FILE)
-            run_dt = datetime.fromtimestamp(mtime, timezone.utc) - timedelta(seconds=60)
-            start_ts = run_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-        except Exception:
-            start_ts = (COLLECTOR_START_TIME - timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    else:
-        start_ts = (COLLECTOR_START_TIME - timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return env_start
 
+    current_id = None
+    current_mtime = 0.0
+    if os.path.exists(RUN_STATE_FILE):
+        try:
+            current_mtime = os.path.getmtime(RUN_STATE_FILE)
+            with open(RUN_STATE_FILE, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read().strip()
+                if content:
+                    current_id = content
+        except Exception:
+            pass
+
+    # Check if run transition occurred
+    if current_id != active_run_id or abs(current_mtime - active_run_mtime) > 1.0:
+        active_run_id = current_id
+        active_run_mtime = current_mtime
+        if current_mtime > 0.0:
+            active_run_start_dt = datetime.fromtimestamp(current_mtime, timezone.utc)
+        else:
+            active_run_start_dt = COLLECTOR_START_TIME
+
+        # Explicitly reset NWDAF state and freshness upon run transition
+        last_nwdaf_signature = None
+        last_nwdaf_data_change_time = 0.0
+        with METRICS_LOCK:
+            metrics_store["nwdaf_comm_freshness"] = 0
+            metrics_store["nwdaf_comm_duration_sec"] = float("nan")
+            metrics_store["nwdaf_comm_ul_bytes"] = float("nan")
+            metrics_store["nwdaf_comm_dl_bytes"] = float("nan")
+            metrics_store["nwdaf_comm_vol_std_bytes"] = float("nan")
+
+    if active_run_start_dt:
+        return active_run_start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return COLLECTOR_START_TIME.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def get_nwdaf_query_window():
+    """Calculates an isolated RFC3339 query window for NWDAF NBI analytics."""
+    start_ts = check_run_state_change()
     end_ts = (datetime.now(timezone.utc) + timedelta(seconds=300)).strftime("%Y-%m-%dT%H:%M:%SZ")
     return start_ts, end_ts
 

@@ -21,7 +21,7 @@ During initial pilot evaluations of the cross-domain multi-slice telemetry pipel
   3. *Layer 3 (SMF Ingestion & Exposure):* SMF-1 extracts volume/packet counters and emits `Nsmf_EventExposure` (`QOS_MON`, Event 98) HTTP/2 notifications.
   4. *Layer 4 (NWDAF SBI & Database):* `oai-nwdaf-sbi` receives notifications and persists `CustomUsageReport` structures into MongoDB `testing.smf` under `qosmonlist`.
   5. *Layer 5 (NWDAF Engine & Northbound 3GPP REST API):* Querying Kong API Gateway (`:8080/nnwdaf-analyticsinfo/v1/analytics`) for `UE_COMMUNICATION` returns HTTP 200 with dynamic volume and duration metrics (`commDur: 2842s`, `ulVol: 1680B`, `dlVol: 1680B`), precisely matching the cumulative sum of ingested URR reports.
-* **Control-Plane Event Ingestion Confirmed (✅):** AMF dynamic NRF registration ([Case #51](../troubleshooting/5g-core.md#51-oai-amf-automated-nrf-registration-failure-missing-nfinstanceid-in-dynamic-resource-uri)), `Namf_EventExposure`, and `Nsmf_EventExposure` session establishment records are verified, with `Nnwdaf_AnalyticsInfo` returning dynamic `absoluteNum: 1`.
+* **Control-Plane Event Ingestion Confirmed (✅):** AMF dynamic NRF registration ([Case #51](../troubleshooting/5g-core.md#case-51)), `Namf_EventExposure`, and `Nsmf_EventExposure` session establishment records are verified, with `Nnwdaf_AnalyticsInfo` returning dynamic `absoluteNum: 1`.
 * **Host Adapter Observability Operational (✅):** Core user-plane buffer queue occupancy (`tc qdisc`) and drop rate telemetry are actively streaming via `core_adapter.py` on VM-3 to VM-6 (`10.102.0.67`).
 * **Complete Dual-Track Telemetry Architecture Operational (✅):** Both Track 1 (Native 3GPP PFCP URR $\to$ SMF $\to$ NWDAF SBI $\to$ MongoDB `qosmonlist` $\to$ NWDAF Engine $\to$ Northbound API) and Track 2 (OAM Host Adapter via `core_adapter.py` under 3GPP TS 23.288 §6.2.3) are verified and running simultaneously in the testbed.
 
@@ -364,8 +364,8 @@ PDU Session established (Case #52)   absoluteNum: 1 returned                [Pha
 ```
 
 ### Phase 1: Upstream Control Plane Verification ✅ COMPLETED
-- AMF dynamic registration with NRF fixed and verified ([Case #51](../troubleshooting/5g-core.md#51-oai-amf-automated-nrf-registration-failure-missing-nfinstanceid-in-dynamic-resource-uri)).
-- SMF-1 N4 association and session setup restored ([Case #52](../troubleshooting/5g-core.md#52-oai-upf-n4pfcp-session-establishment-silent-drop-unsupported-3gpp-ts-29244-ie-type-62-measurement-method)).
+- AMF dynamic registration with NRF fixed and verified ([Case #51](../troubleshooting/5g-core.md#case-51)).
+- SMF-1 N4 association and session setup restored ([Case #52](../troubleshooting/5g-core.md#case-52)).
 - UE 1 connects, configures `oaitun_ue1` (`12.1.1.2`), and pings External DN `192.168.70.145` with 0% loss.
 
 ### Phase 2: Control Plane Event Ingestion to NWDAF ✅ COMPLETED

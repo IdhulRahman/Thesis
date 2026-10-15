@@ -582,6 +582,7 @@ the xApp should use an empty object.
 
 ---
 
+<a id="case-14"></a>
 ## Case 14 — xApp Receives CREATE but A1 Does Not Become `ENFORCED`
 
 ### Verify xApp Response

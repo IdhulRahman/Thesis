@@ -280,7 +280,7 @@ uicc0 = {
 > UPDATE SessionManagementSubscriptionData SET singleNssai = '{"sst":222,"sd":"00007B"}' WHERE ueid = '208950000000002' AND sst = 222;
 > ```
 > After correcting, restart `oai-amf` and `oai-smf-slice2` on VM-3 to flush stale state.
-> See [Troubleshooting Case 49](../troubleshooting/ran-ue.md#case-49-ue-2-pdu-session-establishment-rejected--mysql-s-nssai-subscriber-profile-mismatch) for full root-cause analysis.
+> See [Troubleshooting Case 49](../troubleshooting/ran-ue.md#case-49) for full root-cause analysis.
 
 ---
 

@@ -51,14 +51,13 @@ def read_last_lines(file_path, num_lines=30, chunk_size=8192):
 
 
 class DuLogTracker:
-    """Tracks DU log file progression, file size, modification time, and measurement staleness."""
+    """Tracks DU log file byte offset, incremental lines, and measurement staleness."""
 
     def __init__(self, log_path, cell_id, stale_threshold=STALE_THRESHOLD_SEC):
         self.log_path = log_path
         self.cell_id = cell_id
         self.stale_threshold = stale_threshold
-        self.last_size = 0
-        self.last_mtime = 0.0
+        self.last_offset = 0
         self.last_meas_time = 0.0
         self.cached_stats = {
             "cell_id": self.cell_id,
@@ -74,13 +73,73 @@ class DuLogTracker:
             "source_age_sec": None,
             "read_time": 0.0
         }
+        # Initialize offset to current end of file if it exists, or parse initial tail
+        if os.path.exists(self.log_path):
+            try:
+                cur_size = os.path.getsize(self.log_path)
+                init_seek = max(0, cur_size - 8192)
+                with open(self.log_path, "r", encoding="utf-8", errors="replace") as f:
+                    f.seek(init_seek)
+                    initial_chunk = f.read()
+                self.last_offset = cur_size
+                mtime = os.path.getmtime(self.log_path)
+                if (time.time() - mtime) <= self.stale_threshold:
+                    self._parse_chunk(initial_chunk, mtime, is_initial=True)
+            except Exception:
+                self.last_offset = 0
+
+    def _reset_metrics(self):
+        self.cached_stats["valid"] = False
+        self.cached_stats["nprb"] = None
+        self.cached_stats["prb_pct"] = None
+        self.cached_stats["mcs"] = None
+        self.cached_stats["bler"] = None
+        self.cached_stats["snr_db"] = None
+        self.cached_stats["rssi_dbm"] = None
+        self.cached_stats["ulsch_errors"] = None
+
+    def _parse_chunk(self, chunk, mtime, is_initial=False):
+        now = time.time()
+        full_matches = RADIO_STATS_PATTERN.findall(chunk)
+        if full_matches:
+            last = full_matches[-1]
+            nprb_val = int(last[3])
+            self.cached_stats["ulsch_errors"] = int(last[0])
+            self.cached_stats["bler"] = float(last[1])
+            self.cached_stats["mcs"] = int(last[2])
+            self.cached_stats["nprb"] = nprb_val
+            self.cached_stats["prb_pct"] = round((nprb_val / MAX_PRB) * 100.0, 2)
+            self.cached_stats["snr_db"] = float(last[4])
+            self.cached_stats["rssi_dbm"] = float(last[5])
+            self.cached_stats["valid"] = True
+            self.cached_stats["source_mtime"] = mtime
+            self.last_meas_time = now if not is_initial else mtime
+            return True
+
+        nprb_matches = NPRB_FALLBACK.findall(chunk)
+        if nprb_matches:
+            nprb_val = int(nprb_matches[-1])
+            self.cached_stats["nprb"] = nprb_val
+            self.cached_stats["prb_pct"] = round((nprb_val / MAX_PRB) * 100.0, 2)
+            # Crucial: Explicitly reset metrics not present in fallback format
+            self.cached_stats["ulsch_errors"] = None
+            self.cached_stats["bler"] = None
+            self.cached_stats["mcs"] = None
+            self.cached_stats["snr_db"] = None
+            self.cached_stats["rssi_dbm"] = None
+            self.cached_stats["valid"] = True
+            self.cached_stats["source_mtime"] = mtime
+            self.last_meas_time = now if not is_initial else mtime
+            return True
+
+        return False
 
     def update(self):
         now = time.time()
         self.cached_stats["read_time"] = now
 
         if not os.path.exists(self.log_path):
-            self.cached_stats["valid"] = False
+            self._reset_metrics()
             self.cached_stats["source_age_sec"] = None
             return self.cached_stats
 
@@ -88,69 +147,43 @@ class DuLogTracker:
             stat = os.stat(self.log_path)
             cur_size = stat.st_size
             cur_mtime = stat.st_mtime
-            age = now - cur_mtime
+            file_age = now - cur_mtime
 
-            # If the log file itself has not been modified within the threshold, DU is idle or halted
-            if age > self.stale_threshold:
-                self.cached_stats["valid"] = False
+            # If log file has not been modified within threshold, DU is idle or halted
+            if file_age > self.stale_threshold:
+                self._reset_metrics()
                 self.cached_stats["source_mtime"] = cur_mtime
-                self.cached_stats["source_age_sec"] = round(age, 2)
+                self.cached_stats["source_age_sec"] = round(file_age, 2)
                 return self.cached_stats
 
-            # If file size and mtime are unchanged, verify time since last measurement was extracted
-            if cur_size == self.last_size and cur_mtime == self.last_mtime:
-                meas_age = (now - self.last_meas_time) if self.last_meas_time > 0.0 else age
-                if meas_age > self.stale_threshold:
-                    self.cached_stats["valid"] = False
-                self.cached_stats["source_age_sec"] = round(meas_age, 2)
-                return self.cached_stats
+            # Handle log rotation or truncation
+            if cur_size < self.last_offset:
+                self.last_offset = 0
 
-            # New data is available: extract recent log lines
-            lines = read_last_lines(self.log_path, num_lines=30)
-            text_block = "\n".join(lines)
+            # Read strictly NEW bytes appended since last check
+            if cur_size > self.last_offset:
+                with open(self.log_path, "r", encoding="utf-8", errors="replace") as f:
+                    f.seek(self.last_offset)
+                    new_chunk = f.read(cur_size - self.last_offset)
+                self.last_offset = cur_size
 
-            matches = RADIO_STATS_PATTERN.findall(text_block)
-            if matches:
-                last = matches[-1]
-                nprb_val = int(last[3])
-                self.cached_stats["ulsch_errors"] = int(last[0])
-                self.cached_stats["bler"] = float(last[1])
-                self.cached_stats["mcs"] = int(last[2])
-                self.cached_stats["nprb"] = nprb_val
-                self.cached_stats["prb_pct"] = round((nprb_val / MAX_PRB) * 100.0, 2)
-                self.cached_stats["snr_db"] = float(last[4])
-                self.cached_stats["rssi_dbm"] = float(last[5])
-                self.cached_stats["valid"] = True
-                self.cached_stats["source_mtime"] = cur_mtime
-                self.cached_stats["source_age_sec"] = round(age, 2)
+                found_radio = self._parse_chunk(new_chunk, cur_mtime)
+                if not found_radio:
+                    # New lines were written, but none contained radio statistics (non-radio logs)
+                    # Do NOT update last_meas_time!
+                    if (now - self.last_meas_time) > self.stale_threshold:
+                        self._reset_metrics()
+            else:
+                # No new bytes written
+                if (now - self.last_meas_time) > self.stale_threshold:
+                    self._reset_metrics()
 
-                self.last_meas_time = now
-                self.last_size = cur_size
-                self.last_mtime = cur_mtime
-                return self.cached_stats
-
-            nprb_matches = NPRB_FALLBACK.findall(text_block)
-            if nprb_matches:
-                nprb_val = int(nprb_matches[-1])
-                self.cached_stats["nprb"] = nprb_val
-                self.cached_stats["prb_pct"] = round((nprb_val / MAX_PRB) * 100.0, 2)
-                self.cached_stats["valid"] = True
-                self.cached_stats["source_mtime"] = cur_mtime
-                self.cached_stats["source_age_sec"] = round(age, 2)
-
-                self.last_meas_time = now
-                self.last_size = cur_size
-                self.last_mtime = cur_mtime
-                return self.cached_stats
-
-            # Lines were written but no scheduler match
-            self.cached_stats["valid"] = False
-            self.last_size = cur_size
-            self.last_mtime = cur_mtime
+            meas_age = (now - self.last_meas_time) if self.last_meas_time > 0.0 else file_age
+            self.cached_stats["source_age_sec"] = round(meas_age, 2)
             return self.cached_stats
 
         except Exception:
-            self.cached_stats["valid"] = False
+            self._reset_metrics()
             return self.cached_stats
 
 

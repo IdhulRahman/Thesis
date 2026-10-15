@@ -234,6 +234,7 @@ On VM-3 (`oai-core`), update the configuration files to match the thesis multi-s
 
 ---
 
+<a id="case-50"></a>
 ## Case 50 — SMF N4/PFCP 1-Second Timeout After Manual `upfs:` Configuration Edit
 
 ### Symptom
@@ -302,6 +303,7 @@ In OAI SMF ([`smf_app.cpp`](https://github.com/openairinterface/oai-cn5g-smf/blo
 
 ---
 
+<a id="case-51"></a>
 ## Case 51 — OAI AMF Automated NRF Registration Failure (Missing `/{nfInstanceId}` in Dynamic Resource URI)
 
 ### Symptom
@@ -408,6 +410,7 @@ This confirms that NRF functions correctly and strictly adheres to 3GPP TS 29.51
 
 ---
 
+<a id="case-52"></a>
 ## Case 52 — OAI UPF N4/PFCP Session Establishment Silent Drop (Unsupported 3GPP TS 29.244 IE Type 62 `Measurement Method`)
 
 ### Symptom

@@ -470,8 +470,11 @@ All acceptance checks have passed on VM-3:
    ```
    Then restart AMF and SMF to flush stale state:
    ```bash
-   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml restart oai-amf oai-smf-slice1 oai-smf-slice2
+   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml restart oai_amf oai_smf_slice1 oai_smf_slice2
    ```
+
+   > [!NOTE]
+   > In OAI CN5G Compose files, core services use underscores (`oai_amf`, `oai_smf_slice1`, `oai_smf_slice2`), while their runtime container names use hyphens (`oai-amf`, `oai-smf-slice1`, `oai-smf-slice2`). Use service names when invoking `docker compose restart`, or container names when invoking `docker restart`.
 
 6. **NWDAF Live Telemetry Pipeline [VALIDATED]:**
    Verify the full 3GPP TS 29.520 analytics pipeline is functioning — `absoluteNum` must be `> 0`:
@@ -622,7 +625,7 @@ curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
 }
 ```
 
-> **Note:** `absoluteNum: 1` is the result of `CountDocuments` on `testing.smf` in MongoDB — confirmed live from a real PDU session event, not a hardcode. `relativeRatio` and `confidence` remain `0` due to upstream `//TODO` in `network_performance.go` (Tahap 3 — implementation in progress; see [Troubleshooting Case 48](../troubleshooting/nwdaf.md#case-48-oai-nwdaf-engine-v210-returns-http-400-bad-request-on-slice_load_level-nbi-query)).
+> **Note:** `absoluteNum: 1` is the result of `CountDocuments` on `testing.smf` in MongoDB — confirmed live from a real PDU session event, not a hardcode. `relativeRatio` and `confidence` remain `0` due to upstream `//TODO` in `network_performance.go` (Tahap 3 — implementation in progress; see [Troubleshooting Case 48](../troubleshooting/nwdaf.md#case-48)).
 
 ### 12.4 Empirical Evidence: Unimplemented Dynamic User-Plane Load in OAI NWDAF v2.1.0
 
