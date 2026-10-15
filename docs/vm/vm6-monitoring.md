@@ -39,7 +39,10 @@ To prove the thesis hypotheses and evaluate multi-timescale closed-loop coordina
 ### 2.1 Domain 1: 5G Core Network & NWDAF (VM-3 — `10.102.0.164`)
 Ingested via Core Research Telemetry Adapter (`core_adapter.py` v9) and 3GPP Rel-17 `Nnwdaf` REST API (`http://10.102.0.164:8080`):
 
-> **Core Metrics Validity Note:** Based on the source code audit of OAI NWDAF v2.1.0 (`network_performance.go`), dynamic load ratio calculations remain marked as `//TODO` and evaluate to a constant `0`. Therefore, physical User-Plane performance observability is extracted directly from the UPF Linux kernel using `core_adapter.py` v9 adhering to 3GPP PM principles (TS 32.401 & TS 28.552).
+> **Core Metrics Validity & Semantic Audit Note:**
+> 1. Physical user-plane buffer queue dynamics and packet drops are sampled directly from the Linux kernel using `core_adapter.py` v9 (adhering to 3GPP PM TS 32.401 & TS 28.552).
+> 2. Native 3GPP TS 29.520 `UE_COMMUNICATION` telemetry is polled dynamically by `telemetry_collector.py` from Kong Gateway port 8080 (`/nnwdaf-analyticsinfo/v1/analytics?event-id=UE_COMMUNICATION`).
+> 3. Upstream OAI Engine semantics: `nwdaf_comm_duration_sec` sums report elapsed durations (`commDur: 2842s`), and `nwdaf_comm_vol_std_bytes` computes sample standard deviation ($\sigma = 588\text{ B}$). In single-slice PoC (Slice 1), volume counters (`ulVol: 1680B`, `dlVol: 1680B`) match live UPF URR reports, and freshness is tracked with a 35s window.
 
 | Metric Name | Source NF / Method | Unit / Type | Role in Thesis Evaluation |
 |---|---|---|---|
@@ -49,6 +52,11 @@ Ingested via Core Research Telemetry Adapter (`core_adapter.py` v9) and 3GPP Rel
 | `upf_packet_drops_delta` | `oai-upf-slice1/2` (`tc -j -s qdisc`) | Rate / Delta | Physical packet drops due to buffer overflow or queue exhaustion on UPF. |
 | `upf_tx_bytes_total` | `oai-upf-slice1/2` (`/proc/net/dev`) | Cumulative Counter | Cumulative egress byte volume since container startup. |
 | `upf_rx_bytes_total` | `oai-upf-slice1/2` (`/proc/net/dev`) | Cumulative Counter | Cumulative ingress byte volume since container startup. |
+| `nwdaf_comm_duration_sec` | OAI NWDAF NBI (`UE_COMMUNICATION`) | Seconds (`s`) | Aggregated communication duration reported by NWDAF. |
+| `nwdaf_comm_ul_bytes` | OAI NWDAF NBI (`UE_COMMUNICATION`) | Bytes (`B`) | Cumulative uplink user-plane volume reported by NWDAF. |
+| `nwdaf_comm_dl_bytes` | OAI NWDAF NBI (`UE_COMMUNICATION`) | Bytes (`B`) | Cumulative downlink user-plane volume reported by NWDAF. |
+| `nwdaf_comm_vol_std_bytes`| OAI NWDAF NBI (`UE_COMMUNICATION`) | Bytes (`B`) | Volume variation metric (computed as standard deviation $\sigma$ upstream). |
+| `nwdaf_comm_freshness` | Collector Poller (`telemetry_collector.py`)| Binary (`1/0`) | Freshness indicator for NWDAF NBI telemetry ($1$ if updated within 35s). |
 | `nwdaf_network_performance` | OAI NWDAF NBI (`Nnwdaf_AnalyticsInfo`) | JSON 3GPP TS 29.520 | PDU session control analytics (`SESS_SUCC_RATIO`, static ratio `0`). |
 | `amf_active_pdu_sessions` | AMF SBI (`/namf-comm`) | Counter | Ground-truth count of active PDU sessions across slices. |
 
