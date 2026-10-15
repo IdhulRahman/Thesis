@@ -176,12 +176,13 @@ docker exec oai-upf-slice1 tc -j -s qdisc show dev eth0
 
 #### 3.3 Automated Extraction Implementation
 Executed by [`scripts/core_adapter.py`](file:///d:/Idhul/Program/Thesis/scripts/core_adapter.py) v9:
-* Samples interface counters with monotonic timestamp bracketing.
-* Archives locally to `./upf-telemetry/<RUN_ID>/telemetry.jsonl` and `./telemetry.csv`.
-* Asynchronously delivers reports to `http://10.102.0.67:9100/report`.
+* Samples interface counters and kernel qdisc structures with monotonic timestamp bracketing.
+* Archives locally to `./upf-telemetry/<RUN_ID>-<UUID>/telemetry.jsonl` and `./telemetry.csv`.
+* Asynchronously delivers reports to `http://10.102.0.67:9100/report` (custom VM-6 endpoint).
+* Diagnostics: `python3 core_adapter.py --inspect-qdiscs`
 ```bash
 cd /opt/oran/5gc/scripts
-python3 core_adapter.py --run-id PILOT_TEST > core_adapter.log 2>&1 &
+sudo nohup python3 -u core_adapter.py --run-id PILOT_TEST > core_adapter.log 2>&1 &
 ```
 
 ---
