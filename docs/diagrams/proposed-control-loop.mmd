@@ -1,0 +1,78 @@
+flowchart LR
+%% ====================================================================
+%% Proposed Multi-Timescale Closed-Loop Traffic Steering Mechanism
+%% Bottleneck-Aware RIC–NWDAF Coordination
+%% ====================================================================
+
+    %% ----------------------------------------------------
+    %% Domain 1: Multi-Domain Telemetry & Observation
+    %% ----------------------------------------------------
+    subgraph OBSERVATION ["Observation & Telemetry Aggregation Layer"]
+        RAN_KPI["RAN Telemetry (VM-4 ran_adapter.py / DU Logs)<br/>• PRB Utilization (NPRB/106)<br/>• UL-SCH SNR, MCS, BLER"]
+        CORE_METRICS["Core Telemetry (VM-3 NWDAF & Host Adapter)<br/>• 3GPP UE_COMMUNICATION (Volume, Duration)<br/>• UPF eth0 tc qdisc Backlog & Drops"]
+        E2E_QOS["E2E UE Experience (VM-5 trafgen.sh)<br/>• Slice-1 Offered Load (iperf3)<br/>• Slice-2 Canary RTT & Loss (ping)"]
+    end
+
+    %% ----------------------------------------------------
+    %% Domain 2: Slow Loop — Non-RT RIC Coordinator (~30 s Timescale)
+    %% ----------------------------------------------------
+    subgraph SLOW_LOOP ["Slow Loop: Non-RT RIC Coordinator (~30 s | VM-1)"]
+        CROSS_AGG["Cross-Domain Feature Normalizer<br/>(Monotonic UTC Time-Aligned)"]
+        CLASSIFIER["Bottleneck Classification Engine<br/>(NORMAL / RAN / CORE / JOINT)"]
+        POLICY_GEN["Action Selector & Policy Dispatcher<br/>(A1 Type 20008 Generator)"]
+        SLA_VERIFY["Closed-Loop SLA Verifier<br/>(Evaluates Post-Action Vs / Churn Penalty)"]
+
+        CROSS_AGG --> CLASSIFIER
+        CLASSIFIER --> POLICY_GEN
+        POLICY_GEN --> SLA_VERIFY
+        SLA_VERIFY -. "SLA Recovery Feedback" .-> POLICY_GEN
+    end
+
+    %% ----------------------------------------------------
+    %% Domain 3: Fast Loop — Near-RT RIC Controller (10 ms - 1 s Timescale)
+    %% ----------------------------------------------------
+    subgraph FAST_LOOP ["Fast Loop: Near-RT RIC Controller (10 ms - 1 s | VM-2)"]
+        A1_POLICY["A1 Policy Type 20008 Store<br/>(Target Slice SLA & Cell Constraints)"]
+        XAPP["Traffic-Steering xApp<br/>(Evaluates Handover Eligibility)"]
+
+        A1_POLICY --> XAPP
+    end
+
+    %% ----------------------------------------------------
+    %% Domain 4: Actuation & Enforcement Layer
+    %% ----------------------------------------------------
+    subgraph ACTUATION ["Multi-Domain Actuation Layer"]
+        RAN_ACT["OAI Split RAN CU/DUs (VM-4)<br/>(E2SM-RC Target Cell Reconfiguration)"]
+        CORE_ACT["Core User-Plane Conditioning (VM-3)<br/>(Linux tc qdisc Token Bucket Filter / Shaper)"]
+    end
+
+    %% ----------------------------------------------------
+    %% Domain 5: Sliced Data Plane
+    %% ----------------------------------------------------
+    subgraph DATA_PLANE ["Multi-Slice 5G Data Plane"]
+        UES["Active UEs (VM-5)<br/>• UE-1 (eMBB Slice)<br/>• UE-2 (URLLC Slice)"]
+    end
+
+    %% ----------------------------------------------------
+    %% Ingestion to Slow Loop
+    %% ----------------------------------------------------
+    RAN_KPI -- "1 Hz PRB / SNR Feed" --> CROSS_AGG
+    CORE_METRICS -- "1 Hz UPF Queue & NWDAF Feed" --> CROSS_AGG
+    E2E_QOS -- "1 Hz RTT / Loss / Tput Feed" --> CROSS_AGG
+
+    %% ----------------------------------------------------
+    %% Policy Distribution & Actuation
+    %% ----------------------------------------------------
+    POLICY_GEN -- "A1 Interface (REST :10001)" --> A1_POLICY
+    XAPP -- "E2 Control (E2SM-RC)" --> RAN_ACT
+    POLICY_GEN -. "Core Shaping Directives (Optional Core Path)" .-> CORE_ACT
+
+    %% ----------------------------------------------------
+    %% Physical Actuation & Feedback Loop
+    %% ----------------------------------------------------
+    RAN_ACT -- "RRC Reconfiguration (Inter-Cell Handover)" --> UES
+    CORE_ACT -- "Egress Rate Limiting / Shaping" --> UES
+
+    UES -. "Altered Channel Conditions" .-> RAN_KPI
+    UES -. "Altered Session Buffer Load" .-> CORE_METRICS
+    UES -. "Post-Steering SLA State" .-> E2E_QOS

@@ -1,62 +1,86 @@
-# Interface Integration Guides
+# Cross-Domain Interface Integration Guides
 
-This folder contains the validated end-to-end integration guides for the inter-VM protocol interfaces in the O-RAN 5G thesis testbed.
+This directory contains the authoritative integration specifications and validation guides for the cross-domain interfaces linking the 6 virtual machines in the O-RAN 5G Core testbed.
 
-> **Thesis:** *Bottleneck-Aware Closed-Loop Traffic Steering via O-RAN RIC–NWDAF Coordination in Multi-Slice 5G Networks*
-
----
-
-## Integration Index
-
-| File | Interface | Endpoints | Status |
-|---|---|---|:---:|
-| [a1-integration.md](a1-integration.md) | **A1 Interface** | VM-1 (A1 PMS) → VM-2 (A1 Mediator → xApp via RMR 20010/20011) | ✅ Verified |
-| [e2-integration.md](e2-integration.md) | **E2 Interface** | VM-4 (OAI FlexRIC E2 Agent) → VM-2 (E2Term SCTP :36421) | ✅ Verified |
+**Thesis Research Title:**  
+*Bottleneck-Aware Closed-Loop Traffic Steering via O-RAN RIC–NWDAF Coordination in Multi-Slice 5G Networks*
 
 ---
 
-## Overview
+## 1. Integration Matrix & Specification Mapping
 
-### A1 Interface (VM-1 ↔ VM-2)
-
-The A1 path enables the Non-RT RIC rApp to dispatch policy constraints to the Near-RT RIC xApp:
-
-```
-A1 PMS (VM-1 :8081)
-   │  OscA1Client (HTTP)
-   ▼
-A1 Compatibility Shim (VM-2 :10001, Nginx)
-   │
-   ▼
-A1 Mediator (VM-2 :10000)
-   │  RMR mtype 20010
-   ▼
-Traffic Steering xApp (VM-2 :4560)
-   │  RMR RTS mtype 20011
-   ▼
-A1 Mediator (status ENFORCED)
-```
-
-### E2 Interface (VM-4 ↔ VM-2)
-
-The E2 path enables near-real-time RAN telemetry ingestion and radio actuation:
-
-```
-OAI FlexRIC E2 Agent (VM-4)
-   │  E2AP over SCTP (port 36421)
-   ▼
-E2Term (VM-2)
-   │  RMR (msg 12001 E2_SETUP_REQ)
-   ▼
-E2Mgr → RNIB/DBaaS (Redis)
-```
-
-Verified Service Models: **E2SM-KPM (ID: 2)**, **E2SM-RC (ID: 3)**, and 6× FlexRIC layer-2 SMs.
+| Document | Primary Interface | Cross-VM Boundary | Protocol & Transport | Standard Specification | Operational Status |
+|---|---|---|---|---|:---:|
+| [`a1-integration.md`](a1-integration.md) | **O-RAN A1** | VM-1 (Non-RT) $\to$ VM-2 (Near-RT) | REST HTTP/1.1 (`:10001`) & RMR (`:4560`) | O-RAN.WG2.A1AP v03.01 | **`Validated`** |
+| [`e2-integration.md`](e2-integration.md) | **O-RAN E2** | VM-4 (Split RAN) $\leftrightarrow$ VM-2 (Near-RT) | E2AP over SCTP (`:36421`) | O-RAN.WG3.E2AP v02.03 | **`Validated` (E2Setup)** |
+| [`nwdaf-integration.md`](nwdaf-integration.md) | **3GPP NWDAF** | VM-3 (5GC) $\to$ VM-6 (Collector) | N4 PFCP, SBA HTTP/2, REST NBI (`:8080`) | 3GPP TS 23.288 / TS 29.520 | **`Validated` (Channel E)** |
 
 ---
 
-See also:
-- [../vm/vm1-nonrt-ric.md](../vm/vm1-nonrt-ric.md) — VM-1 deployment guide
-- [../vm/vm2-nearrt-ric.md](../vm/vm2-nearrt-ric.md) — VM-2 deployment guide
-- [../vm/vm4-oai-ran.md](../vm/vm4-oai-ran.md) — VM-4 (RAN) deployment guide
-- [../troubleshooting.md](../troubleshooting.md) — Validated fixes for known integration issues
+## 2. Interface Overview & Dataflows
+
+### 2.1 A1 Interface Path (VM-1 $\to$ VM-2)
+The A1 path allows the Non-RT RIC coordinator on VM-1 to deliver policy guidelines and SLA constraints (Policy Type `20008`) to the Near-RT RIC xApp on VM-2:
+```text
+ Non-RT RIC (VM-1)                   Near-RT RIC (VM-2)
+ ┌─────────────────┐                 ┌──────────────────────┐
+ │ A1 PMS (:8081)  │ ──► OscA1Client ──► NGINX Shim (:10001) │
+ └─────────────────┘                 └──────────┬───────────┘
+                                                ▼
+                                     ┌──────────────────────┐
+                                     │ A1 Mediator (:10000) │
+                                     └──────────┬───────────┘
+                                                ▼ RMR 20010
+                                     ┌──────────────────────┐
+                                     │ xApp Runner (:4560)  │
+                                     └──────────┬───────────┘
+                                                ▼ RMR RTS 20011 (ENFORCED)
+                                     ┌──────────────────────┐
+                                     │ A1 Mediator Status   │
+                                     └──────────────────────┘
+```
+> [!NOTE]
+> A status of `ENFORCED` confirms that the xApp received and accepted the policy. Physical radio steering actuation over E2 is evaluated separately.
+
+### 2.2 E2 Interface Path (VM-4 $\leftrightarrow$ VM-2)
+The E2 path connects the OAI gNB Centralized Unit (CU) to the Near-RT RIC, providing node discovery, telemetry indications, and radio control actuation:
+```text
+ OAI Split RAN (VM-4)                Near-RT RIC (VM-2)
+ ┌──────────────────────┐            ┌──────────────────────┐
+ │ CU-CP / CU-UP Softm. │            │ ric_e2term (:36421)  │
+ │  ├── FlexRIC Agent   │ ──► SCTP ──►  ├── Decodes ASN.1   │
+ │  ├── E2SM-KPM (ID: 2)│            │  └── RMR msg 12001   │
+ │  └── E2SM-RC  (ID: 3)│            └──────────┬───────────┘
+ └──────────────────────┘                       ▼
+                                     ┌──────────────────────┐
+                                     │ ric_e2mgr / DBaaS    │
+                                     │ (NodeB Registered)   │
+                                     └──────────────────────┘
+```
+
+### 2.3 NWDAF & Core Telemetry Path (VM-3 $\to$ VM-6)
+Exposes standardized 3GPP user-plane communication analytics (`UE_COMMUNICATION`) from the 5G Core datapath alongside high-frequency host telemetry:
+```text
+ 5G Core Datapath (VM-3)             Monitoring Host (VM-6)
+ ┌──────────────────────┐            ┌──────────────────────┐
+ │ UPF simpleswitch     │            │ telemetry_collector  │
+ │  └── URR 1 via N4    │            │  ├── GET :8080 (3GPP)│
+ └──────────┬───────────┘            │  └── POST :9100/rep. │
+            ▼ PFCP msg 56            └──────────┬───────────┘
+ ┌──────────────────────┐                       ▼
+ │ SMF-1 (QOS_MON)      │            ┌──────────────────────┐
+ └──────────┬───────────┘            │ Prometheus &         │
+            ▼ HTTP/2 SBI             │ record_dual_stream   │
+ ┌──────────────────────┐            │ (37-Column Dataset)  │
+ │ oai-nwdaf-sbi/engine │            └──────────────────────┘
+ │  └── Kong (:8080)    │
+ └──────────────────────┘
+```
+
+---
+
+## 3. Related Documentation
+
+* **Deployment Guides:** [docs/deployment/README.md](../deployment/README.md)
+* **Telemetry Metric Catalog:** [docs/telemetry/metric-catalog.md](../telemetry/metric-catalog.md)
+* **Troubleshooting Cases:** [docs/troubleshooting/README.md](../troubleshooting/README.md)

@@ -1,0 +1,134 @@
+flowchart LR
+%% ====================================================================
+%% Current System Architecture: 6-VM O-RAN RIC & 5G Core Platform
+%% ====================================================================
+
+    %% VM-5: OAI nrUE Emulator
+    subgraph VM5 ["VM-5 — nrUE Emulator (10.102.0.165)"]
+        UE1["UE-1 (netns: ue1)<br/>eMBB (01000001)<br/>IP: 12.1.1.2"]
+        UE2["UE-2 (netns: ue2)<br/>URLLC (de00007b)<br/>IP: 12.1.2.2"]
+        TRAFGEN["Multi-Slice TrafGen<br/>(trafgen.sh)"]
+        UE1 -.-> TRAFGEN
+        UE2 -.-> TRAFGEN
+    end
+
+    %% VM-4: OAI Split RAN
+    subgraph VM4 ["VM-4 — Split RAN (10.102.0.167)"]
+        subgraph VM4_DU ["Distributed Units (DUs)"]
+            DU1["DU-1 (Cell-1, PCI 1)<br/>RFsim Server :4043"]
+            DU2["DU-2 (Cell-2, PCI 2)<br/>RFsim Server :4044"]
+        end
+
+        subgraph VM4_CU ["Central Unit (CU)"]
+            CU_CP["CU-CP (RRC)"]
+            CU_UP["CU-UP (PDCP/SDAP)"]
+        end
+
+        E2_AGENT["FlexRIC E2 Agent<br/>(KPM ID: 2, RC ID: 3)"]
+        RAN_ADAPT["RAN Telemetry Adapter<br/>(ran_adapter.py)"]
+        DU1 -.-> RAN_ADAPT
+        DU2 -.-> RAN_ADAPT
+    end
+
+    %% VM-3: OAI 5G Core & NWDAF
+    subgraph VM3 ["VM-3 — 5G Core & NWDAF (10.102.0.164)"]
+        subgraph VM3_5GC ["5GC Control Plane"]
+            AMF["AMF (oai-amf)"]
+            SMF1["SMF-1 (eMBB)"]
+            SMF2["SMF-2 (URLLC)"]
+            CORE_CP["NRF, UDM, UDR, AUSF, NSSF"]
+        end
+
+        subgraph VM3_UPF ["5GC User Plane"]
+            UPF1["UPF-1 (simpleswitch)<br/>eMBB (192.168.70.142)"]
+            UPF2["UPF-2 (v2.1.0)<br/>URLLC (192.168.70.143)"]
+            EXT_DN["External Data Network<br/>(oai-ext-dn: 192.168.70.145)"]
+        end
+
+        subgraph VM3_NWDAF ["3GPP NWDAF (AnLF)"]
+            NWDAF_SBI["NWDAF SBI (:6062)"]
+            NWDAF_ENG["NWDAF Engine (:6063)<br/>MongoDB: testing.smf"]
+            KONG["Kong API Gateway (:8080)<br/>Nnwdaf_AnalyticsInfo"]
+        end
+
+        CORE_ADAPT["Core Telemetry Adapter<br/>(core_adapter.py v9)"]
+        UPF1 -. "tc qdisc / drops" .-> CORE_ADAPT
+        UPF2 -. "tc qdisc / drops" .-> CORE_ADAPT
+    end
+
+    %% VM-1: Non-RT RIC
+    subgraph VM1 ["VM-1 — Non-RT RIC (10.102.0.168)"]
+        A1_PMS["A1 Policy Management Service<br/>(A1 PMS v2.6.0 :8081)"]
+        RAPP["Bottleneck-Aware Coordinator rApp<br/>(Offline Trained Model / MAPE-K)<br/>[PLANNED EXECUTION]"]
+        RAPP -.-> A1_PMS
+    end
+
+    %% VM-2: Near-RT RIC
+    subgraph VM2 ["VM-2 — Near-RT RIC (10.102.0.66)"]
+        A1_MED["A1 Mediator (:10001)"]
+        XAPP["Traffic Steering xApp<br/>(python_xapp_runner)"]
+        SUB_MGR["Subscription Manager"]
+        E2_TERM["E2 Termination (E2Term :36421)"]
+        E2_MGR["E2 Manager (E2Mgr)"]
+        DBAAS["DBaaS / RNIB (Redis 5.0.9)"]
+
+        A1_MED -- "RMR 20010" --> XAPP
+        XAPP -. "RMR 20011" .-> A1_MED
+        E2_TERM -. "SCTP E2 Setup" .-> E2_MGR
+        E2_MGR --> DBAAS
+    end
+
+    %% VM-6: Monitoring & Telemetry Host
+    subgraph VM6 ["VM-6 — Monitoring Host (10.102.0.67)"]
+        COLLECTOR["Telemetry Collector (:9100)<br/>(telemetry_collector.py)"]
+        PROM["Prometheus TSDB (:9090)"]
+        GRAF["Grafana (:3000)"]
+        RECORDER["Monotonic Recorder (1 Hz)<br/>(record_dual_stream.py)"]
+        DATASET["37-Column CSV Dataset<br/>(telemetry_raw_<RUN>.csv)"]
+
+        COLLECTOR --> PROM
+        PROM --> GRAF
+        COLLECTOR --> RECORDER
+        RECORDER --> DATASET
+    end
+
+    %% ----------------------------------------------------
+    %% Validated 3GPP Data & Control Paths
+    %% ----------------------------------------------------
+    UE1 == "RFsim TCP :4043" ==> DU1
+    UE2 == "RFsim TCP :4044" ==> DU2
+    DU1 -- "F1-C" --> CU_CP
+    DU1 -- "F1-U" --> CU_UP
+    DU2 -- "F1-C" --> CU_CP
+    DU2 -- "F1-U" --> CU_UP
+
+    CU_CP -- "N2 / NGAP (SCTP :38412)" --> AMF
+    CU_UP -- "N3 / GTP-U (UDP :2152)" --> UPF1
+    CU_UP -- "N3 / GTP-U (UDP :2152)" --> UPF2
+    UPF1 --> EXT_DN
+    UPF2 --> EXT_DN
+
+    %% 5GC Internal Ingestion Chain
+    UPF1 -- "PFCP N4 URR (msg 56)" --> SMF1
+    SMF1 -- "Nsmf_EventExposure (QOS_MON)" --> NWDAF_SBI
+    NWDAF_SBI --> NWDAF_ENG
+    NWDAF_ENG --> KONG
+
+    %% ----------------------------------------------------
+    %% Validated Telemetry Export Streams
+    %% ----------------------------------------------------
+    TRAFGEN -- "HTTP POST :9100/report (1 Hz)" --> COLLECTOR
+    RAN_ADAPT -- "HTTP POST :9100/report (1 Hz)" --> COLLECTOR
+    CORE_ADAPT -- "HTTP POST :9100/report (1 Hz)" --> COLLECTOR
+    COLLECTOR -- "HTTP GET :8080 (3GPP UE_COMMUNICATION)" --> KONG
+
+    %% ----------------------------------------------------
+    %% O-RAN Control Paths
+    %% ----------------------------------------------------
+    E2_AGENT -- "E2Setup / SCTP :36421 [VALIDATED]" --> E2_TERM
+    A1_PMS -- "A1 Policy Type 20008 [VALIDATED]" --> A1_MED
+
+    %% Planned Closed-Loop Paths
+    XAPP -. "E2 Control (E2SM-RC ID: 3) [PLANNED]" .-> E2_TERM
+    E2_TERM -. "E2 Control Request [PLANNED]" .-> E2_AGENT
+    COLLECTOR -. "Feature Feed [PLANNED]" .-> RAPP
