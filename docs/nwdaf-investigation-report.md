@@ -14,11 +14,11 @@ During initial pilot evaluations of the cross-domain multi-slice telemetry pipel
 1. The `nwdaf_load_embb` and `nwdaf_load_urllc` columns in the TSDB collector dataset contained `NaN` values (100% missing).
 2. When the official 3GPP `Nnwdaf_AnalyticsInfo` interface was queried directly through the Kong API Gateway (port 8080 on VM-3), the service responded with **HTTP 200 OK**, but both `relativeRatio` and `absoluteNum` remained constant at **`0`**.
 
-**Current Status (Revision v4 Updates):**
+**Current Status (Revision v5 Updates):**
 * **Control-Plane Event Ingestion Confirmed (✅):** Following the resolution of AMF dynamic NRF registration ([Case #51](troubleshooting.md#51-oai-amf-automated-nrf-registration-failure-missing-nfinstanceid-in-dynamic-resource-uri)), `Namf_EventExposure` and `Nsmf_EventExposure` events are successfully ingested by `oai-nwdaf-sbi` into MongoDB (`testing.amf` and `testing.smf`). The NWDAF analytics API returns **`absoluteNum: 1`** derived dynamically from `CountDocuments`.
-* **PoC Session Establishment with URR Confirmed (✅):** With the Rel-16 compatibility patch clamping IE 43 length to 6 octets, upstream UPF `develop` successfully completes N4 association setup without exceptions and establishes PDU sessions with `Linked URR: 1`. Data-plane connectivity via `oaitun_ue1` to External DN achieves 0% packet loss.
+* **PoC Session Establishment & N4 Usage Reporting Confirmed (✅):** With the Rel-16 compatibility patch clamping IE 43 length to 6 octets and `upf.support_features.enable_urr: yes` configured, upstream UPF `develop` establishes PDU sessions with `Linked URR: 1`, passes 0% packet loss traffic via `oaitun_ue1`, and actively transmits PFCP Session Report Requests (`msg type 56`, 109 bytes, `Trigger: Periodic Reporting`) over N4. SMF-1 receives these reports, returns `itti_n4_session_report_response`, and dispatches an N11 QoS Monitoring trigger (`SEID 0x4`).
 * **Host Adapter Observability Operational (✅):** Core user-plane buffer queue occupancy and drop rate telemetry are actively extracted via the **Core Telemetry Adapter (`core_adapter.py`)** on VM-3, streaming physical `tc qdisc` measurements directly to the telemetry collector on VM-6 (`10.102.0.67`).
-* **NWDAF User-Plane Telemetry Reporting Under Active Validation (⏳):** While session establishment with URR is verified, the downstream reporting chain—PFCP Usage Reports emitted over N4, SMF ingestion and notification to NWDAF (QOS_MON / `qosmonlist`), and user-plane analytics exposure via NWDAF API—remains under active validation. Ingesting both telemetry streams into NWDAF is maintained as the architectural implementation target.
+* **NWDAF Downstream Ingestion & Exposure Under Active Validation (⏳):** While N4 PFCP Usage Reporting from UPF to SMF and the SMF N11 event trigger are verified, downstream ingestion by `oai-nwdaf-sbi` and exposure of user-plane QoS metrics via the NWDAF NBI API remain under active validation. Ingesting both telemetry streams into NWDAF is maintained as the architectural implementation target.
 
 ---
 
@@ -260,18 +260,23 @@ PDU Session established (Case #52)   absoluteNum: 1 returned                [Pha
 ### Phase 3A: Host/Kernel Adapter Observability ✅ OPERATIONAL
 - The dedicated **Core Telemetry Adapter (`core_adapter.py` v9)** on VM-3 directly inspects physical/veth interface queue occupancy (`tc qdisc`) and packet drops on `oai-upf-slice1` and `oai-upf-slice2`, exporting telemetry directly to the collector on VM-6 (`10.102.0.67`) for baseline bottleneck evaluation across S1–S8.
 
-### Phase 3B: User-Plane Telemetry Integration via NWDAF ⏳ POC DEPLOYED (SESSION WITH URR VERIFIED; REPORTING UNDER VALIDATION)
+### Phase 3B: User-Plane Telemetry Integration via NWDAF ⏳ POC DEPLOYED (N4 USAGE REPORTING VERIFIED; NWDAF INGESTION UNDER VALIDATION)
 - The thesis architectural agreement specifies that user-plane load telemetry must be processed and exposed through NWDAF.
 - **Dual-Track Evaluation Strategy:**
-  1. **Track 1 (Native 3GPP PFCP URR PoC via UPF `develop` @ `c51cae2` — ✅ SESSION VERIFIED; ⏳ REPORTING IN PROGRESS):**
+  1. **Track 1 (Native 3GPP PFCP URR PoC via UPF `develop` @ `c51cae2` — ✅ N4 USAGE REPORTING VERIFIED; ⏳ NWDAF INGESTION UNDER VALIDATION):**
      - Maintain the stable working `v2.1.0` baseline on VM-3 while evaluating the URR PoC.
      - Built custom image `oai-upf:poc-develop-ie43-compat-v1` with the validated Rel-16 compatibility patch ([`patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch`](../patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch)) to clamp IE 43 length to 6 octets (Rel-16), eliminating SMF Bad Length exceptions.
-     - Deployed via Docker Compose override [`deploy/compose.upf-poc.yaml`](../deploy/compose.upf-poc.yaml) with `enable_usage_reporting: yes` active under `smf.upfs` in `conf/slicing_slice1_config.yaml`.
-     - **Verification Evidence (Session Establishment):** PDU session establishment succeeds cleanly with zero N4 exceptions (`Received N4 ASSOCIATION SETUP RESPONSE`), SMF links `Linked URR: 1` to `PDR 1`, and UE 1 softmodem connects to External DN (`192.168.70.145`) with 0% packet loss via explicit interface binding (`sudo ip netns exec ue1 ping -I oaitun_ue1 -c 10 192.168.70.145`, avg RTT 0.257 ms).
-     - **Validation Still Required (Downstream Telemetry Propagation):**
-       - Verification that UPF's `usage_report_loop` actively emits PFCP Session Report Requests containing Usage Reports over N4 (internal UPF config logging `+ Enable Usage Reporting (URR): No` indicates UPF `support_features` flag in config requires validation).
-       - Verification that SMF processes Usage Reports and triggers `QOS_MON` or session volume updates to NWDAF (`qosmonlist` in MongoDB).
-       - Verification of user-plane analytics exposure via NWDAF NBI API.
+     - Configured dual URR flags in `conf/slicing_slice1_config.yaml`:
+       1. `smf.upfs[].config.enable_usage_reporting: yes`: Enables SMF creation of IE 62 (`Measurement Method`) within `Create URR`.
+       2. `upf.support_features.enable_urr: yes`: Enables UPF `simpleswitch` (`pfcp_switch.cpp:1030`) to initialize internal URR datapath structures and spawn `thread_usage_report_`.
+     - **Verification Evidence (Session Establishment & Periodic N4 Reporting):**
+       - UPF startup banner confirms `+ Enable Usage Reporting (URR): Yes`.
+       - PDU session establishment succeeds with `Linked URR: 1` on PDR 1, and UE 1 softmodem passes data traffic with 0% packet loss (`ping -I oaitun_ue1 -c 10 192.168.70.145`, avg RTT 0.257 ms).
+       - UPF `usage_report_loop()` actively transmits PFCP Session Report Requests (`msg type 56`, 109 bytes) with `Trigger: Periodic Reporting` over N4.
+       - SMF-1 logs verify successful reception: `Received N4 SESSION REPORT REQUEST from an UPF`, responds with `itti_n4_session_report_response`, and executes `Send request to N11 to trigger QoS Monitoring (Usage Report) Event, SMF Context-related SEID 0x4`.
+     - **Validation Still Required (Downstream Telemetry Propagation to NWDAF):**
+       - Verification that SMF/AMF dispatches the QoS Monitoring event to `oai-nwdaf-sbi` via HTTP/2 and persists records into MongoDB `testing` database.
+       - Verification of user-plane analytics exposure via NWDAF NBI API (`Nnwdaf_AnalyticsInfo`).
   2. **Track 2 (Custom OAM Host Telemetry Adapter via `core_adapter.py` v9 — ✅ OPERATIONAL):**
      - Under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM"), NWDAF is formally designed to ingest network performance and user-plane metrics through management services.
      - While 3GPP URR provides session-level volume and duration counters, bottleneck indicators such as physical egress queue backlog, bufferbloat, and packet drop surges occur at the Linux kernel packet scheduler (`tc qdisc`). These metrics are sampled non-intrusively by `core_adapter.py` v9 on VM-3 and pushed directly to VM-6 (`:9100/report`).

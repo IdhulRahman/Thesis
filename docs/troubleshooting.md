@@ -2712,8 +2712,23 @@ To enable native 3GPP PFCP Usage Reporting Rules (URR) while maintaining full in
      ```
    - **Live NWDAF Control Plane Ingestion:**
      MongoDB database `testing.smf` immediately records the live session event under SUPI `208950000000001` with timestamp `1792040188` and IP `12.1.1.5`, confirming control-plane session ingestion (`absoluteNum: 1`).
+   - **N4 Periodic Usage Reporting Verification (UPF $\to$ SMF):**
+     Activating native URR reporting requires dual configuration in `conf/slicing_slice1_config.yaml`:
+     1. `smf.upfs[].config.enable_usage_reporting: yes`: Instructs SMF to construct and attach 3GPP TS 29.244 IE Type 62 within `Create URR` linked to PDR 1.
+     2. `upf.support_features.enable_urr: yes`: Instructs UPF `simpleswitch` (`pfcp_switch.cpp:1030`) to initialize internal URR datapath structures and spawn `thread_usage_report_ = std::thread(&pfcp_switch::usage_report_loop, this)`.
+
+     Once configured and restarted, UPF banner confirmed `+ Enable Usage Reporting (URR): Yes`. UPF `usage_report_loop()` periodically builds and transmits PFCP Session Report Requests (`msg type 56`, 109 bytes) containing `Usage Report Trigger: Periodic Reporting` over N4. SMF-1 logs verify successful reception and downstream event dispatch:
+     ```text
+     [smf_n4 ] [info] handle_receive(109 bytes)
+     [smf_n4 ] [debug] handle_receive_pfcp_msg msg type 56 length 105
+     [smf_n4 ] [info] Received N4 SESSION REPORT REQUEST from an UPF
+     [smf_app] [info]               Trigger         -> Periodic Reporting
+     [smf_app] [debug] Send request to N11 to trigger QoS Monitoring (Usage Report) Event, SMF Context-related SEID  0x4
+     [smf_app] [info] Sending ITTI message 31itti_n4_session_report_response to task TASK_SMF_N4
+     ```
+     This empirically confirms that the UPF $\to$ SMF leg of Track 1 is fully functional.
    - **Reporting Chain Boundary:**
-     While PDU session establishment with `Linked URR: 1` is verified, the downstream reporting chain (PFCP Session Reports from UPF to SMF, forwarding to NWDAF `qosmonlist`, and user-plane analytics exposure via NWDAF NBI) remains under active validation.
+     While UPF $\to$ SMF N4 Usage Reporting and SMF N11 event triggering are verified, the downstream propagation from SMF/AMF to NWDAF (updating MongoDB schema fields and exposing QoS metrics via NWDAF NBI API) remains under active validation.
 
 #### Approach 2: Fallback Workaround (Baseline `v2.1.0` Rollback)
 
@@ -2727,11 +2742,11 @@ If operational requirements mandate strict conformance to the unpatched `v2.1.0`
 
 ### Architectural & Thesis Implications
 
-This investigation demonstrates that while `openair-upf:v2.1.0` lacks URR datapath handling, upstream `develop` (`c51cae2`) successfully provides native URR support when patched for Rel-16 IE 43 length alignment with the bounds of the SMF parser commit in use.
+This investigation demonstrates that while `openair-upf:v2.1.0` lacks URR datapath handling, upstream `develop` (`c51cae2`) successfully provides native URR support when patched for Rel-16 IE 43 length alignment with the bounds of the SMF parser commit in use. Furthermore, configuring `upf.support_features.enable_urr: yes` activates periodic PFCP Session Report emissions over N4, which SMF consumes to trigger N11 QoS Monitoring events.
 
 Concurrently, network bottlenecks in virtualized 5G Core span multiple layers: UPF CPU processing starvation, internal pipeline queuing, physical transport link saturation, and host kernel egress queue backlogs.  
 To ensure holistic observability, the thesis employs a **Dual-Track Complementary Architecture**:
-1. **Native 3GPP PFCP URR Track:** PoC session establishment verified with `Linked URR: 1`. End-to-end telemetry propagation to NWDAF is under active validation to capture session-level volume and duration reporting via standard 3GPP N4 $\to$ SMF $\to$ NWDAF interfaces.
+1. **Native 3GPP PFCP URR Track:** PoC session establishment with `Linked URR: 1` and periodic N4 Usage Reporting (msg type 56) to SMF verified. Downstream notification to NWDAF is under active validation to capture session-level volume and duration reporting via standard 3GPP N4 $\to$ SMF $\to$ NWDAF interfaces.
 2. **Custom OAM Host Telemetry Track:** Operates under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM services") via `core_adapter.py` v9 on VM-3, capturing physical kernel queue dynamics (`tc qdisc` backlog bytes and packet drops) that 3GPP URR does not natively measure.
 
 Directing both telemetry streams into NWDAF represents the system's architectural implementation target; currently, Track 2 streams directly to VM-6 while Track 1's upstream reporting chain to NWDAF is being finalized.
