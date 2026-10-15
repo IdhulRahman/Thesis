@@ -128,7 +128,7 @@ Ingested directly from the automated multi-slice traffic generator (`trafgen.sh`
 
 ## 4. Formal Research Evaluation Metrics
 
-Data ingested into VM-6 directly feeds the mathematical formulations required for thesis evaluation (Section 5 of `bottleneck-methodology.md`):
+Data ingested into VM-6 directly feeds the mathematical formulations required for thesis evaluation (Section 5 of [Methodology](../experiments/methodology.md)):
 
 1. **SLA Violation Rate ($V_s$):**
    $$V_s = \frac{\sum_{k=1}^{K} \mathbb{I}(\text{SLA violated in window } k)}{K} \times 100\%$$

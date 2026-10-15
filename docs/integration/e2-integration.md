@@ -296,8 +296,8 @@ With the E2 connection established, the next stage of the research connects the 
 
 ## Related Documentation
 
-- [VM-4 — OAI RAN](../vm/vm4-oai-ran.md)
-- [VM-2 — Near-RT RIC](../vm/vm2-nearrt-ric.md)
+- [VM-4 — OAI RAN](../deployment/vm-04-ran.md)
+- [VM-2 — Near-RT RIC](../deployment/vm-02-near-rt-ric.md)
 - [A1 Integration Guide](a1-integration.md)
 - [System Architecture](../architecture.md)
-- [Troubleshooting](../troubleshooting.md)
+- [Troubleshooting](../troubleshooting/README.md)

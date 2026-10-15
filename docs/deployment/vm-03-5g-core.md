@@ -622,7 +622,7 @@ curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
 }
 ```
 
-> **Note:** `absoluteNum: 1` is the result of `CountDocuments` on `testing.smf` in MongoDB — confirmed live from a real PDU session event, not a hardcode. `relativeRatio` and `confidence` remain `0` due to upstream `//TODO` in `network_performance.go` (Tahap 3 — implementation in progress; see [troubleshooting.md §48](../troubleshooting/README.md)).
+> **Note:** `absoluteNum: 1` is the result of `CountDocuments` on `testing.smf` in MongoDB — confirmed live from a real PDU session event, not a hardcode. `relativeRatio` and `confidence` remain `0` due to upstream `//TODO` in `network_performance.go` (Tahap 3 — implementation in progress; see [Troubleshooting Case 48](../troubleshooting/nwdaf.md#case-48-oai-nwdaf-engine-v210-returns-http-400-bad-request-on-slice_load_level-nbi-query)).
 
 ### 12.4 Empirical Evidence: Unimplemented Dynamic User-Plane Load in OAI NWDAF v2.1.0
 
