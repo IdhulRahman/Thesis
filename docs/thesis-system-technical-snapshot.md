@@ -1,8 +1,8 @@
 # Technical Snapshot: 5G O-RAN RIC–NWDAF Coordination Testbed
 
-* **Snapshot ID:** `SNAPSHOT-20261012-V1.0-THESIS-SYSTEM`
-* **Inspection Date:** 2026-10-12
-* **Repository Git Commit:** `8363ba7c87edd529d6634964f4ea5a9de6ca979f` (Clean read-only audit)
+* **Snapshot ID:** `SNAPSHOT-20261015-V2.0-THESIS-SYSTEM`
+* **Inspection Date:** 2026-10-15
+* **Repository Git Commit:** `9ce3aee` (Post-PoC URR & NWDAF Verification)
 * **Thesis Title:** *Bottleneck-Aware Closed-Loop Traffic Steering via O-RAN RIC–NWDAF Coordination in Multi-Slice 5G Networks*
 * **Primary Scope:** Telemetry validation, ground-truth dataset integrity, and domain diagnosis (`NORMAL`, `RAN`, `CORE`, `JOINT`). Offline ML/DL training with rApp closed-loop inference.
 
@@ -27,12 +27,12 @@ All components are classified into four formal operational statuses:
 | **VM-2** | `10.102.0.66` | A1 Mediator & NGINX Reverse-Proxy | A1 Mediator `3.2.2`, Nginx `:10001` | A1 protocol normalization & RMR routing | **TERUJI** | Passes `/a1-p/healthcheck` |
 | **VM-2** | `10.102.0.66` | Python xApp Runner (`python_xapp_runner`) | `i-release` (container IP `10.0.2.20`) | Hosts Python xApps (RMR `:4560`) | **BERJALAN** | Container healthy, `ricxappframe` OK |
 | **VM-2** | `10.102.0.66` | Traffic Steering xApp (`a1_policy_xapp.py`) | Python xApp baseline | Handles policy 20008, prepares E2SM-RC actions | **TERUJI** | A1 policy CREATE/GET lifecycle passed |
-| **VM-3** | `10.102.0.164` | OAI 5G Core Network Functions | OAI 5GC Federation `v2.1.0` (pinned Compose) | 5GC Control Plane (NRF, UDR, UDM, AUSF, AMF, SMF) | **BERJALAN** | [`docs/vm/vm3-oai-5gc.md`](file:///d:/Idhul/Program/Thesis/docs/vm/vm3-oai-5gc.md) (Docker Compose UP, AMF N2 `:38412` active) |
-| **VM-3** | `10.102.0.164` | Dedicated UPF Slice 1 (`oai-upf-slice1`) | `oai-upf-vpp` / `spgwu-tiny` | User-Plane Anchor for eMBB (`01000001`, `12.1.1.0/24`) | **TERUJI** | Egress traffic routed, N3/N6 active |
-| **VM-3** | `10.102.0.164` | Dedicated UPF Slice 2 (`oai-upf-slice2`) | `oai-upf-vpp` / `spgwu-tiny` | User-Plane Anchor for URLLC (`de00007b`, `12.1.2.0/24`) | **TERUJI** | Egress traffic routed, N3/N6 active |
+| **VM-3** | `10.102.0.164` | OAI 5G Core Network Functions | OAI 5GC Federation `v2.1.0` + custom overrides | 5GC Control Plane (NRF, UDR, UDM, AUSF, AMF, SMF) | **TERUJI** | [`docs/vm/vm3-oai-5gc.md`](file:///d:/Idhul/Program/Thesis/docs/vm/vm3-oai-5gc.md) (Docker Compose UP with AMF & UPF overrides; AMF N2 `:38412` active) |
+| **VM-3** | `10.102.0.164` | Dedicated UPF Slice 1 (`oai-upf-slice1`) | `oai-upf:poc-develop-ie43-compat-v1` / `v2.1.0` | User-Plane Anchor for eMBB (`01000001`, `12.1.1.0/24`) | **TERUJI** | PoC UPF develop (`c51cae2`) with Rel-16 IE 43 patch ([`patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch`](file:///d:/Idhul/Program/Thesis/patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch)); N4 association OK, `Linked URR: 1`, 0% ping loss |
+| **VM-3** | `10.102.0.164` | Dedicated UPF Slice 2 (`oai-upf-slice2`) | `oai-upf:v2.1.0` | User-Plane Anchor for URLLC (`de00007b`, `12.1.2.0/24`) | **TERUJI** | Egress traffic routed, N3/N6 active, 0% ping loss |
 | **VM-3** | `10.102.0.164` | External Data Network (`oai-ext-dn`) | Container IP `192.168.70.145` | iperf3 server `:5201` & ICMP ping target | **TERUJI** | Target reachable by UE1 & UE2 |
-| **VM-3** | `10.102.0.164` | Core Telemetry Adapter (`core_adapter.py`) | Host Python daemon v9 | Scrapes UPF Linux kernel qdisc & pushes to VM-6 | **BERJALAN** | Log: sampling at 1 Hz, HTTP push `:9100/report` |
-| **VM-3** | `10.102.0.164` | OAI NWDAF Container (`oai-nwdaf`) | 3GPP Rel-17 Nnwdaf REST API (`:8080`) | Slice load analytics provider | **DIRENCANAKAN** | Bypassed; physical UPF telemetry measured directly via `core_adapter.py` v9 |
+| **VM-3** | `10.102.0.164` | Core Telemetry Adapter (`core_adapter.py`) | Host Python daemon v9 | Scrapes UPF Linux kernel qdisc & pushes to VM-6 `:9100/report` | **BERJALAN** | Daemon active (PID 1788641), 1 Hz sampling, local disk archive retained |
+| **VM-3** | `10.102.0.164` | OAI NWDAF Stack (`oai-nwdaf-*`) | 8 microservices (`develop`/`v2.0.0`) + Kong Gateway (`:8080`) + MongoDB | 3GPP Rel-17 NBI Analytics (`Nnwdaf_AnalyticsInfo`) & SBI Ingestion | **TERUJI** | Live query returns HTTP 200 with dynamic `absoluteNum: 1`, MongoDB `testing.smf` indexed |
 | **VM-4** | `10.102.0.167` | OAI gNB CU (`cu_gnb.conf`) | OAI 2024.w39 `nr-softmodem` | CU-CP (RRC) & CU-UP (PDCP/SDAP), E2 Agent to VM-2 | **TERUJI** | [`docs/vm/vm4-oai-ran.md`](file:///d:/Idhul/Program/Thesis/docs/vm/vm4-oai-ran.md) (E2 Agent connected to `:36421`) |
 | **VM-4** | `10.102.0.167` | OAI gNB DU-1 (`du_gnb1.conf`, Cell-1) | OAI 2024.w39 `nr-softmodem --rfsim` | RLC/MAC/PHY DU for Cell-1 (TCP server `:4043`) | **TERUJI** | Primary serving cell for UE1 (and co-located contention cell for UE2) |
 | **VM-4** | `10.102.0.167` | OAI gNB DU-2 (`du_gnb2.conf`, Cell-2) | OAI 2024.w39 `nr-softmodem --rfsim` | RLC/MAC/PHY DU for Cell-2 (TCP server `:4044`) | **BERJALAN** | Target standby cell for steering (or serving cell for UE2 per `spawn_multi_ue.sh` default) |
@@ -183,8 +183,8 @@ The recorded dataset (`telemetry_raw_<RUN>_<PID>.csv`) contains exactly 22 colum
 | 7 | `e2e_slice1_jitter_ms` | VM-5 `ue1` ns | App-layer UDP jitter | `trafgen.sh` $\rightarrow$ `:9100/report` | ms | Gauge | Unparsed from iperf3 live log | 1.0 s | Currently fixed at `0.000` | Fixed `0.000` | `jitter_ms` (`slice: 1`) |
 | 8 | `e2e_slice2_rtt_ms` | VM-5 `ue2` ns | Round-trip ICMP latency | `trafgen.sh` $\rightarrow$ `:9100/report` | ms | Gauge | Parsed from ping `time=(\d+\.\d+)` | 1.0 s | Observed $14.0 - 57.8\text{ ms}$ | Decays to `0.0` after 3.5s inactivity | `rtt_ms` (`slice: 2`) |
 | 9 | `e2e_slice2_loss_pct` | VM-5 `ue2` ns | End-to-end ping packet loss | `trafgen.sh` $\rightarrow$ `:9100/report` | % | Gauge | Parsed from ping packet loss % | 1.0 s | $0.0 - 100.0\%$ | Decays to `0.0` after 3.5s inactivity | `packet_loss_pct` (`slice: 2`) |
-| 10 | `nwdaf_load_embb` | VM-3 5GC NWDAF | 3GPP Rel-17 Nnwdaf API | `telemetry_collector.py` | % | Gauge | Polled from `:8080` (fallback mock) | 2.0 s | Fixed `5.00` | Retains initial default `5.00` | `nwdaf_slice_load_level["01000001"]` |
-| 11 | `nwdaf_load_urllc` | VM-3 5GC NWDAF | 3GPP Rel-17 Nnwdaf API | `telemetry_collector.py` | % | Gauge | Polled from `:8080` (fallback mock) | 2.0 s | Fixed `5.00` | Retains initial default `5.00` | `nwdaf_slice_load_level["de00007b"]` |
+| 10 | `nwdaf_load_embb` | VM-3 5GC NWDAF | 3GPP Rel-17 Nnwdaf API | `telemetry_collector.py` | % | Gauge | Polled from Kong `:8080` (`Nnwdaf_AnalyticsInfo`); relativeRatio is 0 (`//TODO`), absoluteNum evaluates dynamically (1) | 2.0 s | Fixed `0` / `5.00` fallback | Retains initial default `5.00` | `nwdaf_slice_load_level["01000001"]` |
+| 11 | `nwdaf_load_urllc` | VM-3 5GC NWDAF | 3GPP Rel-17 Nnwdaf API | `telemetry_collector.py` | % | Gauge | Polled from Kong `:8080` (`Nnwdaf_AnalyticsInfo`); relativeRatio is 0 (`//TODO`), absoluteNum evaluates dynamically (1) | 2.0 s | Fixed `0` / `5.00` fallback | Retains initial default `5.00` | `nwdaf_slice_load_level["de00007b"]` |
 | 12 | `upf_backlog_bytes_embb` | VM-3 UPF-1 Container| Kernel qdisc queue depth | `core_adapter.py` $\rightarrow$ `:9100/report` | Bytes | Gauge | `tc -s qdisc show dev eth0` backlog | 1.0 s | $0 - 304,034\text{ B}$ | Retains last pushed state | `upf_qdisc_backlog_bytes["01000001"]` |
 | 13 | `upf_backlog_bytes_urllc`| VM-3 UPF-2 Container| Kernel qdisc queue depth | `core_adapter.py` $\rightarrow$ `:9100/report` | Bytes | Gauge | `tc -s qdisc show dev eth0` backlog | 1.0 s | Fixed `0.00` (no TC applied) | Retains last pushed state | `upf_qdisc_backlog_bytes["de00007b"]` |
 | 14 | `upf_drops_embb` | VM-3 UPF-1 Container| Kernel qdisc drop rate | `core_adapter.py` $\rightarrow$ `:9100/report` | Drops/s | Rate/Delta| $\Delta \text{drops} / \Delta t$ per second | 1.0 s | $0 - 1,752\text{ drops/s}$ | Retains last pushed state | `upf_qdisc_drops_delta["01000001"]` |
@@ -223,22 +223,19 @@ The recorded dataset (`telemetry_raw_<RUN>_<PID>.csv`) contains exactly 22 colum
 
 ---
 
-## 5. Actual Status & Pipeline of NWDAF
+## 5. Actual Status & Pipeline of NWDAF (Dual-Track Architecture)
 
-* **Active NWDAF Services:**
-  - Standard 3GPP Rel-17 NWDAF container is **NOT active** in the current live docker compose execution.
-* **HTTP Polling Endpoint & Dynamic Fallback:**
-  - `telemetry_collector.py` contains a background polling thread targeting:
-    `http://10.102.0.164:8080/nnwdaf-eventsubscription/v1/slice-load-level`
-  - **Dynamic Fallback:** If the external Nnwdaf endpoint does not respond within 5 seconds, `telemetry_collector.py` dynamically calculates slice load level based on UPF throughput divided by nominal slice quota:
-    $\text{load}_{\text{embb}} = \min(100.0, \max(5.0, (\text{tx\_mbps} / 25.0) \times 100))$.
-* **Response & Fallback Handling:**
-  - Because port `:8080` is unreachable, `poll_external_nfs()` catches `urllib.error.URLError` and quietly passes (`except Exception: pass`).
-  - As a result, `metrics_store["nwdaf_slice_load_level"]` continuously retains its hardcoded initialization dictionary:
-    `{"01000001": 5.0, "de00007b": 5.0}`.
-* **Core Adapter Architecture vs. NWDAF Pipeline:**
-  - [`core_adapter.py`](file:///d:/Idhul/Program/Thesis/scripts/core_adapter.py) operates as an independent host daemon. It bypasses 3GPP SBI entirely, querying the Linux kernel directly (`tc -s qdisc show dev eth0`) and posting raw metrics directly to VM-6 (`http://10.102.0.67:9100/report`).
-  - The metrics collected (`upf_backlog_bytes_embb`, `upf_drops_embb`) represent **direct kernel telemetric instrumentation**, not 3GPP NWDAF events.
+* **Active NWDAF Services (100% Operational):**
+  - All 8 official OAI NWDAF microservices (`oai-nwdaf-nbi-gateway`, `oai-nwdaf-nbi-analytics`, `oai-nwdaf-nbi-events`, `oai-nwdaf-nbi-ml`, `oai-nwdaf-engine`, `oai-nwdaf-engine-ads`, `oai-nwdaf-sbi`, `oai-nwdaf-database`) are actively running and healthy on VM-3.
+  - The Kong API Gateway (`oai-nwdaf-nbi-gateway`) exposes the northbound 3GPP `Nnwdaf_AnalyticsInfo` REST API on port `8080` with path-based routing.
+* **Control Plane Event Ingestion & Analytics (3GPP TS 29.520):**
+  - Following the HTTP/2 prior-knowledge configuration on `oai-nwdaf-sbi`, SBI event subscriptions (`Namf_EventExposure`, `Nsmf_EventExposure`) successfully ingest live PDU session establishment records (`PDU_SES_EST`) into MongoDB `testing.smf`.
+  - Querying `http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics` for `NETWORK_PERFORMANCE` (`SESS_SUCC_RATIO`) returns `HTTP 200 OK` with dynamically evaluated `absoluteNum: 1`.
+  - In OAI NWDAF Engine v2.1.0 source code (`network_performance.go`), `relativeRatio` and `confidence` evaluate to constant `0` due to upstream `//TODO` placeholder implementation.
+* **Dual-Track Core Telemetry Architecture:**
+  - **Track 1 (Native 3GPP PFCP URR PoC):** Evaluated via custom UPF build `oai-upf:poc-develop-ie43-compat-v1` ([`patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch`](file:///d:/Idhul/Program/Thesis/patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch)), clamping IE 43 length to 6 octets (Release 16 format). Empirically verified: N4 association succeeds with 0 exceptions, PDU session links `Linked URR: 1` to `PDR 1`, and UE 1 ping to External DN achieves 0% packet loss (avg RTT 0.420 ms / 0.523 ms).
+  - **Track 2 (Custom OAM Host Telemetry Adapter):** Operates under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM services") via `core_adapter.py` v9 on VM-3. Samples Linux kernel `tc qdisc` queue buffer backlog (`upf_queue_backlog_bytes`) and packet drops (`upf_packet_drops_delta`) at 1 Hz with monotonic time bracketing, archiving locally and pushing asynchronously to VM-6 (`:9100/report`).
+  - **Synthesis:** Track 1 provides standard 3GPP session volume/duration accounting over N4, while Track 2 captures physical buffer queue congestion and packet drop spikes that occur at the Linux kernel packet scheduler.
 
 ---
 
