@@ -1,0 +1,35 @@
+diff --git a/docker/Dockerfile.amf.ubuntu b/docker/Dockerfile.amf.ubuntu
+index 29a965c1..2d778f9b 100644
+--- a/docker/Dockerfile.amf.ubuntu
++++ b/docker/Dockerfile.amf.ubuntu
+@@ -35,11 +35,16 @@ FROM $BASE_IMAGE as oai-amf-base
+ ENV DEBIAN_FRONTEND=noninteractive
+ ENV TZ=Europe/Paris
+ ENV IS_DOCKERFILE=1
+-RUN apt-get update && \
++RUN printf '%s\n' \
++      'Acquire::Retries "3";' \
++      'APT::Update::Error-Mode "any";' \
++      > /etc/apt/apt.conf.d/99thesis-build && \
++    apt-get update && \
+     DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes && \
+     DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+       psmisc \
+       git \
++      libsystemd-dev \
+   && rm -rf /var/lib/apt/lists/*
+
+ # Some GIT configuration commands quite useful
+@@ -90,7 +95,11 @@ ENV TZ=Europe/Paris
+ ARG ENABLE_LTTNG=false
+
+ # We install some debug tools for the moment in addition of mandatory libraries
+-RUN apt-get update && \
++RUN printf '%s\n' \
++      'Acquire::Retries "3";' \
++      'APT::Update::Error-Mode "any";' \
++      > /etc/apt/apt.conf.d/99thesis-build && \
++    apt-get update && \
+     DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes && \
+     DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+ # Debug Tools that are not mandatory

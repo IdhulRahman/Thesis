@@ -2521,7 +2521,16 @@ This confirms that NRF functions correctly and strictly adheres to 3GPP TS 29.51
    nrfs.insert(nsi_information.getNrfNfMgtUri());
 
    // After (Patched):
-   nrfs.insert(nsi_information.getNrfNfMgtUri() + "/" + amf_instance_id);
+   std::string nrf_uri = nsi_information.getNrfNfMgtUri();
+   if (nrf_uri.empty()) {
+     Logger::amf_app().warn("NSSF returned an empty NRF management URI");
+   } else {
+     while (!nrf_uri.empty() && nrf_uri.back() == '/') {
+       nrf_uri.pop_back();
+     }
+     nrf_uri += "/" + amf_instance_id;
+     nrfs.insert(nrf_uri);
+   }
    ```
 
 2. **Rebuild Custom AMF Image (`oai-amf:thesis-nrf-uri-v1`):**

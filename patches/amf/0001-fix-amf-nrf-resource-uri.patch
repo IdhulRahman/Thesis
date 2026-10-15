@@ -1,33 +1,23 @@
-From 58f77cfb437299a4c8526543b591d392cf9c7b82 Mon Sep 17 00:00:00 2001
-From: Idhul Rahman <idhul@thesis.local>
-Date: Wed, 14 Oct 2026 12:00:00 +0700
-Subject: [PATCH] fix(amf-app): dynamically append nfInstanceId to nrfNfMgtUri
- per 3GPP TS 29.510
-
-Under 3GPP TS 29.510 §6.1.3.3.2 and §6.1.3.3.3.2, registration (NFRegister)
-strictly targets the Individual NF Instance resource URI:
-  http://<nrf>:<port>/nnrf-nfm/v1/nf-instances/{nfInstanceId} via HTTP PUT.
-When enable_nssf is active, amf_app received nrfNfMgtUri from NSSF without the
-trailing instance UUID, causing registration failure. This patch appends
-"/" + amf_instance_id to the target registration URI.
----
- src/amf-app/amf_app.cpp | 4 +++-
- 1 file changed, 3 insertions(+), 1 deletion(-)
-
 diff --git a/src/amf-app/amf_app.cpp b/src/amf-app/amf_app.cpp
-index 1234567..89abcdef 100644
+index 2edab793..36caa3aa 100644
 --- a/src/amf-app/amf_app.cpp
 +++ b/src/amf-app/amf_app.cpp
-@@ -1612,7 +1612,9 @@ void amf_app::get_nrfs(
-         if (nsi_information.nrfNfMgtUriIsSet()) {
-           Logger::amf_app().debug(
-               "NRF Management URI: %s", nsi_information.getNrfNfMgtUri().c_str());
--          nrfs.insert(nsi_information.getNrfNfMgtUri());
-+          // 3GPP TS 29.510 §6.1.3.3.2: Append /{nfInstanceId} for individual instance resource PUT
-+          std::string full_nrf_uri = nsi_information.getNrfNfMgtUri() + "/" + amf_instance_id;
-+          nrfs.insert(full_nrf_uri);
-         }
-       }
-     }
--- 
-2.34.1
+@@ -1607,7 +1607,17 @@ void amf_app::get_nrfs(std::unordered_set<std::string>& nrfs) {
+               from_json(
+                   authorized_network_slice_info["nsiInformation"],
+                   nsi_information);
+-              nrfs.insert(nsi_information.getNrfNfMgtUri());
++              std::string nrf_uri = nsi_information.getNrfNfMgtUri();
++              if (nrf_uri.empty()) {
++                Logger::amf_app().warn(
++                    "NSSF returned an empty NRF management URI");
++              } else {
++                while (!nrf_uri.empty() && nrf_uri.back() == '/') {
++                  nrf_uri.pop_back();
++                }
++                nrf_uri += "/" + amf_instance_id;
++                nrfs.insert(nrf_uri);
++              }
+             } catch (std::exception& e) {
+               Logger::amf_app().warn(
+                   "Could not parse NSI Information from Json");
