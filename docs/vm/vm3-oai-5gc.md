@@ -705,6 +705,13 @@ Actual JSON response from the system (HTTP 200 OK):
 
 > **Live Empirical Note:** `absoluteNum: 1` dynamically reflects the actual active session document count in MongoDB `testing.smf` following UE 1 establishment. `relativeRatio` and `confidence` remain `0` due to upstream `//TODO` in `network_performance.go`.
 
+To query User-Plane data volume telemetry aggregated from `qosmonlist` under 3GPP TS 29.520 §5.1.6.3.2, query `event-id=UE_COMMUNICATION`:
+```bash
+curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
+  --data-urlencode "event-id=UE_COMMUNICATION" \
+  --data-urlencode 'ana-req={"startTs":"2026-10-01T00:00:00Z","endTs":"2026-10-20T23:59:59Z"}' | jq .
+```
+
 #### 4. Scientific Implications for Thesis Research Methodology
 The findings above confirm that:
 1. **`absoluteNum` in OAI NWDAF v2.1.0 is confirmed functional for control-plane sessions:** After correcting the multi-slice `oai-nwdaf-sbi` SBI endpoint configuration (see §9 Step 4), SMF event subscriptions succeed and MongoDB `testing.smf` is populated with real PDU session documents. `absoluteNum` correctly reflects `CountDocuments` output — dynamically returning `1`.
@@ -712,7 +719,7 @@ The findings above confirm that:
 3. **Dual-Track Core Telemetry Architecture:**
    - **Track 1 (Native 3GPP PFCP URR Track — 100% Empirically Verified End-to-End):** PoC session establishment with `Linked URR: 1`, periodic N4 Usage Reporting (msg type 56 emitted to SMF), and downstream ingestion into MongoDB `testing.smf` (`qosmonlist` array populated live with volume and packet counters) are fully verified via `oai-upf:poc-develop-ie43-compat-v1` and `oai-nwdaf-sbi`.
    - **Track 2 (Custom OAM Host Telemetry Track — Operational to VM-6):** Operates under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM services") via `core_adapter.py` v9 on VM-3, capturing physical kernel queue dynamics (`tc qdisc` backlog bytes and drop rates) that 3GPP URR does not natively measure, streaming directly to VM-6 (`:9100/report`).
-   - **Architectural Implementation Target:** Directing both telemetry streams into NWDAF represents the system's architectural implementation target; currently, Track 2 streams directly to VM-6 while Track 1's upstream reporting chain to NWDAF is being finalized.
+   - **Architectural Implementation Target:** Both telemetry streams are operational in the testbed: Track 1 captures standardized 3GPP session volume/duration counters into NWDAF MongoDB, while Track 2 provides sub-second kernel queue bufferbloat and drop telemetry directly to the Non-RT RIC / TSDB collector on VM-6.
 
 ---
 

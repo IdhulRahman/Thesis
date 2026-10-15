@@ -27,8 +27,12 @@ During initial pilot evaluations of the cross-domain multi-slice telemetry pipel
 ### 2.1 Formal Semantics: `SESS_SUCC_RATIO` vs. `SLICE_LOAD_LEVEL`
 * **`SESS_SUCC_RATIO` (3GPP TS 29.520 §5.1.6.3.10):**  
   Represents the ratio of successful PDU session establishments over total attempts (*Session Establishment Success Ratio*). This metric is strictly a **Control-Plane reliability indicator**, not a measure of user-plane packet throughput, buffer queue dynamics, or slice capacity exhaustion. Consequently, its calculation must not be hijacked or conflated with user-plane congestion.
+* **`UE_COMMUNICATION` (3GPP TS 29.520 §5.1.6.3.2):**  
+  The standardized 3GPP analytics event designed to expose user-plane communication metrics, including uplink/downlink data volume (`ulVol`, `dlVol`), traffic volume variance, and communication duration (`commDur`). In the OAI NWDAF codebase (`internal/engine/ue_communication.go`), this is the **dedicated Northbound Analytics event** that queries and aggregates user-plane telemetry from the MongoDB `qosmonlist` array!
 * **`SLICE_LOAD_LEVEL` (3GPP TS 23.288 §6.3 / TS 29.520 §5.1.6.3.4):**  
   The standardized analytics event designed to report slice load percentages based on active sessions and resource consumption against provisioned capacity limits.
+* **OAI NWDAF NBI Supported Event Scope:**  
+  Audit of `api_nwdaf_analytics_document_service.go` reveals that the `Nnwdaf_AnalyticsInfo` endpoint strictly implements a switch case for three event IDs: `NETWORK_PERFORMANCE`, `UE_COMMUNICATION`, and `UE_MOBILITY`. Querying other 3GPP event identifiers (such as `QOS_SUSTAINABILITY` or `SLICE_LOAD_LEVEL`) defaults to HTTP 400 with `"invalid Event Id param"`.
 
 ### 2.2 Native 3GPP Core Telemetry Data Path (UPF $\to$ NWDAF)
 The absence of a direct HTTP/2 Service-Based Interface (SBI) on C-based UPF containers (`openair-upf`) is standardized under 3GPP architecture. The standard specifies native user-plane telemetry propagation through Control and User Plane Separation (CUPS):
