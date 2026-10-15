@@ -127,7 +127,7 @@ func nwPerfNumOfPdu(w http.ResponseWriter, r *http.Request) {
 
 ---
 
-### Evidence 4: Definitive Localization of UPF URR Binary & Architectural Limitation (Case #52)
+### Evidence 4: Localization of UPF URR in v2.1.0 vs. Upstream `develop` (Case #52)
 
 When `enable_usage_reporting: yes` was configured in SMF-1 (`conf/slicing_slice1_config.yaml`), SMF-1 constructed a `Create URR` Information Element containing 3GPP TS 29.244 §8.2.40 IE Type 62 (`Measurement Method`, 1 octet).
 
@@ -137,17 +137,20 @@ When `enable_usage_reporting: yes` was configured in SMF-1 (`conf/slicing_slice1
    09:21:30.362964 veth4cace10 Out IP 192.168.70.139.8805 > 192.168.70.142.8805: UDP, length 241
    ```
    The 241-byte packet arrived at UPF-1's veth interface, but UPF-1 emitted zero response packets.
-2. **UPF Container Log Exception:**
+2. **UPF Container Log Exception (`openair-upf:v2.1.0`):**
    ```text
    [2026-10-15 04:12:45.660] [upf_n4 ] [info] handle_receive(241 bytes)
    [pfcp   ] [error] Unknown PFCP IE type 62 (length 1)
    [upf_n4 ] [info] handle_receive exception PFCP IE TLV 6 Bad Length 48 Exception /openair-upf/src/pfcp/3gpp_29.244.hpp:219
    ```
-3. **Source Code & Upstream Git Audit (`component/oai-upf` @ `89ee4c9`):**
-   - **Parser Disabled:** In `src/pfcp/3gpp_29.244.cpp` (lines 376–379), `PFCP_IE_MEASUREMENT_METHOD` is explicitly commented out, and `src/pfcp/msg_pfcp.hpp` (lines 648–656) unconditionally throws `pfcp_msg_illegal_ie_exception`.
-   - **Zero Datapath / Session Support:** In `src/upf_app/simpleswitch/pfcp_switch.cpp` (lines 703–745, 954–1028), session establishment and modification routines strictly iterate over `create_fars`, `create_pdrs`, and `create_qers`. **There is zero processing of `create_urrs`**. The session class (`pfcp_session.cpp`) contains no method or storage structure to manage or track URRs.
-   - **Incomplete Upstream Feature:** Upstream git history confirms that URR support was only ever introduced in an unmerged experimental branch (`0168012 origin/feature_urr_implementation: Init: Start the implementation of the URR`).
-4. **Conclusion:** Even if the IE 62 parser were patched, `openair-upf:v2.1.0` would silently ignore `create_urrs`, maintain zero volume counters, and never emit PFCP Usage Reports. Native UPF URR is unimplemented upstream in this release. Restoring SMF configuration to baseline resolved the session stall and restored full user plane routing.
+3. **Comparative Source Code Audit (`v2.1.0` vs. Upstream `develop`):**
+   - **UPF `v2.1.0` (`89ee4c9`):**
+     - In `src/pfcp/3gpp_29.244.cpp` (lines 376–379), `PFCP_IE_MEASUREMENT_METHOD` is commented out, and `src/pfcp/msg_pfcp.hpp` (lines 648–656) unconditionally throws `pfcp_msg_illegal_ie_exception`.
+     - In `src/upf_app/simpleswitch/pfcp_switch.cpp` (lines 703–745, 954–1028), session establishment and modification strictly iterate over `create_fars`, `create_pdrs`, and `create_qers`. **There is zero processing of `create_urrs`**. The session class (`pfcp_session.cpp`) contains no method or structure to track URRs.
+   - **UPF `develop` (`c51cae2`):**
+     - Upstream `develop` commit `c51cae2324e79a65e96f48ef8a00365de06bcb96` introduces URR support into `simpleswitch`: `create_urrs` is processed in `pfcp_switch.cpp`, `pfcp_urr.cpp` manages URR state, and `usage_report_loop()` / `send_usage_report()` handle reporting.
+     - Per official [FEATURE_SET.md](https://github.com/openairinterface/oai-cn5g-upf/blob/c51cae2324e79a65e96f48ef8a00365de06bcb96/docs/FEATURE_SET.md), URR support is documented as partial and requires empirical testing against our deployed SMF/NWDAF versions.
+4. **Conclusion:** In `openair-upf:v2.1.0`, merely patching the parser is insufficient because the datapath lacks URR handling. Testing native URR requires evaluating upstream `develop` (`c51cae2`), while keeping the functioning `v2.1.0` baseline intact.
 
 ---
 
@@ -240,12 +243,19 @@ PDU Session established (Case #52)   absoluteNum: 1 returned                [Pha
 ### Phase 3A: Host/Kernel Adapter Observability ✅ OPERATIONAL
 - The dedicated **Core Telemetry Adapter (`core_adapter.py` v9)** on VM-3 directly inspects physical/veth interface queue occupancy (`tc qdisc`) and packet drops on `oai-upf-slice1` and `oai-upf-slice2`, exporting telemetry directly to the collector on VM-6 (`10.102.0.67`) for baseline bottleneck evaluation across S1–S8.
 
-### Phase 3B: User-Plane Telemetry Integration via NWDAF ⏳ SELECTED: OAM INGESTION BRIDGE
+### Phase 3B: User-Plane Telemetry Integration via NWDAF ⏳ DUAL-TRACK ARCHITECTURE
 - The thesis architectural agreement specifies that user-plane load telemetry must be processed and exposed through NWDAF.
-- **Empirical Architectural Decision:**
-  1. **Option 1 (Native UPF PFCP URR) Ruled Out:** Definitive source code audit of `oai-upf:v2.1.0` (`pfcp_switch.cpp`) confirmed zero datapath or session handling for `create_urrs`. Furthermore, URR remains unmerged upstream (`0168012 origin/feature_urr_implementation`). Building native URR would require developing an entire PFCP reporting subsystem from scratch.
-  2. **Option 2 (3GPP TS 23.288 §6.2.3 Data Collection via OAM Ingestion Bridge) Adopted:** Under 3GPP Rel-17 specifications, NWDAF is formally designed to ingest network performance and user-plane metrics through OAM services. In Linux containerized UPFs, bottleneck indicators (queue backlog, buffering latency, packet drops) occur at the kernel packet scheduler (`tc qdisc`), which is directly and accurately captured by `core_adapter.py` v9.
-- **Implementation Strategy:** Bridge the physical kernel queue metrics collected by `core_adapter.py` into NWDAF via an OAM ingestion interface / database bridge, enabling the NWDAF engine to serve canonical dynamic slice load analytics to the Non-RT RIC rApp.
+- **Dual-Track Evaluation Strategy:**
+  1. **Track 1 (Native 3GPP PFCP URR PoC via UPF `develop` @ `c51cae2`):**
+     - Maintain the stable working `v2.1.0` baseline on VM-3.
+     - Execute an isolated Proof-of-Concept build of UPF from branch `develop` pinned to commit `c51cae2324e79a65e96f48ef8a00365de06bcb96`.
+     - **Verification Criteria:** Prove that PDU session establishment succeeds with `enable_usage_reporting: yes`, Usage Reports are transmitted by UPF and accepted by SMF, reports arrive at NWDAF (`testing.smf`), and slice-to-metric mappings and reporting intervals operate accurately.
+  2. **Track 2 (Custom OAM Host Telemetry Adapter via `core_adapter.py` v9):**
+     - Under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM"), NWDAF is formally designed to ingest network performance and user-plane metrics through management services.
+     - While 3GPP URR provides session-level volume and duration counters, bottleneck indicators such as physical egress queue backlog, bufferbloat, and packet drop surges occur at the Linux kernel packet scheduler (`tc qdisc`). These metrics are sampled non-intrusively by `core_adapter.py` v9 on VM-3.
+  3. **Complementary Synthesis:**
+     - The two tracks are complementary: native URR provides 3GPP session volume/duration telemetry, while the OAM adapter captures physical queue dynamics and congestion.
+     - Both metric streams feed NWDAF, allowing NWDAF's analytics engine to compute comprehensive slice load and performance analytics for Non-RT RIC rApp closed-loop steering.
 
 ### Phase 4: Closed-Loop rApp Integration ⏳ READY FOR EXECUTION
 - Correlate NWDAF session statistics and Core user-plane queue telemetry with O-RAN E2SM-KPM PRB metrics in the Non-RT RIC rApp (VM-1).

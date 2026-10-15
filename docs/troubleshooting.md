@@ -2598,10 +2598,10 @@ Simultaneously, PFCP Heartbeat exchanges between SMF-1 and UPF-1 (`192.168.70.14
 
 ### Root Cause
 
-1. **Unsupported Information Element in `openair-upf` Binary:**
+1. **Unsupported Information Element in `openair-upf:v2.1.0` Binary:**
    - Under **3GPP TS 29.244 §8.2.40**, Information Element (IE) Type **62** (1 octet) defines the **`Measurement Method`**. This IE is a mandatory sub-element inside the **`Create URR` (Usage Reporting Rule)** IE used by the SMF to configure data volume and duration measurements.
    - When `enable_usage_reporting: yes` is configured under `smf.upfs` in SMF configuration files (e.g., `conf/slicing_slice1_config.yaml`), SMF-1 automatically constructs a `Create URR` containing IE Type 62 within the `PFCP Session Establishment Request` payload (241 bytes).
-   - In `oaisoftwarealliance/oai-upf:v2.1.0` (`openair-upf`), the internal PFCP TLV parser lacks implementation support for IE Type 62:
+   - In `oaisoftwarealliance/oai-upf:v2.1.0` (`openair-upf` @ `89ee4c9`), the internal PFCP TLV parser lacks implementation support for IE Type 62:
      ```text
      [upf_n4 ] [info] handle_receive(241 bytes)
      [pfcp   ] [error] Unknown PFCP IE type 62 (length 1)
@@ -2610,13 +2610,9 @@ Simultaneously, PFCP Heartbeat exchanges between SMF-1 and UPF-1 (`192.168.70.14
 2. **Silent Packet Drop:**
    - When the C++ exception is thrown in `3gpp_29.244.hpp:219`, `openair-upf` aborts packet processing immediately. It drops the request without transmitting any error response (such as a `PFCP Session Establishment Response` with Cause `Rule creation/modification failure`).
    - Consequently, SMF-1 remains waiting for an acknowledgement until its internal 1-second timeout expires (`timer id 897`), triggering retransmission and eventual session abandonment.
-3. **Absence of Datapath and Session Logic for URR in `openair-upf:v2.1.0`:**
-   - Detailed source code audit of `component/oai-upf/src/upf_app/simpleswitch/pfcp_switch.cpp` (lines 703–745, 954–1028) revealed that session establishment and modification strictly process `create_fars`, `create_pdrs`, and `create_qers`. **There is zero processing of `create_urrs`** in the application switch.
-   - The session manager class (`pfcp_session.cpp`) contains no method or storage structure to manage or track URRs.
-   - In `src/pfcp/msg_pfcp.hpp` (lines 648–656), `get()` and `set()` for `measurement_method_t` explicitly throw `pfcp_msg_illegal_ie_exception`.
-   - Upstream git commit history confirms that URR was only ever initiated in an experimental development branch (`0168012 origin/feature_urr_implementation: Init: Start the implementation of the URR`) and was never completed or merged into release `v2.1.0`.
-   - Consequently, even patching the IE 62 parser would result in silent omission of URR handling: UPF would maintain no counters and emit zero Usage Reports.
-
+3. **Absence of Datapath Logic in `v2.1.0` vs. Availability in Upstream `develop`:**
+   - In `openair-upf:v2.1.0` (`component/oai-upf/src/upf_app/simpleswitch/pfcp_switch.cpp:703–745`), session setup only processes `create_fars`, `create_pdrs`, and `create_qers`. There is zero handling of `create_urrs` in `simpleswitch`.
+   - In contrast, upstream `develop` (pinned to commit `c51cae2324e79a65e96f48ef8a00365de06bcb96`) has merged URR support: `pfcp_switch.cpp` processes `create_urrs`, `pfcp_urr.cpp` manages URR structures, and `usage_report_loop()` / `send_usage_report()` handle reporting. Per official `docs/FEATURE_SET.md`, this support is partial and requires empirical testing for end-to-end compatibility with SMF and NWDAF.
 ### Empirical Verification
 
 1. **Packet Capture (`tcpdump` on VM-3 bridge `any`):**
@@ -2671,10 +2667,14 @@ Simultaneously, PFCP Heartbeat exchanges between SMF-1 and UPF-1 (`192.168.70.14
 
 ### Architectural & Thesis Implications
 
-This empirical discovery proves that native 3GPP User-Plane Usage Reporting (URR) via N4/PFCP to SMF is completely absent from the `openair-upf:v2.1.0` datapath.  
-Attempting to implement URR natively would require re-architecting the entire UPF forwarding engine and session management subsystem.
+This investigation establishes that while `openair-upf:v2.1.0` lacks URR datapath handling, upstream `develop` (`c51cae2`) introduces URR constructs that warrant an isolated Proof-of-Concept (PoC) evaluation.
 
-Instead, in full alignment with **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM services"), the thesis platform leverages the dedicated **Core Telemetry Adapter (`core_adapter.py` v9)** on VM-3 to directly sample physical kernel queue telemetry (`tc qdisc` backlog bytes and drop rates) and interface throughput. These ground-truth metrics are bridged to NWDAF, allowing NWDAF's analytics engine to compute canonical slice load analytics for closed-loop coordination with the Non-RT RIC rApp.
+Concurrently, network bottlenecks can manifest across multiple dimensions: UPF CPU processing starvation, internal buffering, transport contention, and kernel egress queue backlogs.  
+To ensure holistic observability, the thesis employs a **Dual-Track Complementary Architecture**:
+1. **Native 3GPP PFCP URR Track:** Evaluated via an isolated PoC of UPF `develop` (`c51cae2`) to verify session-level volume and duration reporting via 3GPP standard N4 $\to$ SMF $\to$ NWDAF interfaces.
+2. **Custom OAM Host Telemetry Track:** Operates under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM services") via `core_adapter.py` v9 on VM-3, capturing physical kernel queue dynamics (`tc qdisc` backlog bytes and drop rates) that 3GPP URR does not natively measure.
+
+Both telemetry streams feed NWDAF, empowering its analytics engine to provide robust, multi-dimensional slice load intelligence to the Non-RT RIC rApp for closed-loop control.
 ---
 
 ## Related Documentation
