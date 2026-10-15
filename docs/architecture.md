@@ -76,8 +76,9 @@ To ensure cross-domain compatibility, repeatability, and bug-free operation acro
 
 | Layer / Domain | Software Framework | Version / Branch | Deployment Mode & Image Source | Role in Thesis Platform |
 |---|---|---|---|---|
-| **5G Core Network NFs** | OpenAirInterface 5G Core (`oai-cn5g-fed`) | **`v2.1.0`** (3GPP Rel-16/17 SA) | Docker Compose (`oaisoftwarealliance/oai-*:v2.1.0`) | AMF, SMF-1/2/3, UPF-1/2, VPP-UPF-3, NRF-12/3, UDM, UDR, AUSF, NSSF |
+| **5G Core Network NFs** | OpenAirInterface 5G Core (`oai-cn5g-fed`) | **`v2.1.0`** (3GPP Rel-16/17 SA) + overrides | Docker Compose (`oai-amf:thesis-nrf-uri-v1`, `oai-upf:poc-develop-ie43-compat-v1`, `oai-*:v2.1.0`) | AMF, SMF-1/2, UPF-1/2, NRF-12, UDM, UDR, AUSF, NSSF |
 | **Core Analytics (NWDAF)** | OpenAirInterface NWDAF (`oai-cn5g-nwdaf`) | **`develop / v2.0.0`** (3GPP Rel-17) | 8 Docker microservices + Kong API Gateway (`:8080`) + MongoDB | Exposes `Nnwdaf_AnalyticsInfo` (`NETWORK_PERFORMANCE`) to rApp |
+| **Core Telemetry (OAM)** | Core Research Telemetry Adapter | **`v9.0.0`** (3GPP TS 23.288 §6.2.3) | Host Python daemon (`scripts/core_adapter.py`) | Non-intrusive Linux kernel qdisc backlog & drop telemetry |
 | **Centralized Unit (CU)** | OpenAirInterface5G (`openairinterface5g`) | **`develop` branch** | Native C softmodem with FlexRIC submodule | CU-CP / CU-UP with E2 Agent (SCTP :36421 to VM-2) |
 | **Distributed Units (DU)** | OpenAirInterface5G (`openairinterface5g`) | **`develop` branch** | Native C softmodem (F1-U :2155/:2154, RFsim :4043/:4044) | DU-1 (Cell-1, PCI 1) and DU-2 (Cell-2, PCI 2) |
 | **Near-RT RIC** | O-RAN Software Community (O-RAN SC) | **Dawn Release** | Docker Compose (7 platform containers) | E2Term, E2Mgr, Subscription Manager, A1 Mediator, DBaaS Redis 5.0.9, Traffic Steering xApp |
