@@ -15,20 +15,14 @@ The experimental testbed implements a fully disaggregated, standards-compliant O
 
 ![Current System Architecture](docs/diagrams/current-system-architecture.png)
 
-```text
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                        6-VM Subnet Demarcation (10.102.0.0/24)                         │
-├────────────────────┬─────────────────┬─────────────────────────────────────────────────┤
-│ Virtual Machine    │ Host IP Address │ Functional Subsystem & Primary Services         │
-├────────────────────┼─────────────────┼─────────────────────────────────────────────────┤
-│ **VM-1** (Non-RT)  │ `10.102.0.168`  │ Non-RT RIC, A1 PMS v2.6.0 (:8081), rApp Host    │
-│ **VM-2** (Near-RT) │ `10.102.0.66`   │ Near-RT RIC (Dawn), A1 Mediator (:10001), xApp  │
-│ **VM-3** (5GC)     │ `10.102.0.164`  │ OAI 5G Core Multi-Slice, 3GPP NWDAF, UPF Host   │
-│ **VM-4** (RAN)     │ `10.102.0.167`  │ OAI Split RAN (CU-CP, CU-UP, DU-1, DU-2), E2    │
-│ **VM-5** (UE)      │ `10.102.0.165`  │ OAI nrUE Emulator (netns: ue1, ue2), TrafGen    │
-│ **VM-6** (Monitor) │ `10.102.0.67`   │ Telemetry Collector (:9100), Prometheus, Logger │
-└────────────────────┴─────────────────┴─────────────────────────────────────────────────┘
-```
+| Virtual Machine | Host IP Address | Functional Subsystem & Primary Services |
+|---|---|---|
+| **VM-1** (Non-RT RIC) | `10.102.0.168` | Non-RT RIC, A1 PMS v2.6.0 (`:8081`), rApp Host |
+| **VM-2** (Near-RT RIC) | `10.102.0.66` | Near-RT RIC (Dawn), A1 Mediator (`:10001`), xApp Host |
+| **VM-3** (5G Core & NWDAF) | `10.102.0.164` | OAI 5G Core Multi-Slice, 3GPP NWDAF (`:8080`), UPF Host |
+| **VM-4** (Split RAN) | `10.102.0.167` | OAI Split RAN (CU-CP, CU-UP, DU-1, DU-2), E2 Agent |
+| **VM-5** (nrUE Emulator) | `10.102.0.165` | OAI nrUE Emulator (netns: `ue1`, `ue2`), TrafGen |
+| **VM-6** (Observability) | `10.102.0.67` | Telemetry Collector (`:9100`), Prometheus TSDB, Logger |
 
 For complete architectural details, see [docs/architecture.md](docs/architecture.md).  
 For the software versions, Git commits, and container image tags, see [docs/software-manifest.md](docs/software-manifest.md).

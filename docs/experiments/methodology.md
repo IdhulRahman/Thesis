@@ -20,16 +20,13 @@ The central scientific premise of this thesis is that **diagnosing the exact arc
 
 To validate the hypotheses, the experimental testbed executes **five comparative baselines (B0 to B4)** alongside the **Proposed System**:
 
-```text
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                          NETWORK CONTROL PARADIGM SPECTRUM                             │
-├─────────────────┬──────────────────┬─────────────────┬────────────────┬────────────────┤
-│       B0        │      B1 & B2     │       B3        │       B4       │    PROPOSED    │
-│  Static Default │  Single-Domain   │   Decoupled /   │  Coordinated   │  Bottleneck-   │
-│  (No RIC)       │  (RAN/Core Only) │  Uncoordinated  │ Naive / Fixed  │  Aware Closed  │
-│                 │                  │                 │   Heuristic    │      Loop      │
-└─────────────────┴──────────────────┴─────────────────┴────────────────┴────────────────┘
-```
+| Paradigm Tier | Baseline ID | Control Approach | Domain Awareness | Coordination Model |
+|---|---|---|---|---|
+| **Static Default** | **B0** | Standard 3GPP A3 Handover | Local Radio RSRP only | No RIC coordination |
+| **Single-Domain** | **B1** & **B2** | Standalone xApp / Core Shaper | Isolated to RAN or Core | Blind to cross-domain congestion |
+| **Decoupled** | **B3** | Uncoordinated Dual Controllers | Both domains active | Independent / Conflicting actuation |
+| **Naive Coordination** | **B4** | Fixed Priority Heuristic | Cross-domain aggregated | Static action sequence (No root diagnosis) |
+| **Proposed System** | **PROPOSED** | Closed-Loop MAPE-K Coordination | Cross-domain correlated | Root-cause matched steering & verification |
 
 | Baseline ID | Control Paradigm | Decision Inputs | Actuation Mechanisms | Expected Failure Mode / Behavioral Limitation |
 |---|---|---|---|---|

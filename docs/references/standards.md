@@ -26,18 +26,12 @@
 
 To prevent false claims of standardization, every experimental threshold, buffer size, capacity bound, and polling cadence is classified into four formal origin tiers:
 
-```text
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                        PARAMETER ORIGIN CLASSIFICATION TIERS                           │
-├────────────────────┬───────────────────────────────────────────────────────────────────┤
-│ Tier               │ Definition & Research Context                                     │
-├────────────────────┼───────────────────────────────────────────────────────────────────┤
-│ **Standard-Defined**| Explicitly mandated or standardized in 3GPP/ETSI/O-RAN specs.   │
-│ **Implementation** | Behavior or setting dictated by upstream open-source code (OAI).  │
-│ **Calibrated**     | Empirically measured and verified under testbed stress conditions.│
-│ **Research-Choice**| Selected specifically for this thesis's evaluation methodology.   │
-└────────────────────┴───────────────────────────────────────────────────────────────────┘
-```
+| Tier | Definition & Research Context |
+|---|---|
+| **Standard-Defined** | Explicitly mandated or standardized in 3GPP/ETSI/O-RAN specifications. |
+| **Implementation-Defined** | Behavior or setting dictated by upstream open-source software (OAI / O-RAN SC). |
+| **Calibrated** | Empirically measured and verified under testbed stress conditions. |
+| **Research-Selected** | Selected specifically for this thesis's evaluation methodology and hypothesis testing. |
 
 | Parameter Name | Value | Origin Tier | Origin Justification & Technical Basis |
 |---|---|:---:|---|
