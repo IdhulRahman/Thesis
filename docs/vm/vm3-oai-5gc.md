@@ -43,7 +43,7 @@ The deployment uses official container images from the OpenAirInterface Software
 | OAI 5G Core Federation | `v2.1.0` (pinned) | `https://github.com/OPENAIRINTERFACE/oai-cn5g-fed` | Core federation repository |
 | AMF | `thesis-nrf-uri-v1` / `v2.1.0` | `oai-amf:thesis-nrf-uri-v1` | Custom build with dynamic NRF resource URI patch ([`patches/amf/0001-fix-amf-nrf-resource-uri.patch`](../../patches/amf/0001-fix-amf-nrf-resource-uri.patch)) |
 | SMF | `v2.1.0` | `oaisoftwarealliance/oai-smf:v2.1.0` | Official release image |
-| UPF | `poc-develop-ie43-compat-v1` / `v2.1.0` | `oai-upf:poc-develop-ie43-compat-v1` | PoC build from upstream `develop` (`c51cae2`) with Rel-16 IE 43 patch ([`patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch`](../../patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch)); baseline fallback is `oai-upf:v2.1.0` |
+| UPF | `poc-develop-ie43-compat-v1` / `v2.1.0` | `oai-upf:poc-develop-ie43-compat-v1` | PoC build from upstream `develop` (`c51cae2`) with Rel-16 IE 43 patch ([`patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch`](../../patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch)); session establishment with `Linked URR: 1` verified; end-to-end user-plane reporting to NWDAF under active validation; baseline fallback is `oai-upf:v2.1.0` |
 | NRF | `v2.1.0` | `oaisoftwarealliance/oai-nrf:v2.1.0` | Official release image |
 | UDM | `v2.1.0` | `oaisoftwarealliance/oai-udm:v2.1.0` | Official release image |
 | UDR | `v2.1.0` | `oaisoftwarealliance/oai-udr:v2.1.0` | Official release image |

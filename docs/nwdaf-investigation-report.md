@@ -16,9 +16,9 @@ During initial pilot evaluations of the cross-domain multi-slice telemetry pipel
 
 **Current Status (Revision v4 Updates):**
 * **Control-Plane Event Ingestion Confirmed (✅):** Following the resolution of AMF dynamic NRF registration ([Case #51](troubleshooting.md#51-oai-amf-automated-nrf-registration-failure-missing-nfinstanceid-in-dynamic-resource-uri)), `Namf_EventExposure` and `Nsmf_EventExposure` events are successfully ingested by `oai-nwdaf-sbi` into MongoDB (`testing.amf` and `testing.smf`). The NWDAF analytics API returns **`absoluteNum: 1`** derived dynamically from `CountDocuments`.
-* **User-Plane UPF Parser Limitation Definitively Localized (✅):** Empirical packet capture and container log traces proved that `oaisoftwarealliance/oai-upf:v2.1.0` lacks parser support for 3GPP TS 29.244 IE Type 62 (`Measurement Method`), which is mandatory in `Create URR` when `enable_usage_reporting: yes` is enabled. Upstream UPF source inspection (`3gpp_29.244.cpp`) confirms that `PFCP_IE_MEASUREMENT_METHOD` is commented out. UPF threw a C++ TLV length exception and silently discarded the session establishment request ([Case #52](troubleshooting.md#52-oai-upf-n4pfcp-session-establishment-silent-drop-unsupported-3gpp-ts-29244-ie-type-62-measurement-method)). Restoring SMF configuration to baseline enabled immediate PDU session establishment (`oaitun_ue1` with IP `12.1.1.2`, 0% packet loss to External DN `192.168.70.145`).
-* **Host Adapter Observability Operational (✅):** While native UPF PFCP URR to NWDAF is bounded by the upstream binary, Core user-plane buffer queue occupancy and drop rate telemetry are actively and accurately extracted via the **Core Telemetry Adapter (`core_adapter.py`)** on VM-3, streaming physical `tc qdisc` measurements directly to the telemetry collector on VM-6 (`10.102.0.67`).
-* **NWDAF User-Plane Telemetry Integration Pending (⏳):** Because the thesis architectural agreement specifies using NWDAF as the canonical core analytics entity, user-plane telemetry must ultimately be processed and exposed through NWDAF. The localized IE 62 finding forms the foundation for evaluating either a custom UPF patch (enabling `PFCP_IE_MEASUREMENT_METHOD`), an upstream UPF upgrade, or integrating adapter-collected metrics via a custom NWDAF DCCF/OAM ingestion pipeline.
+* **PoC Session Establishment with URR Confirmed (✅):** With the Rel-16 compatibility patch clamping IE 43 length to 6 octets, upstream UPF `develop` successfully completes N4 association setup without exceptions and establishes PDU sessions with `Linked URR: 1`. Data-plane connectivity via `oaitun_ue1` to External DN achieves 0% packet loss.
+* **Host Adapter Observability Operational (✅):** Core user-plane buffer queue occupancy and drop rate telemetry are actively extracted via the **Core Telemetry Adapter (`core_adapter.py`)** on VM-3, streaming physical `tc qdisc` measurements directly to the telemetry collector on VM-6 (`10.102.0.67`).
+* **NWDAF User-Plane Telemetry Reporting Under Active Validation (⏳):** While session establishment with URR is verified, the downstream reporting chain—PFCP Usage Reports emitted over N4, SMF ingestion and notification to NWDAF (QOS_MON / `qosmonlist`), and user-plane analytics exposure via NWDAF API—remains under active validation. Ingesting both telemetry streams into NWDAF is maintained as the architectural implementation target.
 
 ---
 
@@ -260,20 +260,24 @@ PDU Session established (Case #52)   absoluteNum: 1 returned                [Pha
 ### Phase 3A: Host/Kernel Adapter Observability ✅ OPERATIONAL
 - The dedicated **Core Telemetry Adapter (`core_adapter.py` v9)** on VM-3 directly inspects physical/veth interface queue occupancy (`tc qdisc`) and packet drops on `oai-upf-slice1` and `oai-upf-slice2`, exporting telemetry directly to the collector on VM-6 (`10.102.0.67`) for baseline bottleneck evaluation across S1–S8.
 
-### Phase 3B: User-Plane Telemetry Integration via NWDAF ✅ PO-C DEPLOYED & OPERATIONAL (DUAL-TRACK)
+### Phase 3B: User-Plane Telemetry Integration via NWDAF ⏳ POC DEPLOYED (SESSION WITH URR VERIFIED; REPORTING UNDER VALIDATION)
 - The thesis architectural agreement specifies that user-plane load telemetry must be processed and exposed through NWDAF.
 - **Dual-Track Evaluation Strategy:**
-  1. **Track 1 (Native 3GPP PFCP URR PoC via UPF `develop` @ `c51cae2` — ✅ VERIFIED):**
+  1. **Track 1 (Native 3GPP PFCP URR PoC via UPF `develop` @ `c51cae2` — ✅ SESSION VERIFIED; ⏳ REPORTING IN PROGRESS):**
      - Maintain the stable working `v2.1.0` baseline on VM-3 while evaluating the URR PoC.
-     - Built custom image `oai-upf:poc-develop-ie43-compat-v1` with the Rel-16 compatibility patch ([`patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch`](../patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch)) to align IE 43 length with the SMF parser bounds.
-     - Deployed via Docker Compose override [`deploy/compose.upf-poc.yaml`](../deploy/compose.upf-poc.yaml) with `enable_usage_reporting: yes` active in `conf/slicing_slice1_config.yaml`.
-     - **Verification Evidence:** PDU session establishment succeeds cleanly with zero N4 exceptions (`Received N4 ASSOCIATION SETUP RESPONSE`), UE 1 connects to External DN (`192.168.70.145`) with 0% packet loss (avg RTT 0.420 ms), and MongoDB (`testing.smf`) dynamically records the live PDU session event (`absoluteNum: 1`).
+     - Built custom image `oai-upf:poc-develop-ie43-compat-v1` with the validated Rel-16 compatibility patch ([`patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch`](../patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch)) to clamp IE 43 length to 6 octets (Rel-16), eliminating SMF Bad Length exceptions.
+     - Deployed via Docker Compose override [`deploy/compose.upf-poc.yaml`](../deploy/compose.upf-poc.yaml) with `enable_usage_reporting: yes` active under `smf.upfs` in `conf/slicing_slice1_config.yaml`.
+     - **Verification Evidence (Session Establishment):** PDU session establishment succeeds cleanly with zero N4 exceptions (`Received N4 ASSOCIATION SETUP RESPONSE`), SMF links `Linked URR: 1` to `PDR 1`, and UE 1 softmodem connects to External DN (`192.168.70.145`) with 0% packet loss via explicit interface binding (`sudo ip netns exec ue1 ping -I oaitun_ue1 -c 10 192.168.70.145`, avg RTT 0.257 ms).
+     - **Validation Still Required (Downstream Telemetry Propagation):**
+       - Verification that UPF's `usage_report_loop` actively emits PFCP Session Report Requests containing Usage Reports over N4 (internal UPF config logging `+ Enable Usage Reporting (URR): No` indicates UPF `support_features` flag in config requires validation).
+       - Verification that SMF processes Usage Reports and triggers `QOS_MON` or session volume updates to NWDAF (`qosmonlist` in MongoDB).
+       - Verification of user-plane analytics exposure via NWDAF NBI API.
   2. **Track 2 (Custom OAM Host Telemetry Adapter via `core_adapter.py` v9 — ✅ OPERATIONAL):**
      - Under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM"), NWDAF is formally designed to ingest network performance and user-plane metrics through management services.
-     - While 3GPP URR provides session-level volume and duration counters, bottleneck indicators such as physical egress queue backlog, bufferbloat, and packet drop surges occur at the Linux kernel packet scheduler (`tc qdisc`). These metrics are sampled non-intrusively by `core_adapter.py` v9 on VM-3.
-  3. **Complementary Synthesis:**
+     - While 3GPP URR provides session-level volume and duration counters, bottleneck indicators such as physical egress queue backlog, bufferbloat, and packet drop surges occur at the Linux kernel packet scheduler (`tc qdisc`). These metrics are sampled non-intrusively by `core_adapter.py` v9 on VM-3 and pushed directly to VM-6 (`:9100/report`).
+  3. **Architectural Implementation Target:**
      - The two tracks are complementary: native URR provides 3GPP session volume/duration telemetry, while the OAM adapter captures physical queue dynamics and congestion.
-     - Both metric streams feed NWDAF, allowing NWDAF's analytics engine to compute comprehensive slice load and performance analytics for Non-RT RIC rApp closed-loop steering.
+     - Directing both metric streams into NWDAF represents the architectural design target; currently, Track 2 feeds VM-6 directly while Track 1's end-to-end reporting chain to NWDAF is under active validation.
 
 ### Phase 4: Closed-Loop rApp Integration ⏳ READY FOR EXECUTION
 - Correlate NWDAF session statistics and Core user-plane queue telemetry with O-RAN E2SM-KPM PRB metrics in the Non-RT RIC rApp (VM-1).

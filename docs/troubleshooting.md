@@ -2690,20 +2690,30 @@ To enable native 3GPP PFCP Usage Reporting Rules (URR) while maintaining full in
      [smf_n4 ] [info] Received N4 ASSOCIATION SETUP RESPONSE from an UPF
      [smf_n4 ] [info] Received N4 ASSOCIATION SETUP RESPONSE
      ```
-   - **End-to-End PDU Session & Data Plane:**
-     UE 1 softmodem on VM-5 spawns, receives tunnel IP `12.1.1.2/24` on `oaitun_ue1`, and pings External DN with **0% packet loss (avg RTT 0.420 ms)**:
+   - **End-to-End PDU Session & Explicit Interface Data Plane Verification:**
+     UE 1 softmodem on VM-5 spawns, receives tunnel IP `12.1.1.3/24` on `oaitun_ue1`, and pings External DN with explicit interface binding (`-I oaitun_ue1`), achieving **0% packet loss (avg RTT 0.257 ms)**:
      ```text
-     PING 192.168.70.145 (192.168.70.145) 56(84) bytes of data.
-     64 bytes from 192.168.70.145: icmp_seq=1 ttl=62 time=0.411 ms
-     64 bytes from 192.168.70.145: icmp_seq=2 ttl=62 time=0.349 ms
-     64 bytes from 192.168.70.145: icmp_seq=3 ttl=62 time=0.328 ms
-     64 bytes from 192.168.70.145: icmp_seq=4 ttl=62 time=0.592 ms
+     five-g@nrue:~$ sudo ip netns exec ue1 ping -I oaitun_ue1 -c 10 192.168.70.145
+     PING 192.168.70.145 (192.168.70.145) from 12.1.1.3 oaitun_ue1: 56(84) bytes of data.
+     64 bytes from 192.168.70.145: icmp_seq=1 ttl=62 time=0.283 ms
+     64 bytes from 192.168.70.145: icmp_seq=2 ttl=62 time=0.169 ms
+     64 bytes from 192.168.70.145: icmp_seq=3 ttl=62 time=0.280 ms
+     64 bytes from 192.168.70.145: icmp_seq=4 ttl=62 time=0.276 ms
+     64 bytes from 192.168.70.145: icmp_seq=5 ttl=62 time=0.194 ms
+     64 bytes from 192.168.70.145: icmp_seq=6 ttl=62 time=0.130 ms
+     64 bytes from 192.168.70.145: icmp_seq=7 ttl=62 time=0.365 ms
+     64 bytes from 192.168.70.145: icmp_seq=8 ttl=62 time=0.252 ms
+     64 bytes from 192.168.70.145: icmp_seq=9 ttl=62 time=0.421 ms
+     64 bytes from 192.168.70.145: icmp_seq=10 ttl=62 time=0.209 ms
+
      --- 192.168.70.145 ping statistics ---
-     4 packets transmitted, 4 received, 0% packet loss, time 3056ms
-     rtt min/avg/max/mdev = 0.328/0.420/0.592/0.103 ms
+     10 packets transmitted, 10 received, 0% packet loss, time 9240ms
+     rtt min/avg/max/mdev = 0.130/0.257/0.421/0.083 ms
      ```
    - **Live NWDAF Control Plane Ingestion:**
-     MongoDB database `testing.smf` immediately records the live session event under SUPI `208950000000001` with timestamp `1792040188` and IP `12.1.1.5`.
+     MongoDB database `testing.smf` immediately records the live session event under SUPI `208950000000001` with timestamp `1792040188` and IP `12.1.1.5`, confirming control-plane session ingestion (`absoluteNum: 1`).
+   - **Reporting Chain Boundary:**
+     While PDU session establishment with `Linked URR: 1` is verified, the downstream reporting chain (PFCP Session Reports from UPF to SMF, forwarding to NWDAF `qosmonlist`, and user-plane analytics exposure via NWDAF NBI) remains under active validation.
 
 #### Approach 2: Fallback Workaround (Baseline `v2.1.0` Rollback)
 
@@ -2721,10 +2731,10 @@ This investigation demonstrates that while `openair-upf:v2.1.0` lacks URR datapa
 
 Concurrently, network bottlenecks in virtualized 5G Core span multiple layers: UPF CPU processing starvation, internal pipeline queuing, physical transport link saturation, and host kernel egress queue backlogs.  
 To ensure holistic observability, the thesis employs a **Dual-Track Complementary Architecture**:
-1. **Native 3GPP PFCP URR Track:** Verified via the patched UPF PoC (`oai-upf:poc-develop-ie43-compat-v1`) to capture session-level volume and duration reporting via 3GPP standard N4 $\to$ SMF $\to$ NWDAF interfaces.
+1. **Native 3GPP PFCP URR Track:** PoC session establishment verified with `Linked URR: 1`. End-to-end telemetry propagation to NWDAF is under active validation to capture session-level volume and duration reporting via standard 3GPP N4 $\to$ SMF $\to$ NWDAF interfaces.
 2. **Custom OAM Host Telemetry Track:** Operates under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM services") via `core_adapter.py` v9 on VM-3, capturing physical kernel queue dynamics (`tc qdisc` backlog bytes and packet drops) that 3GPP URR does not natively measure.
 
-Both telemetry streams feed NWDAF, empowering its analytics engine to provide robust, multi-dimensional slice load intelligence to the Non-RT RIC rApp for closed-loop control.
+Directing both telemetry streams into NWDAF represents the system's architectural implementation target; currently, Track 2 streams directly to VM-6 while Track 1's upstream reporting chain to NWDAF is being finalized.
 ---
 
 ## Related Documentation

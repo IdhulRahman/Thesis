@@ -9,32 +9,32 @@ extensions (8 octets). This patch clamps the serialized length to 6 octets,
 serializes only octets u1-u6, and adds a safety assertion verifying that
 unused Rel-17 octets u7-u8 remain zero.
 ---
- src/common-src/pfcp/3gpp_29.244.hpp | 13 ++++++++-----
- 1 file changed, 8 insertions(+), 5 deletions(-)
+ src/common-src/pfcp/3gpp_29.244.hpp | 17 ++++++++++++-----
+ 1 file changed, 12 insertions(+), 5 deletions(-)
 
 diff --git a/src/common-src/pfcp/3gpp_29.244.hpp b/src/common-src/pfcp/3gpp_29.244.hpp
 index 8e45f92..9a71b23 100644
 --- a/src/common-src/pfcp/3gpp_29.244.hpp
 +++ b/src/common-src/pfcp/3gpp_29.244.hpp
-@@ -2522,7 +2522,7 @@ class pfcp_up_function_features_ie : public pfcp_ie {
+@@ -2524,7 +2524,7 @@ class pfcp_up_function_features_ie : public pfcp_ie {
      u8.bf.tscts      = b.tscts;
      u8.bf.spare      = b.spare;
-
+ 
 -    tlv.set_length(8);
 +    tlv.set_length(6);
    }
    //--------
    pfcp_up_function_features_ie() : pfcp_ie(PFCP_IE_UP_FUNCTION_FEATURES) {
-@@ -2534,7 +2534,7 @@ class pfcp_up_function_features_ie : public pfcp_ie {
+@@ -2537,7 +2537,7 @@ class pfcp_up_function_features_ie : public pfcp_ie {
      u7.b = 0;
      u8.b = 0;
-
+ 
 -    tlv.set_length(8);
 +    tlv.set_length(6);
    }
    //--------
    explicit pfcp_up_function_features_ie(const pfcp_tlv& t) : pfcp_ie(t) {
-@@ -2621,6 +2621,11 @@ class pfcp_up_function_features_ie : public pfcp_ie {
+@@ -2621,17 +2621,20 @@ class pfcp_up_function_features_ie : public pfcp_ie {
    }
    //--------
    void dump_to(std::ostream& os) {
@@ -45,10 +45,12 @@ index 8e45f92..9a71b23 100644
 +    }
 -    tlv.set_length(8);
 +    tlv.set_length(6);
-
+ 
      tlv.dump_to(os);
      os.write(reinterpret_cast<const char*>(&u1.b), sizeof(u1.b));
-@@ -2633,8 +2638,6 @@ class pfcp_up_function_features_ie : public pfcp_ie {
+     os.write(reinterpret_cast<const char*>(&u2.b), sizeof(u2.b));
+     os.write(reinterpret_cast<const char*>(&u3.b), sizeof(u3.b));
+     os.write(reinterpret_cast<const char*>(&u4.b), sizeof(u4.b));
      os.write(reinterpret_cast<const char*>(&u5.b), sizeof(u5.b));
      os.write(reinterpret_cast<const char*>(&u6.b), sizeof(u6.b));
 -    os.write(reinterpret_cast<const char*>(&u7.b), sizeof(u7.b));

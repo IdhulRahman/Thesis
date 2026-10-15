@@ -1,0 +1,4 @@
+# Ensure patches and shell scripts always retain LF line endings
+*.patch text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
