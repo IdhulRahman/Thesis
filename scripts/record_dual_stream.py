@@ -36,6 +36,8 @@ HEADERS = [
     "e2e_slice1_tput_mbps", "e2e_slice1_jitter_ms", "e2e_slice2_rtt_ms", "e2e_slice2_loss_pct",
     "e2e_probe_freshness",
     "nwdaf_load_embb", "nwdaf_load_urllc",
+    "nwdaf_comm_ul_bytes", "nwdaf_comm_dl_bytes", "nwdaf_comm_duration_sec",
+    "nwdaf_comm_vol_std_bytes", "nwdaf_comm_freshness", "nwdaf_api_status",
     "estimated_load_embb", "estimated_load_urllc",
     "upf_backlog_bytes_embb", "upf_backlog_bytes_urllc",
     "upf_drops_embb", "upf_drops_urllc",
@@ -90,6 +92,9 @@ def extract_telemetry():
         "e2e_slice2_rtt_ms": NAN_STR, "e2e_slice2_loss_pct": NAN_STR,
         "e2e_probe_freshness": "0",
         "nwdaf_load_embb": NAN_STR, "nwdaf_load_urllc": NAN_STR,
+        "nwdaf_comm_ul_bytes": NAN_STR, "nwdaf_comm_dl_bytes": NAN_STR,
+        "nwdaf_comm_duration_sec": NAN_STR, "nwdaf_comm_vol_std_bytes": NAN_STR,
+        "nwdaf_comm_freshness": "0", "nwdaf_api_status": "0",
         "estimated_load_embb": NAN_STR, "estimated_load_urllc": NAN_STR,
         "upf_backlog_bytes_embb": NAN_STR, "upf_backlog_bytes_urllc": NAN_STR,
         "upf_drops_embb": NAN_STR, "upf_drops_urllc": NAN_STR,
@@ -124,6 +129,18 @@ def extract_telemetry():
                         raw_data["nwdaf_load_embb"] = val_str
                     elif s in ("de00007b", "222"):
                         raw_data["nwdaf_load_urllc"] = val_str
+                elif name == "nwdaf_comm_ul_bytes":
+                    raw_data["nwdaf_comm_ul_bytes"] = val_str
+                elif name == "nwdaf_comm_dl_bytes":
+                    raw_data["nwdaf_comm_dl_bytes"] = val_str
+                elif name == "nwdaf_comm_duration_sec":
+                    raw_data["nwdaf_comm_duration_sec"] = val_str
+                elif name == "nwdaf_comm_vol_std_bytes":
+                    raw_data["nwdaf_comm_vol_std_bytes"] = val_str
+                elif name == "nwdaf_comm_freshness":
+                    raw_data["nwdaf_comm_freshness"] = val_str
+                elif name == "nwdaf_api_status":
+                    raw_data["nwdaf_api_status"] = val_str
                 elif name == "estimated_slice_load_level":
                     s = labels.get("snssai", "")
                     if s in ("01000001", "1"):
@@ -221,6 +238,9 @@ def main():
                 telemetry["e2e_slice2_rtt_ms"], telemetry["e2e_slice2_loss_pct"],
                 telemetry["e2e_probe_freshness"],
                 telemetry["nwdaf_load_embb"], telemetry["nwdaf_load_urllc"],
+                telemetry["nwdaf_comm_ul_bytes"], telemetry["nwdaf_comm_dl_bytes"],
+                telemetry["nwdaf_comm_duration_sec"], telemetry["nwdaf_comm_vol_std_bytes"],
+                telemetry["nwdaf_comm_freshness"], telemetry["nwdaf_api_status"],
                 telemetry["estimated_load_embb"], telemetry["estimated_load_urllc"],
                 telemetry["upf_backlog_bytes_embb"], telemetry["upf_backlog_bytes_urllc"],
                 telemetry["upf_drops_embb"], telemetry["upf_drops_urllc"],

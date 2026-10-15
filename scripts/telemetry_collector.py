@@ -32,15 +32,16 @@ metrics_store = {
 
     # Domain 1: 5G Core & NWDAF (VM-3)
     "nwdaf_slice_load_level": {
-        "01000001": float("nan"),     # eMBB (SST 1, SD 1)
-        "de00007b": float("nan")      # URLLC (SST 222, SD 123)
+        "01000001": float("nan"),     # eMBB (SST 1, SD 1) - Retains NaN (load % uncalculated upstream)
+        "de00007b": float("nan")      # URLLC (SST 222, SD 123) - Retains NaN
     },
     # 3GPP TS 29.520 UE_COMMUNICATION Analytics (PoC Slice 1 URR Ingestion)
+    "nwdaf_api_status": 0,            # 1 = NBI REST API polling succeeded (HTTP 200), 0 = Error/Unreachable
     "nwdaf_comm_duration_sec": float("nan"),
     "nwdaf_comm_ul_bytes": float("nan"),
     "nwdaf_comm_dl_bytes": float("nan"),
     "nwdaf_comm_vol_std_bytes": float("nan"),
-    "nwdaf_comm_freshness": 0,
+    "nwdaf_comm_freshness": 0,        # 1 = Fresh source measurement received within 45s, 0 = Stale / unchanged / expired
     "estimated_slice_load_level": {
         "01000001": float("nan"),     # Empirical load estimate (Tx / Quota * 100%)
         "de00007b": float("nan")
@@ -105,6 +106,8 @@ last_reply_ue2 = 0.0
 last_report_core = 0.0
 last_report_ran = 0.0
 last_nwdaf_poll_time = 0.0
+last_nwdaf_data_change_time = 0.0
+last_nwdaf_signature = None
 
 
 def fmt_val(v, fmt=".2f"):
@@ -149,6 +152,7 @@ def format_prometheus_metrics():
 
         # Auto-reset stale NWDAF metrics if external Nnwdaf daemon stopped responding (> 35 seconds, matching UPF 30s loop + 5s buffer)
         if last_nwdaf_poll_time > 0.0 and (now - last_nwdaf_poll_time > 35.0):
+            metrics_store["nwdaf_api_status"] = 0
             metrics_store["nwdaf_comm_freshness"] = 0
             metrics_store["nwdaf_comm_duration_sec"] = float("nan")
             metrics_store["nwdaf_comm_ul_bytes"] = float("nan")
@@ -156,6 +160,10 @@ def format_prometheus_metrics():
             metrics_store["nwdaf_comm_vol_std_bytes"] = float("nan")
             for snssai in ("01000001", "de00007b"):
                 metrics_store["nwdaf_slice_load_level"][snssai] = float("nan")
+
+        # Check source measurement age: if source values have not changed in > 45 seconds, mark freshness = 0
+        if last_nwdaf_data_change_time > 0.0 and (now - last_nwdaf_data_change_time > 45.0):
+            metrics_store["nwdaf_comm_freshness"] = 0
 
         # Auto-reset stale RAN metrics if ran_adapter stopped pushing (> 3.5 seconds)
         if last_report_ran > 0.0 and (now - last_report_ran > 3.5):
@@ -195,10 +203,14 @@ def format_prometheus_metrics():
         lines.append("# TYPE e2e_slice2_last_seq gauge")
         lines.append(f"e2e_slice2_last_seq {fmt_val(metrics_store['e2e_slice2_last_seq'], '.0f')}")
 
-        lines.append("# HELP nwdaf_slice_load_level NWDAF reported slice load level percentage")
+        lines.append("# HELP nwdaf_slice_load_level NWDAF reported slice load level percentage (NaN until load % is supported upstream)")
         lines.append("# TYPE nwdaf_slice_load_level gauge")
         for snssai, val in metrics_store["nwdaf_slice_load_level"].items():
             lines.append(f'nwdaf_slice_load_level{{snssai="{snssai}"}} {fmt_val(val)}')
+
+        lines.append("# HELP nwdaf_api_status NWDAF Northbound REST API connectivity status (1=OK/200, 0=Error/Unreachable)")
+        lines.append("# TYPE nwdaf_api_status gauge")
+        lines.append(f"nwdaf_api_status {int(metrics_store['nwdaf_api_status'])}")
 
         lines.append("# HELP nwdaf_comm_duration_sec NWDAF reported communication duration in seconds (note: upstream sums report elapsed times)")
         lines.append("# TYPE nwdaf_comm_duration_sec gauge")
@@ -216,7 +228,7 @@ def format_prometheus_metrics():
         lines.append("# TYPE nwdaf_comm_vol_std_bytes gauge")
         lines.append(f"nwdaf_comm_vol_std_bytes {fmt_val(metrics_store['nwdaf_comm_vol_std_bytes'], '.0f')}")
 
-        lines.append("# HELP nwdaf_comm_freshness Freshness indicator for NWDAF user-plane telemetry (1=Fresh within 35s, 0=Stale)")
+        lines.append("# HELP nwdaf_comm_freshness Freshness indicator for NWDAF user-plane telemetry (1=Fresh source report within 45s, 0=Stale/Unchanged)")
         lines.append("# TYPE nwdaf_comm_freshness gauge")
         lines.append(f"nwdaf_comm_freshness {int(metrics_store['nwdaf_comm_freshness'])}")
 
@@ -486,7 +498,7 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
 
 
 def poll_external_nfs():
-    global last_nwdaf_poll_time
+    global last_nwdaf_poll_time, last_nwdaf_data_change_time, last_nwdaf_signature
     while True:
         try:
             # Query 3GPP TS 29.520 UE_COMMUNICATION analytics from NWDAF via Kong Gateway port 8080.
@@ -506,7 +518,9 @@ def poll_external_nfs():
                 if resp.status == 200:
                     data = json.loads(resp.read().decode())
                     with METRICS_LOCK:
-                        last_nwdaf_poll_time = time.time()
+                        now = time.time()
+                        last_nwdaf_poll_time = now
+                        metrics_store["nwdaf_api_status"] = 1
                         ue_comms = data.get("ueComms", [])
                         if ue_comms:
                             comm = ue_comms[0]
@@ -518,17 +532,34 @@ def poll_external_nfs():
                             # into the ulVolVariance field:
                             std_dev = float(traf.get("ulVolVariance", float("nan")))
 
+                            sig = (dur, ul, dl, std_dev)
+                            if sig != last_nwdaf_signature:
+                                last_nwdaf_signature = sig
+                                last_nwdaf_data_change_time = now
+
                             metrics_store["nwdaf_comm_duration_sec"] = dur
                             metrics_store["nwdaf_comm_ul_bytes"] = ul
                             metrics_store["nwdaf_comm_dl_bytes"] = dl
                             metrics_store["nwdaf_comm_vol_std_bytes"] = std_dev
-                            metrics_store["nwdaf_comm_freshness"] = 1
 
-                            # Update slice 1 indicator for dataset continuity
-                            if not math.isnan(ul):
-                                metrics_store["nwdaf_slice_load_level"]["01000001"] = ul
+                            # Freshness is 1 if data was modified within 45 seconds (exceeding UPF 30s URR loop)
+                            if last_nwdaf_data_change_time > 0 and (now - last_nwdaf_data_change_time <= 45.0):
+                                metrics_store["nwdaf_comm_freshness"] = 1
+                            else:
+                                metrics_store["nwdaf_comm_freshness"] = 0
+                        else:
+                            # Empty ueComms array indicates no active telemetry reports in queried window
+                            metrics_store["nwdaf_comm_freshness"] = 0
+                            metrics_store["nwdaf_comm_duration_sec"] = float("nan")
+                            metrics_store["nwdaf_comm_ul_bytes"] = float("nan")
+                            metrics_store["nwdaf_comm_dl_bytes"] = float("nan")
+                            metrics_store["nwdaf_comm_vol_std_bytes"] = float("nan")
+                else:
+                    with METRICS_LOCK:
+                        metrics_store["nwdaf_api_status"] = 0
         except Exception:
-            pass
+            with METRICS_LOCK:
+                metrics_store["nwdaf_api_status"] = 0
 
         time.sleep(2)
 
