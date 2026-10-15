@@ -2573,6 +2573,94 @@ This confirms that NRF functions correctly and strictly adheres to 3GPP TS 29.51
 
 ---
 
+## 52. OAI UPF N4/PFCP Session Establishment Silent Drop (Unsupported 3GPP TS 29.244 IE Type 62 `Measurement Method`)
+
+### Symptom
+
+During 5G PDU Session Establishment from UE 1 (`nr-uesoftmodem` on VM-5), AMF successfully creates the SM context in SMF-1 (`oai-smf-slice1`), but the session establishment procedure stalls permanently. UE 1 fails to configure `oaitun_ue1`, and gNB CU (`cu.log` on VM-4) never receives a `PDUSessionResourceSetupRequest`.
+
+SMF-1 logs report repeating 1-second PFCP request timeouts followed by retransmission timeouts:
+```text
+[smf_app] [info] Sending ITTI message 37itti_n4_session_establishment_request to task TASK_SMF_N4
+[smf_n4 ] [info] TIME-OUT event timer id 897
+[smf_n4 ] [info] TIME-OUT event timer id 898
+```
+Simultaneously, PFCP Heartbeat exchanges between SMF-1 and UPF-1 (`192.168.70.142`) execute every 10 seconds without any errors, confirming bidirectional socket connectivity on UDP port 8805.
+
+### Root Cause
+
+1. **Unsupported Information Element in `openair-upf` Binary:**
+   - Under **3GPP TS 29.244 §8.2.40**, Information Element (IE) Type **62** (1 octet) defines the **`Measurement Method`**. This IE is a mandatory sub-element inside the **`Create URR` (Usage Reporting Rule)** IE used by the SMF to configure data volume and duration measurements.
+   - When `enable_usage_reporting: yes` is configured under `smf.upfs` in SMF configuration files (e.g., `conf/slicing_slice1_config.yaml`), SMF-1 automatically constructs a `Create URR` containing IE Type 62 within the `PFCP Session Establishment Request` payload (241 bytes).
+   - In `oaisoftwarealliance/oai-upf:v2.1.0` (`openair-upf`), the internal PFCP TLV parser lacks implementation support for IE Type 62:
+     ```text
+     [upf_n4 ] [info] handle_receive(241 bytes)
+     [pfcp   ] [error] Unknown PFCP IE type 62 (length 1)
+     [upf_n4 ] [info] handle_receive exception PFCP IE TLV 6 Bad Length 48 Exception /openair-upf/src/pfcp/3gpp_29.244.hpp:219
+     ```
+2. **Silent Packet Drop:**
+   - When the C++ exception is thrown in `3gpp_29.244.hpp:219`, `openair-upf` aborts packet processing immediately. It drops the request without transmitting any error response (such as a `PFCP Session Establishment Response` with Cause `Rule creation/modification failure`).
+   - Consequently, SMF-1 remains waiting for an acknowledgement until its internal 1-second timeout expires (`timer id 897`), triggering retransmission and eventual session abandonment.
+
+### Empirical Verification
+
+1. **Packet Capture (`tcpdump` on VM-3 bridge `any`):**
+   ```text
+   09:21:30.362960 veth02a45b9 P IP 192.168.70.139.8805 > 192.168.70.142.8805: UDP, length 241
+   09:21:30.362964 veth4cace10 Out IP 192.168.70.139.8805 > 192.168.70.142.8805: UDP, length 241
+   ```
+   The 241-byte UDP packet egressed SMF-1's veth interface (`veth02a45b9`) and entered UPF-1's veth interface (`veth4cace10`). Zero reply packets were emitted by `192.168.70.142`, while preceding (`09:21:28`) and succeeding (`09:21:38`) 16-byte PFCP heartbeat requests were answered by UPF-1 within 0.18 ms.
+
+2. **Historical Log Correlation:**
+   Examining `oai-upf-slice1` historical logs confirmed that prior to enabling usage reporting (`2026-10-14 12:25:35`), UPF-1 processed baseline N4 session requests without exception:
+   ```text
+   [2026-10-14 12:25:35.870] [upf_app] [info] Received N4_SESSION_ESTABLISHMENT_REQUEST seid 0x2
+   [2026-10-14 12:25:35.872] [upf_n4 ] [info] pfcp_session::add(far) seid 0x2
+   [2026-10-14 12:25:35.872] [upf_n4 ] [info] pfcp_session::add(pdr) seid 0x2
+   ```
+   Every session attempt following `enable_usage_reporting: yes` triggered `Unknown PFCP IE type 62 (length 1)`.
+
+### Solution
+
+1. **Disable `enable_usage_reporting` in SMF Configuration:**
+   Restore `conf/slicing_slice1_config.yaml` to the baseline configuration (or omit the manual `upfs:` block with `enable_usage_reporting: yes`):
+   ```bash
+   cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
+   cp conf/slicing_slice1_config.yaml.bak conf/slicing_slice1_config.yaml
+   ```
+
+2. **Restart SMF-1 and UPF-1 Containers:**
+   ```bash
+   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml -f compose.amf-nrf-uri.yaml restart oai_smf_slice1 oai_upf_slice1
+   ```
+
+3. **Verification & End-to-End User Plane Activation:**
+   Re-spawning UE 1 on VM-5 (`nrue`):
+   ```bash
+   sudo /opt/oran/ue/scripts/stop_multi_ue.sh
+   sudo /opt/oran/ue/scripts/spawn_multi_ue.sh -s1 1 -s2 0
+   ```
+   Confirms immediate tunnel activation and end-to-end routing to External DN (`192.168.70.145`):
+   ```text
+   PING 192.168.70.145 (192.168.70.145) from 12.1.1.2 oaitun_ue1: 56(84) bytes of data.
+   64 bytes from 192.168.70.145: icmp_seq=1 ttl=63 time=16.1 ms
+   64 bytes from 192.168.70.145: icmp_seq=2 ttl=63 time=30.2 ms
+   64 bytes from 192.168.70.145: icmp_seq=3 ttl=63 time=22.7 ms
+   64 bytes from 192.168.70.145: icmp_seq=4 ttl=63 time=23.5 ms
+   64 bytes from 192.168.70.145: icmp_seq=5 ttl=63 time=19.6 ms
+
+   --- 192.168.70.145 ping statistics ---
+   5 packets transmitted, 5 received, 0% packet loss, time 4003ms
+   rtt min/avg/max/mdev = 16.144/22.407/30.171/4.663 ms
+   ```
+
+### Architectural & Thesis Implications
+
+This empirical discovery proves that native 3GPP User-Plane Usage Reporting (URR) via N4/PFCP to SMF and NWDAF is strictly bounded by the `openair-upf:v2.1.0` binary implementation (missing IE Type 62).  
+This conclusively justifies the architectural design of the thesis platform, which leverages the dedicated **Core Telemetry Adapter (`core_adapter.py`)** to directly sample kernel socket statistics and interface `tc qdisc` queue telemetry on VM-3 for end-to-end multi-slice observability.
+
+---
+
 ## Related Documentation
 
 - [VM-1 — Non-RT RIC](vm/vm1-nonrt-ric.md)

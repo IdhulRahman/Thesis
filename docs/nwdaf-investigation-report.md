@@ -194,15 +194,15 @@ Setelah sesi PDU baru terbentuk di SMF-1 (`/nsmf-pdusession/v1/sm-contexts/1`) d
   ```
   Nilai `qos_report_count` **tetap 0** sebelum dan sesudah trafik 60 detik dialirkan.
 
-#### 3. Status Lokalisasi Jalur Telemetri User-Plane
-* **Kondisi Terbukti:** Pengaturan `enable_usage_reporting: Yes` telah aktif pada asosiasi PFCP antara SMF-1 dan UPF-1. Namun, pengujian awal trafik kontinu belum menghasilkan pertambahan laporan pada array `qosmonlist` di MongoDB NWDAF (`qos_report_count: 0`).
-* **Klarifikasi Kode Sumber SMF:** Berbeda dari dugaan awal, kode sumber resmi OAI SMF ([`smf_context.cpp`](https://github.com/openairinterface/oai-cn5g-smf/blob/531b6d8755ee792e49122c57bbab047db88ec4b5/src/smf_app/smf_context.cpp)) memiliki pemrosesan *usage report* yang memanggil penanganan monitoring QoS:
-  ```cpp
-  ev_notif.setUsageReport(ur_model);
-  pc->trigger_qos_monitoring(req->seid, ev_notif, 1);
+#### 3. Status Lokalisasi Jalur Telemetri User-Plane: Terlokalisasi Penuh (Definitif)
+* **Temuan Empiris Kritis:** Pengaturan `enable_usage_reporting: yes` menyebabkan SMF-1 menyisipkan IE `Create URR` (Usage Reporting Rule) ke dalam pesan *PFCP Session Establishment Request*. Di dalam IE tersebut, SMF menyertakan sub-IE wajib **IE Type 62 (`Measurement Method`, 3GPP TS 29.244 §8.2.40)**.
+* **Batas Biner UPF OAI v2.1.0:** Biner `oai-upf:v2.1.0` (`openair-upf`) belum mengimplementasikan parser untuk IE Type 62, sehingga melempar exception:
+  ```text
+  [pfcp   ] [error] Unknown PFCP IE type 62 (length 1)
+  [upf_n4 ] [info] handle_receive exception PFCP IE TLV 6 Bad Length 48 Exception /openair-upf/src/pfcp/3gpp_29.244.hpp:219
   ```
-* **Klarifikasi Standar 3GPP:** Sesuai **3GPP TS 23.288 Tabel 6.5.2-2**, *traffic usage report* dari UPF secara eksplisit diakui sebagai salah satu data masukan untuk analitik beban jaringan (*UPF load analytics*) oleh NWDAF.
-* **Status Ilmiah:** Titik kegagalan pelaporan dari UPF ke NWDAF saat ini **belum terlokalisasi**. Sistem tidak boleh buru-buru menyimpulkan ketiadaan kapabilitas OAI atau meninggalkan jalur native.
+* **Dampak Sinyaling:** UPF langsung men-drop paket request tanpa mengirimkan respons error (*silent drop*), memicu timeout 1 detik di SMF dan menggagalkan seluruh pembentukan sesi PDU UE.
+* **Kesimpulan Ilmiah:** Pelaporan *user-plane* secara native melalui PFCP URR dari UPF ke SMF dan NWDAF **terbukti secara definitif tidak didukung oleh biner OAI UPF v2.1.0**. Dengan demikian, telemetri *user-plane* (antrean buffer `tc qdisc` dan *packet drop rate*) secara sahih dan berbasis bukti harus dialirkan melalui **Core Telemetry Adapter (`core_adapter.py`)** pada VM-3 (lihat [Kasus Troubleshooting #52](file:///d:/Idhul/Program/Thesis/docs/troubleshooting.md#52-oai-upf-n4pfcp-session-establishment-silent-drop-unsupported-3gpp-ts-29244-ie-type-62-measurement-method)).
 
 #### 4. Matriks Lokalisasi Titik Kegagalan N4/PFCP
 Untuk melokalisasi penyebab `qos_report_count: 0` secara sistematis, pengujian N4/PFCP ditelusuri dengan matriks diagnostik berikut:

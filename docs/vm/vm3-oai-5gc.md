@@ -212,7 +212,7 @@ In OAI CN5G Federation `v2.1.0`, container services mount configuration files fr
 1. **Slice 1 Configuration (`conf/slicing_slice1_config.yaml`):**
    - Configures `oai-smf-slice1`, `oai-upf-slice1`, and `oai-nrf-slice12`:
    - `snssais`: `sst: 1, sd: 000001` (hex), DNN: `default`, IPv4 subnet: `12.1.1.0/24`.
-   - `smf.upfs`: Configures `enable_usage_reporting: yes` for NRF-discovered UPF node `192.168.70.142` to enable native user-plane usage reports (URR) via PFCP.
+   - `enable_usage_reporting`: Kept at baseline (`no` / omitted). Enabling `enable_usage_reporting: yes` causes SMF to send `Create URR` with 3GPP TS 29.244 IE Type 62 (`Measurement Method`), which `openair-upf:v2.1.0` fails to parse (`Unknown PFCP IE type 62`), resulting in silent request drop (see Troubleshooting Case #52).
 
 2. **Slice 2 Configuration (`conf/slicing_slice2_config.yaml`):**
    - Configures `oai-smf-slice2` and `oai-upf-slice2`:
@@ -652,9 +652,9 @@ Architecturally (3GPP TS 23.288 §6.2), user-plane load analytics require teleme
    - `oai-smf` (`nsmf-pdusession` on port `8080`): Listens for PDU session lifecycle events (`PDU_SES_EST`, `UE_IP_CH`, `DDDS`).
 3. **Absence of Qdisc / Buffer Data in MongoDB:** The internal NWDAF database (`oai-nwdaf-database` / MongoDB) only stores control plane event documents (session counts). No collections or schemas exist to store queue buffer utilization (`tc qdisc backlog`) or packet drop statistics from physical UPF interfaces.
 4. **Empirical Verification of UPF Usage Reporting & QoS Monitoring:**
-   - **Configuration:** `enable_usage_reporting: yes` was enabled on `oai-smf-slice1` by matching the NRF-registered UPF host (`host: 192.168.70.142`), confirming successful association in SMF logs: `Found NRF UPF with host name 192.168.70.142 in configuration, take config from there` with `enable_usage_reporting: Yes`.
-   - **Continuous Traffic Evaluation:** A 60-second continuous ICMP traffic stream (300 packets, interval 0.2s, 0% loss, ~0.28ms RTT) was injected from UE 1 to the External DN (`192.168.70.145`).
-   - **Root Cause & Resolution:** Although `enable_usage_reporting: Yes` is active and OAI SMF source code (`smf_context.cpp`) contains QoS monitoring hooks, `qos_report_count` previously remained 0 because ICMP traffic bypassed the UPF: AMF's PDU session establishment was blocked due to AMF failing automated NRF registration (omitting `/{nfInstanceId}` in its NRF registration URI per 3GPP TS 29.510 §6.1.3.3.2). This was resolved by patching `component/oai-amf/src/amf-app/amf_app.cpp` to dynamically append `"/" + amf_instance_id` to the NSSF `nrfNfMgtUri`, rebuilding the custom image `oai-amf:thesis-nrf-uri-v1`, and redeploying via Docker Compose.
+   - **Configuration Attempt:** `enable_usage_reporting: yes` was evaluated on `oai-smf-slice1` to test native 3GPP PFCP user-plane usage reporting (URR) to NWDAF.
+   - **Root Cause & Binary Limitation:** Activating `enable_usage_reporting: yes` causes SMF-1 to include 3GPP TS 29.244 §8.2.40 IE Type 62 (`Measurement Method`) within the `Create URR` structure of the PFCP Session Establishment Request. The `oai-upf:v2.1.0` binary (`openair-upf`) lacks support for IE Type 62, logging `Unknown PFCP IE type 62 (length 1)` and throwing a C++ exception in `/openair-upf/src/pfcp/3gpp_29.244.hpp:219`. This causes UPF to silently drop the session request without an error response, inducing repeated 1-second SMF N4 timeouts and preventing PDU session establishment (see Troubleshooting Case #52).
+   - **Resolution & Architectural Justification:** Once `enable_usage_reporting` is restored to baseline, PDU session establishment succeeds immediately (`oaitun_ue1` receives IP `12.1.1.2`, 0% packet loss to External DN `192.168.70.145`). This limitation empirically proves that UPF user-plane load metrics cannot be collected via native PFCP URR in OAI v2.1.0, definitively justifying the thesis architecture's use of the **Core Telemetry Adapter (`core_adapter.py`)** on VM-3 to directly observe interface queue buffer occupancy (`tc qdisc`) and packet drops.
 
 #### 3. Testbed Live Verification Evidence (Live REST Output)
 When a 3GPP TS 29.520 analytics query is executed through the VM-3 Kong Gateway:
