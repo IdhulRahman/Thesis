@@ -4,4 +4,4 @@
 
 services:
   oai_upf_slice1:
-    image: oai-upf:poc-develop-c51cae2
+    image: oai-upf:poc-develop-ie43-compat-v1
