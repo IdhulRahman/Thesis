@@ -180,21 +180,26 @@ Querying the MongoDB database `testing` on VM-3:
 }
 
 // db.smf.findOne({_id: "208950000000001"})
-// LIVE VERIFIED (Oct 15, 2026, 10:05 WIB - timestamp: 1792033517):
-// Following the restart of oai-nwdaf-sbi, SMF event exposure actively captures the live PDU session event,
-// assigning IP 12.1.1.3 (matching oaitun_ue1 on VM-5) with S-NSSAI 01000001 and DNN default.
+// LIVE VERIFIED with UPF PoC (Oct 15, 2026, 12:50 WIB - timestamp: 1792040188):
+// Following deployment of oai-upf:poc-develop-ie43-compat-v1 with enable_usage_reporting: yes,
+// PDU session establishment succeeds seamlessly and SMF event exposure actively records the live event
+// in MongoDB, assigning IP 12.1.1.5 with S-NSSAI 01000001 and DNN default.
 {
   _id: '208950000000001',
-  lastmodified: Long('1792033517'),
+  lastmodified: Long('1792040188'),
   ueipchlist: [
     { adipv4addr: '12.1.1.3', pduseid: 10, timestamp: Long('1791973535') },
     { adipv4addr: '12.1.1.4', pduseid: 10, timestamp: Long('1791973566') },
-    { adipv4addr: '12.1.1.3', pduseid: 10, timestamp: Long('1792033517') }
+    { adipv4addr: '12.1.1.3', pduseid: 10, timestamp: Long('1792033517') },
+    { adipv4addr: '12.1.1.4', pduseid: 10, timestamp: Long('1792040041') },
+    { adipv4addr: '12.1.1.5', pduseid: 10, timestamp: Long('1792040188') }
   ],
   dddslist: [
     { dddstatus: { dldatadeliverystatusanyof: 'TRANSMITTED' }, pduseid: 0, timestamp: Long('1791973536') },
     { dddstatus: { dldatadeliverystatusanyof: 'TRANSMITTED' }, pduseid: 0, timestamp: Long('1791973566') },
-    { dddstatus: { dldatadeliverystatusanyof: 'TRANSMITTED' }, pduseid: 0, timestamp: Long('1792033517') }
+    { dddstatus: { dldatadeliverystatusanyof: 'TRANSMITTED' }, pduseid: 0, timestamp: Long('1792033517') },
+    { dddstatus: { dldatadeliverystatusanyof: 'TRANSMITTED' }, pduseid: 0, timestamp: Long('1792040041') },
+    { dddstatus: { dldatadeliverystatusanyof: 'TRANSMITTED' }, pduseid: 0, timestamp: Long('1792040188') }
   ],
   pdusesestlist: [
     {
@@ -214,6 +219,18 @@ Querying the MongoDB database `testing` on VM-3:
       pdusesstype: { pdusessiontypeanyof: 'IPV4' },
       snssai: { sst: 1, sd: '000001' },
       timestamp: Long('1792033517')
+    },
+    {
+      adipv4addr: '12.1.1.4', dnn: 'default', pduseid: 10,
+      pdusesstype: { pdusessiontypeanyof: 'IPV4' },
+      snssai: { sst: 1, sd: '000001' },
+      timestamp: Long('1792040041')
+    },
+    {
+      adipv4addr: '12.1.1.5', dnn: 'default', pduseid: 10,
+      pdusesstype: { pdusessiontypeanyof: 'IPV4' },
+      snssai: { sst: 1, sd: '000001' },
+      timestamp: Long('1792040188')
     }
   ]
 }
