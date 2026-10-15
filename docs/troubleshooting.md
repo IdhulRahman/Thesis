@@ -2512,6 +2512,61 @@ Returns **`HTTP/2 201 Created`** and `oai-nrf-slice12` logs:
 ```
 This confirms that NRF functions correctly and strictly adheres to 3GPP TS 29.510, accepting the AMF registration when the resource URI is well-formed.
 
+### Solution
+
+1. **Patch Upstream AMF Source Code (`amf_app.cpp`):**
+   In `component/oai-amf/src/amf-app/amf_app.cpp` around line 1614 (inside `get_nrfs`), update the NSSF response parsing logic to dynamically append `"/" + amf_instance_id` to `nrfNfMgtUri`:
+   ```cpp
+   // Before:
+   nrfs.insert(nsi_information.getNrfNfMgtUri());
+
+   // After (Patched):
+   nrfs.insert(nsi_information.getNrfNfMgtUri() + "/" + amf_instance_id);
+   ```
+
+2. **Rebuild Custom AMF Image (`oai-amf:thesis-nrf-uri-v1`):**
+   - Ensure the build environment has sufficient RAM ($\ge 8$ GB or restrict parallel jobs with `MAKEFLAGS="-j2"` / `CMAKE_BUILD_PARALLEL_LEVEL=2`).
+   - Add `libsystemd-dev` to Stage 1 dependencies in `docker/Dockerfile.amf.ubuntu` to prevent version locking conflicts with `libsystemd0`.
+   - Add APT retry configuration (`Acquire::Retries "3";`) to handle transient DNS/network fluctuations.
+   - Build using host network:
+     ```bash
+     cd /opt/oran/5gc/oai-cn5g-fed/component/oai-amf
+     sudo docker build \
+       --network=host \
+       --progress=plain \
+       --target oai-amf \
+       -f docker/Dockerfile.amf.ubuntu \
+       -t oai-amf:thesis-nrf-uri-v1 .
+     ```
+
+3. **Deploy Patched Image in Docker Compose:**
+   In `/opt/oran/5gc/oai-cn5g-fed/docker-compose/docker-compose-slicing-basic-nrf.yaml`, update the `oai_amf` service definition:
+   ```yaml
+   oai_amf:
+     container_name: "oai-amf"
+     image: oai-amf:thesis-nrf-uri-v1
+   ```
+   Recreate the container:
+   ```bash
+   cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
+   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d --force-recreate oai_amf
+   ```
+
+4. **Verification:**
+   Check AMF registration logs:
+   ```bash
+   sudo docker logs --tail 30 oai-amf 2>&1 | grep -iE 'RegisterNFInstance|HTTP code'
+   ```
+   Expected output confirms HTTP 201/200:
+   ```text
+   [amf_sbi] [debug] Send NF Instance Registration to NRF, NRF URI (RegisterNFInstance API) http://192.168.70.136:8080/nnrf-nfm/v1/nf-instances/<UUID>
+   [amf_sbi] [info] Got response from NRF, HTTP code (201)
+   ```
+   NRF logs confirm registration:
+   ```text
+   [nrf_app] [info] Added/Updated NF Instance, Status: REGISTERED
+   ```
+
 ---
 
 ## Related Documentation

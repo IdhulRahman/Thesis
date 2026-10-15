@@ -185,7 +185,7 @@ git rev-parse HEAD > /opt/oran/5gc/oai-cn5g-fed.commit
 ```yaml
     oai_amf:
         container_name: "oai-amf"
-        image: oaisoftwarealliance/oai-amf:v2.1.0
+        image: oai-amf:thesis-nrf-uri-v1 # [FIXED] Patched upstream AMF appending /{nfInstanceId} to NSSF nrfNfMgtUri
         # [FIXED / ARCHITECTURE] N2 port exposed to VM-3 host interface
         ports:
             - "38412:38412/sctp"
@@ -654,7 +654,7 @@ Architecturally (3GPP TS 23.288 §6.2), user-plane load analytics require teleme
 4. **Empirical Verification of UPF Usage Reporting & QoS Monitoring:**
    - **Configuration:** `enable_usage_reporting: yes` was enabled on `oai-smf-slice1` by matching the NRF-registered UPF host (`host: 192.168.70.142`), confirming successful association in SMF logs: `Found NRF UPF with host name 192.168.70.142 in configuration, take config from there` with `enable_usage_reporting: Yes`.
    - **Continuous Traffic Evaluation:** A 60-second continuous ICMP traffic stream (300 packets, interval 0.2s, 0% loss, ~0.28ms RTT) was injected from UE 1 to the External DN (`192.168.70.145`).
-   - **Ongoing Failure Localization:** Although `enable_usage_reporting: Yes` is active and OAI SMF source code (`smf_context.cpp`) contains QoS monitoring hooks, `qos_report_count` currently remains 0. Investigation revealed that the previous ICMP traffic stream bypassed UPF because AMF's PDU session establishment was blocked: AMF failed automated NRF registration due to omitting `/{nfInstanceId}` in its NRF registration URI. Manual verification via HTTP/2 cleartext (`curl --http2-prior-knowledge -X PUT .../nnrf-nfm/v1/nf-instances/<UUID>`) succeeded with `HTTP/2 201 Created` on NRF Slice 1-2 (`192.168.70.136`), validating that NRF accepts the profile once the full instance URI is provided.
+   - **Root Cause & Resolution:** Although `enable_usage_reporting: Yes` is active and OAI SMF source code (`smf_context.cpp`) contains QoS monitoring hooks, `qos_report_count` previously remained 0 because ICMP traffic bypassed the UPF: AMF's PDU session establishment was blocked due to AMF failing automated NRF registration (omitting `/{nfInstanceId}` in its NRF registration URI per 3GPP TS 29.510 §6.1.3.3.2). This was resolved by patching `component/oai-amf/src/amf-app/amf_app.cpp` to dynamically append `"/" + amf_instance_id` to the NSSF `nrfNfMgtUri`, rebuilding the custom image `oai-amf:thesis-nrf-uri-v1`, and redeploying via Docker Compose.
 
 #### 3. Testbed Live Verification Evidence (Live REST Output)
 When a 3GPP TS 29.520 analytics query is executed through the VM-3 Kong Gateway:
