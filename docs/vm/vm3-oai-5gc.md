@@ -38,19 +38,19 @@ The deployment follows official OpenAirInterface guidelines from `oai-cn5g-fed` 
 
 The deployment uses official container images from the OpenAirInterface Software Alliance:
 
-| Component | Tag / Version | Image |
-|---|---|---|
-| OAI 5G Core Federation | `v2.1.0` (pinned) | `https://github.com/OPENAIRINTERFACE/oai-cn5g-fed` |
-| AMF | `v2.1.0` | `oaisoftwarealliance/oai-amf:v2.1.0` |
-| SMF | `v2.1.0` | `oaisoftwarealliance/oai-smf:v2.1.0` |
-| UPF | `v2.1.0` | `oaisoftwarealliance/oai-upf:v2.1.0` |
-| NRF | `v2.1.0` | `oaisoftwarealliance/oai-nrf:v2.1.0` |
-| UDM | `v2.1.0` | `oaisoftwarealliance/oai-udm:v2.1.0` |
-| UDR | `v2.1.0` | `oaisoftwarealliance/oai-udr:v2.1.0` |
-| AUSF | `v2.1.0` | `oaisoftwarealliance/oai-ausf:v2.1.0` |
-| NSSF | `v2.1.0` | `oaisoftwarealliance/oai-nssf:v2.1.0` |
-| NWDAF | `v2.1.0` / Rel-17 | `oaisoftwarealliance/oai-nwdaf:v2.1.0` |
-| Database | `8.0` | `mysql:8.0` |
+| Component | Tag / Version | Image | Notes |
+|---|---|---|---|
+| OAI 5G Core Federation | `v2.1.0` (pinned) | `https://github.com/OPENAIRINTERFACE/oai-cn5g-fed` | Core federation repository |
+| AMF | `thesis-nrf-uri-v1` / `v2.1.0` | `oai-amf:thesis-nrf-uri-v1` | Custom build with dynamic NRF resource URI patch ([`patches/amf/0001-fix-amf-nrf-resource-uri.patch`](../../patches/amf/0001-fix-amf-nrf-resource-uri.patch)) |
+| SMF | `v2.1.0` | `oaisoftwarealliance/oai-smf:v2.1.0` | Official release image |
+| UPF | `poc-develop-ie43-compat-v1` / `v2.1.0` | `oai-upf:poc-develop-ie43-compat-v1` | PoC build from upstream `develop` (`c51cae2`) with Rel-16 IE 43 patch ([`patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch`](../../patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch)); baseline fallback is `oai-upf:v2.1.0` |
+| NRF | `v2.1.0` | `oaisoftwarealliance/oai-nrf:v2.1.0` | Official release image |
+| UDM | `v2.1.0` | `oaisoftwarealliance/oai-udm:v2.1.0` | Official release image |
+| UDR | `v2.1.0` | `oaisoftwarealliance/oai-udr:v2.1.0` | Official release image |
+| AUSF | `v2.1.0` | `oaisoftwarealliance/oai-ausf:v2.1.0` | Official release image |
+| NSSF | `v2.1.0` | `oaisoftwarealliance/oai-nssf:v2.1.0` | Official release image |
+| NWDAF | `v2.1.0` / Rel-17 | `oaisoftwarealliance/oai-nwdaf:v2.1.0` | 8 microservices stack + Kong API Gateway |
+| Database | `8.0` | `mysql:8.0` | 5G subscriber database |
 
 ---
 
@@ -212,7 +212,7 @@ In OAI CN5G Federation `v2.1.0`, container services mount configuration files fr
 1. **Slice 1 Configuration (`conf/slicing_slice1_config.yaml`):**
    - Configures `oai-smf-slice1`, `oai-upf-slice1`, and `oai-nrf-slice12`:
    - `snssais`: `sst: 1, sd: 000001` (hex), DNN: `default`, IPv4 subnet: `12.1.1.0/24`.
-   - `enable_usage_reporting`: Kept at baseline (`no` / omitted). Enabling `enable_usage_reporting: yes` causes SMF to send `Create URR` with 3GPP TS 29.244 IE Type 62 (`Measurement Method`), which `openair-upf:v2.1.0` fails to parse (`Unknown PFCP IE type 62`), resulting in silent request drop (see Troubleshooting Case #52).
+   - `enable_usage_reporting`: Enabled (`yes`) when deploying the patched PoC image (`oai-upf:poc-develop-ie43-compat-v1` via `deploy/compose.upf-poc.yaml`). For standard baseline `oai-upf:v2.1.0`, this option is omitted/disabled (`no`) because `v2.1.0` lacks support for 3GPP TS 29.244 IE Type 62 (`Measurement Method`), causing session setup drops (see Troubleshooting Case #52).
 
 2. **Slice 2 Configuration (`conf/slicing_slice2_config.yaml`):**
    - Configures `oai-smf-slice2` and `oai-upf-slice2`:
@@ -358,7 +358,12 @@ services:
       - /nnwdaf-mlmodelprovision/v1
 ```
 
-### Step 3: Launch Full 25-Container Stack
+### Step 3: Launch Full 25-Container Stack (with Patched Overrides)
+
+The validated deployment applies two Docker Compose override files:
+1. `deploy/compose.amf-nrf-uri.yaml` (targets `oai_amf`, using `oai-amf:thesis-nrf-uri-v1` for dynamic NRF registration).
+2. `deploy/compose.upf-poc.yaml` (targets `oai_upf_slice1`, using `oai-upf:poc-develop-ie43-compat-v1` for Rel-16 IE 43 URR compatibility).
+
 ```bash
 cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
 
@@ -372,8 +377,12 @@ until [ "$(sudo docker inspect -f '{{.State.Health.Status}}' mysql 2>/dev/null)"
 done
 echo "MySQL is healthy."
 
-# Launch remaining 24 Core & NWDAF containers
-sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d
+# Launch remaining Core & NWDAF containers with overrides applied:
+sudo docker compose \
+  -f docker-compose-slicing-basic-nrf.yaml \
+  -f compose.amf-nrf-uri.yaml \
+  -f compose.upf-poc.yaml \
+  up -d
 ```
 
 ### Step 4: Configure `oai-nwdaf-sbi` for Multi-Slice Core Endpoints
@@ -651,18 +660,23 @@ Architecturally (3GPP TS 23.288 §6.2), user-plane load analytics require teleme
    - `oai-amf` (`namf-evts` on port `8080`): Listens for UE registration and mobility events.
    - `oai-smf` (`nsmf-pdusession` on port `8080`): Listens for PDU session lifecycle events (`PDU_SES_EST`, `UE_IP_CH`, `DDDS`).
 3. **Absence of Qdisc / Buffer Data in MongoDB:** The internal NWDAF database (`oai-nwdaf-database` / MongoDB) only stores control plane event documents (session counts). No collections or schemas exist to store queue buffer utilization (`tc qdisc backlog`) or packet drop statistics from physical UPF interfaces.
-4. **Empirical Verification of UPF Usage Reporting & QoS Monitoring:**
-   - **Configuration Attempt:** `enable_usage_reporting: yes` was evaluated on `oai-smf-slice1` to test native 3GPP PFCP user-plane usage reporting (URR) to NWDAF.
-   - **Root Cause & Binary Limitation:** Activating `enable_usage_reporting: yes` causes SMF-1 to include 3GPP TS 29.244 §8.2.40 IE Type 62 (`Measurement Method`) within the `Create URR` structure of the PFCP Session Establishment Request. The `oai-upf:v2.1.0` binary (`openair-upf`) lacks support for IE Type 62, logging `Unknown PFCP IE type 62 (length 1)` and throwing a C++ exception in `/openair-upf/src/pfcp/3gpp_29.244.hpp:219`. This causes UPF to silently drop the session request without an error response, inducing repeated 1-second SMF N4 timeouts and preventing PDU session establishment (see Troubleshooting Case #52).
-   - **Resolution & Architectural Justification:** Once `enable_usage_reporting` is restored to baseline, PDU session establishment succeeds immediately (`oaitun_ue1` receives IP `12.1.1.2`, 0% packet loss to External DN `192.168.70.145`). This limitation empirically proves that UPF user-plane load metrics cannot be collected via native PFCP URR in OAI v2.1.0, definitively justifying the thesis architecture's use of the **Core Telemetry Adapter (`core_adapter.py`)** on VM-3 to directly observe interface queue buffer occupancy (`tc qdisc`) and packet drops.
+4. **Empirical Verification of UPF Usage Reporting & Dual-Track Telemetry Architecture:**
+   - **Initial Binary Limitation in Baseline `v2.1.0`:** Activating `enable_usage_reporting: yes` on SMF-1 caused it to include 3GPP TS 29.244 §8.2.40 IE Type 62 (`Measurement Method`) within `Create URR`. The unpatched `oai-upf:v2.1.0` binary lacked parser support for IE Type 62 (`Unknown PFCP IE type 62`), silently dropping the request and causing SMF N4 association timeouts (see Troubleshooting Case #52).
+   - **Upstream `develop` PoC & Release 16 Alignment:** Evaluating upstream UPF `develop` (`c51cae2`) resolved IE 62 and introduced datapath URR structures (`pfcp_urr.cpp`). However, upstream `develop` encoded IE Type 43 (`UP Function Features`) as 8 octets (Release 17 format), which exceeded the 6-octet buffer limit in the deployed SMF parser commit in use (`PFCP IE TLV 43 Bad Length 8 Exception`).
+   - **PoC Patch Resolution (`oai-upf:poc-develop-ie43-compat-v1`):** Applying the Rel-16 compatibility patch ([`patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch`](../../patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch)) clamped IE 43 length to 6 octets, writing only octets 1–6 (`u1`–`u6`). Deployed via Docker Compose override [`deploy/compose.upf-poc.yaml`](../../deploy/compose.upf-poc.yaml).
+   - **Live Empirical Evidence:**
+     - **Clean N4 Association:** SMF-1 received Association Setup Response with 0 exceptions.
+     - **URR Binding:** UPF session setup logs confirmed `pfcp_session::add(pdr) seid 0x2 PDR=1` with **`Linked URR: 1`** and `PDU_SESSION_ACTIVE` in SMF.
+     - **End-to-End Data Plane:** UE 1 softmodem configured `oaitun_ue1` (`12.1.1.3`) and pinged External DN (`192.168.70.145`) with **0% packet loss (avg RTT 0.420 ms / 0.523 ms)**.
+     - **Live NWDAF Ingestion:** MongoDB `testing.smf` immediately recorded live PDU session events, returning dynamic **`absoluteNum: 1`** on the NBI `Nnwdaf_AnalyticsInfo` endpoint.
 
 #### 3. Testbed Live Verification Evidence (Live REST Output)
 When a 3GPP TS 29.520 analytics query is executed through the VM-3 Kong Gateway:
 ```bash
 curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
   --data-urlencode "event-id=NETWORK_PERFORMANCE" \
-  --data-urlencode 'ana-req={"startTs":"2026-10-01T00:00:00Z","endTs":"2026-10-12T23:59:59Z"}' \
-  --data-urlencode 'event-filter={"snssais":[{"sst":1,"sd":"000001"}],"dnns":["oai"],"nwPerfTypes":["SESS_SUCC_RATIO"]}' | jq .
+  --data-urlencode 'ana-req={"startTs":"2026-10-01T00:00:00Z","endTs":"2026-10-20T23:59:59Z"}' \
+  --data-urlencode 'event-filter={"snssais":[{"sst":1,"sd":"000001"}],"dnns":["default"],"nwPerfTypes":["SESS_SUCC_RATIO"]}' | jq .
 ```
 
 Actual JSON response from the system (HTTP 200 OK):
@@ -671,29 +685,33 @@ Actual JSON response from the system (HTTP 200 OK):
   "anaMetaInfo": {
     "dataWindow": {
       "startTime": "2026-10-01T00:00:00Z",
-      "stopTime": "2026-10-12T23:59:59Z"
-    }
+      "stopTime": "2026-10-20T23:59:59Z"
+    },
+    "strategy": {},
+    "accuracy": {}
   },
   "nwPerfs": [
     {
       "networkArea": {},
       "nwPerfType": "SESS_SUCC_RATIO",
       "relativeRatio": 0,
-      "absoluteNum": 0,
+      "absoluteNum": 1,
       "confidence": 0
     }
   ]
 }
 ```
 
-Even when artificial load or physical congestion is injected into the UPF (e.g., 50 ms queuing delay and 10% packet drop via `tc netem`), the `relativeRatio` value returned by NWDAF remains strictly `0`.
+> **Live Empirical Note:** `absoluteNum: 1` dynamically reflects the actual active session document count in MongoDB `testing.smf` following UE 1 establishment. `relativeRatio` and `confidence` remain `0` due to upstream `//TODO` in `network_performance.go`.
 
 #### 4. Scientific Implications for Thesis Research Methodology
 The findings above confirm that:
-1. **`absoluteNum` in OAI NWDAF v2.1.0 is confirmed functional for control-plane sessions:** After correcting the multi-slice `oai-nwdaf-sbi` SBI endpoint configuration (see §9 Step 4), SMF event subscriptions succeed and MongoDB `testing.smf` is populated with real PDU session documents. `absoluteNum` correctly reflects `CountDocuments` output — returning `1` after the first successful PDU Session Establishment.
+1. **`absoluteNum` in OAI NWDAF v2.1.0 is confirmed functional for control-plane sessions:** After correcting the multi-slice `oai-nwdaf-sbi` SBI endpoint configuration (see §9 Step 4), SMF event subscriptions succeed and MongoDB `testing.smf` is populated with real PDU session documents. `absoluteNum` correctly reflects `CountDocuments` output — dynamically returning `1`.
 2. **`relativeRatio` and `confidence` remain hardcoded `0`:** The OAI development team has not yet implemented these calculations (`//TODO` in source). This is an upstream limitation, not a deployment error.
-3. **Native PFCP user-plane telemetry via UPF URR cannot currently reach NWDAF:** While upstream OAI SMF source code (`smf_context.cpp`) implements `setUsageReport()` and `trigger_qos_monitoring()`, empirical packet capture and UPF source audit confirm that `openair-upf:v2.1.0` lacks parser support for 3GPP TS 29.244 IE Type 62 (`Measurement Method`), silently dropping session requests when `enable_usage_reporting: yes` is active (see Troubleshooting Case #52).
-4. **Requirement for a Standards-Aligned Dedicated Adapter:** Core network observability in this research is rigorously achieved through the UPF host telemetry adapter (`core_adapter.py` v9), which extracts interface counters and Linux qdisc queue occupancy directly, strictly conforming to 3GPP Performance Management principles (TS 32.401, TS 28.552).
+3. **Dual-Track Core Telemetry Architecture:**
+   - **Track 1 (Native 3GPP PFCP URR Track):** Successfully validated via the patched UPF PoC (`oai-upf:poc-develop-ie43-compat-v1`) to verify session-level volume and duration reporting via 3GPP standard N4 $\to$ SMF $\to$ NWDAF interfaces.
+   - **Track 2 (Custom OAM Host Telemetry Track):** Operates under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM services") via `core_adapter.py` v9 on VM-3, capturing physical kernel queue dynamics (`tc qdisc` backlog bytes and drop rates) that 3GPP URR does not natively measure.
+   - **Complementary Synthesis:** Both telemetry streams feed NWDAF, empowering its analytics engine to provide robust, multi-dimensional slice load intelligence to the Non-RT RIC rApp for closed-loop control.
 
 ---
 
@@ -771,7 +789,7 @@ The source code for the UPF kernel physical adapter v9 is centrally managed at:
 5. **Main Experiment Recording Daemon Execution (Background Mode):**
    ```bash
    # Run recording for a designated experiment run (e.g., RUN_01_TRAIN):
-   nohup python3 /opt/oran/5gc/scripts/core_adapter.py \
+   sudo nohup python3 -u /opt/oran/5gc/scripts/core_adapter.py \
      --run-id RUN_01_TRAIN \
      --output-dir /opt/oran/5gc/telemetry_archive \
      --url http://10.102.0.67:9100/report \
