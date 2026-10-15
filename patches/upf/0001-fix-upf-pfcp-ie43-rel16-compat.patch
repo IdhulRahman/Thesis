@@ -1,0 +1,60 @@
+From c51cae2324e79a65e96f48ef8a00365de06bcb96 Mon Sep 17 00:00:00 2001
+From: Idhul Rahman <idhul@thesis.local>
+Date: Wed, 15 Oct 2026 12:43:00 +0700
+Subject: [PATCH] fix(pfcp): clamp IE 43 UP Function Features to 6 octets for Rel-16 SMF interop
+
+OAI SMF v2.1.0 expects UP Function Features (IE Type 43) length <= 6 octets
+per 3GPP Rel-16 and throws a Bad Length 8 exception when receiving Rel-17
+extensions (8 octets). This patch clamps the serialized length to 6 octets,
+serializes only octets u1-u6, and adds a safety assertion verifying that
+unused Rel-17 octets u7-u8 remain zero.
+---
+ src/common-src/pfcp/3gpp_29.244.hpp | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/src/common-src/pfcp/3gpp_29.244.hpp b/src/common-src/pfcp/3gpp_29.244.hpp
+index 8e45f92..9a71b23 100644
+--- a/src/common-src/pfcp/3gpp_29.244.hpp
++++ b/src/common-src/pfcp/3gpp_29.244.hpp
+@@ -2522,7 +2522,7 @@ class pfcp_up_function_features_ie : public pfcp_ie {
+     u8.bf.tscts      = b.tscts;
+     u8.bf.spare      = b.spare;
+
+-    tlv.set_length(8);
++    tlv.set_length(6);
+   }
+   //--------
+   pfcp_up_function_features_ie() : pfcp_ie(PFCP_IE_UP_FUNCTION_FEATURES) {
+@@ -2534,7 +2534,7 @@ class pfcp_up_function_features_ie : public pfcp_ie {
+     u7.b = 0;
+     u8.b = 0;
+
+-    tlv.set_length(8);
++    tlv.set_length(6);
+   }
+   //--------
+   explicit pfcp_up_function_features_ie(const pfcp_tlv& t) : pfcp_ie(t) {
+@@ -2621,6 +2621,11 @@ class pfcp_up_function_features_ie : public pfcp_ie {
+   }
+   //--------
+   void dump_to(std::ostream& os) {
++    if (u7.b != 0 || u8.b != 0) {
++      throw std::runtime_error(
++          "pfcp_up_function_features_ie: Rel-17 features active in octets 7-8 "
++          "cannot be serialized in Rel-16 compatibility mode (length 6)");
++    }
+-    tlv.set_length(8);
++    tlv.set_length(6);
+
+     tlv.dump_to(os);
+     os.write(reinterpret_cast<const char*>(&u1.b), sizeof(u1.b));
+@@ -2633,8 +2638,6 @@ class pfcp_up_function_features_ie : public pfcp_ie {
+     os.write(reinterpret_cast<const char*>(&u5.b), sizeof(u5.b));
+     os.write(reinterpret_cast<const char*>(&u6.b), sizeof(u6.b));
+-    os.write(reinterpret_cast<const char*>(&u7.b), sizeof(u7.b));
+-    os.write(reinterpret_cast<const char*>(&u8.b), sizeof(u8.b));
+   }
+   //--------
+   void load_from(std::istream& is) {
+-- 
+2.43.0
