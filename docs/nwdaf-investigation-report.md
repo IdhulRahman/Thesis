@@ -173,22 +173,40 @@ Querying the MongoDB database `testing` on VM-3:
 }
 
 // db.smf.findOne({_id: "208950000000001"})
-// NOTE (Temporal Context): This SMF document reflects an earlier successful PDU session recorded on
-// Oct 14 at 17:26:06 WIB (timestamp: 1791973566), whereas the AMF document above is from Oct 15 at 09:28 WIB.
-// Live re-verification of event reception in db.smf for the latest Oct 15 session (IP 12.1.1.2)
-// is pending verification of active oai-nwdaf-sbi event exposure subscriptions across container restarts.
+// LIVE VERIFIED (Oct 15, 2026, 10:05 WIB - timestamp: 1792033517):
+// Following the restart of oai-nwdaf-sbi, SMF event exposure actively captures the live PDU session event,
+// assigning IP 12.1.1.3 (matching oaitun_ue1 on VM-5) with S-NSSAI 01000001 and DNN default.
 {
   _id: '208950000000001',
-  ueipchlist: [ { adipv4addr: '12.1.1.4', pduseid: 10, timestamp: Long('1791973566') } ],
-  dddslist: [ { dddstatus: { dldatadeliverystatusanyof: 'TRANSMITTED' }, pduseid: 0, timestamp: Long('1791973566') } ],
+  lastmodified: Long('1792033517'),
+  ueipchlist: [
+    { adipv4addr: '12.1.1.3', pduseid: 10, timestamp: Long('1791973535') },
+    { adipv4addr: '12.1.1.4', pduseid: 10, timestamp: Long('1791973566') },
+    { adipv4addr: '12.1.1.3', pduseid: 10, timestamp: Long('1792033517') }
+  ],
+  dddslist: [
+    { dddstatus: { dldatadeliverystatusanyof: 'TRANSMITTED' }, pduseid: 0, timestamp: Long('1791973536') },
+    { dddstatus: { dldatadeliverystatusanyof: 'TRANSMITTED' }, pduseid: 0, timestamp: Long('1791973566') },
+    { dddstatus: { dldatadeliverystatusanyof: 'TRANSMITTED' }, pduseid: 0, timestamp: Long('1792033517') }
+  ],
   pdusesestlist: [
     {
-      adipv4addr: '12.1.1.4',
-      dnn: 'default',
-      pduseid: 10,
+      adipv4addr: '12.1.1.3', dnn: 'default', pduseid: 10,
+      pdusesstype: { pdusessiontypeanyof: 'IPV4' },
+      snssai: { sst: 1, sd: '000001' },
+      timestamp: Long('1791973536')
+    },
+    {
+      adipv4addr: '12.1.1.4', dnn: 'default', pduseid: 10,
       pdusesstype: { pdusessiontypeanyof: 'IPV4' },
       snssai: { sst: 1, sd: '000001' },
       timestamp: Long('1791973566')
+    },
+    {
+      adipv4addr: '12.1.1.3', dnn: 'default', pduseid: 10,
+      pdusesstype: { pdusessiontypeanyof: 'IPV4' },
+      snssai: { sst: 1, sd: '000001' },
+      timestamp: Long('1792033517')
     }
   ]
 }
