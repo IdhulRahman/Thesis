@@ -46,6 +46,7 @@ def main():
             if scen not in scen_data:
                 scen_data[scen] = {
                     "total_rows": 0,
+                    "measured_probe_rows": 0,
                     "valid_rtt_rows": 0,
                     "valid_tput_rows": 0,
                     "outage_rows": 0,
@@ -93,6 +94,7 @@ def main():
             if math.isnan(rtt) and math.isnan(loss):
                 d["missing_probe_rows"] += 1
             else:
+                d["measured_probe_rows"] += 1
                 is_outage = (not math.isnan(loss) and loss >= 100.0)
                 is_latency_violation = (not math.isnan(rtt) and rtt > 20.0)
                 is_loss_violation = (not math.isnan(loss) and 0.0 < loss < 100.0)
@@ -148,7 +150,7 @@ def main():
         n_valid_rtt = d["valid_rtt_rows"]
         n_outage = d["outage_rows"]
         n_missing = d["missing_probe_rows"]
-        n_measured = n_valid_rtt + n_outage
+        n_measured = d["measured_probe_rows"]
 
         coverage_pct = (n_valid_rtt / n_total * 100.0) if n_total > 0 else 0.0
 
@@ -176,7 +178,7 @@ def main():
     print(" - Valid: Sampel dengan RTT valid terukur.")
     print(" - Outage: Outage terkonfirmasi (probe aktif, loss terukur >= 100%).")
     print(" - Miss: Data tidak tersedia (probe belum aktif atau telemetri hilang; bukan outage).")
-    print(" - SLA Viol % dihitung dari sampel probe terukur (Valid + Outage).")
+    print(" - SLA Viol % dihitung dari total sampel probe terukur (RTT atau loss terukur, Total - Miss).")
 
 
 if __name__ == "__main__":
