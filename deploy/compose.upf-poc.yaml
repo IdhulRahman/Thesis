@@ -1,0 +1,7 @@
+# Docker Compose override file for isolated PoC of OAI UPF develop (commit c51cae2)
+# Usage:
+#   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml -f compose.amf-nrf-uri.yaml -f compose.upf-poc.yaml up -d --force-recreate oai_upf_slice1
+
+services:
+  oai_upf_slice1:
+    image: oai-upf:poc-develop-c51cae2
