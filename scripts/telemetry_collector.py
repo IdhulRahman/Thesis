@@ -550,6 +550,27 @@ def check_run_state_change():
     return COLLECTOR_START_TIME.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def log_raw_nwdaf_poll(poll_record):
+    """Archives every raw NWDAF NBI poll response to ensure complete traceability."""
+    global active_run_id
+    if not active_run_id:
+        return
+    data_dir = "/opt/oran/monitoring/data"
+    line = json.dumps(poll_record) + "\n"
+    run_dir = os.path.join(data_dir, "raw", active_run_id)
+    if os.path.exists(run_dir):
+        try:
+            with open(os.path.join(run_dir, "nwdaf_raw_poll_responses.jsonl"), "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
+    try:
+        with open(os.path.join(data_dir, f"nwdaf_raw_poll_{active_run_id}.jsonl"), "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:
+        pass
+
+
 def get_nwdaf_query_window():
     """Calculates an isolated RFC3339 query window for NWDAF NBI analytics."""
     start_ts = check_run_state_change()
@@ -560,6 +581,7 @@ def get_nwdaf_query_window():
 def poll_external_nfs():
     global last_nwdaf_poll_time, last_nwdaf_data_change_time, last_nwdaf_signature
     while True:
+        start_ts, end_ts, url = None, None, None
         try:
             # Query 3GPP TS 29.520 UE_COMMUNICATION analytics from NWDAF via Kong Gateway port 8080.
             # Upstream OAI NWDAF Engine (ue_communication.go) filters MongoDB documents by startTs/endTs.
@@ -575,9 +597,22 @@ def poll_external_nfs():
                 url,
                 headers={"User-Agent": "Thesis-Collector/1.0"}
             )
+            poll_start = time.time()
             with urllib.request.urlopen(req, timeout=2.0) as resp:
+                poll_latency = time.time() - poll_start
                 if resp.status == 200:
-                    data = json.loads(resp.read().decode())
+                    raw_bytes = resp.read()
+                    data = json.loads(raw_bytes.decode())
+                    log_raw_nwdaf_poll({
+                        "poll_timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                        "run_id": active_run_id,
+                        "query_start_ts": start_ts,
+                        "query_end_ts": end_ts,
+                        "query_url": url,
+                        "http_status": resp.status,
+                        "latency_ms": round(poll_latency * 1000, 2),
+                        "response_body": data
+                    })
                     with METRICS_LOCK:
                         now = time.time()
                         last_nwdaf_poll_time = now
@@ -620,9 +655,27 @@ def poll_external_nfs():
                             metrics_store["nwdaf_comm_dl_bytes"] = float("nan")
                             metrics_store["nwdaf_comm_vol_std_bytes"] = float("nan")
                 else:
+                    log_raw_nwdaf_poll({
+                        "poll_timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                        "run_id": active_run_id,
+                        "query_start_ts": start_ts,
+                        "query_end_ts": end_ts,
+                        "query_url": url,
+                        "http_status": resp.status,
+                        "error": "Non-200 HTTP status"
+                    })
                     with METRICS_LOCK:
                         metrics_store["nwdaf_api_status"] = 0
-        except Exception:
+        except Exception as e:
+            log_raw_nwdaf_poll({
+                "poll_timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "run_id": active_run_id,
+                "query_start_ts": start_ts,
+                "query_end_ts": end_ts,
+                "query_url": url,
+                "http_status": getattr(e, "code", 0),
+                "error": str(e)
+            })
             with METRICS_LOCK:
                 metrics_store["nwdaf_api_status"] = 0
 

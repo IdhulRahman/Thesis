@@ -62,7 +62,11 @@ Every variable recorded in the experiment dataset has a fully traceable provenan
 │ [oai-nwdaf-nbi-gateway (Kong Gateway :8080)]                                                                    │
 │   │ HTTP GET /nnwdaf-analyticsinfo/v1/analytics?event-id=UE_COMMUNICATION&ana-req={...}                         │
 │   ▼                                                                                                             │
-│ [VM-6: telemetry_collector.py] ──► Prometheus Gauge (nwdaf_comm_*) ──► [record_dual_stream.py] (1.000 Hz CSV)   │
+│ [VM-6: telemetry_collector.py]                                                                                  │
+│   │ Real-time raw poll archiving: data/raw/<RUN_ID>/nwdaf_raw_poll_responses.jsonl                               │
+│   │ Prometheus Gauge exposure (nwdaf_comm_*)                                                                    │
+│   ▼                                                                                                             │
+│ [record_dual_stream.py] ──► data/raw/<RUN_ID>/telemetry_<RUN_ID>.csv (1.000 Hz Monotonic CSV)                   │
 └─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -95,7 +99,7 @@ Every variable recorded in the experiment dataset has a fully traceable provenan
 │ [VM-5: nrUE uesimtun0] ────────── Offered Load (iperf3 -u) ─────────► [VM-3: oai-ext-dn Receiver :5201]        │
 │                                                                               │                                 │
 │                                                                               ▼                                 │
-│                                                             iperf3 --json-stream / --logfile                    │
+│                                                             iperf3 --one-off --logfile (receiver_iperf.sh)      │
 │                                                             (Ground-Truth Delivered Goodput & UDP Loss)         │
 │                                                                               │                                 │
 │                                                                               ▼                                 │
@@ -120,7 +124,7 @@ To guarantee scientific rigor, all telemetry recorded during experiments is stri
   * `nwdaf_comm_dl_bytes` (Cumulative downlink user-plane volume)
   * `nwdaf_comm_duration_sec` (Cumulative URR report window duration)
   * `nwdaf_comm_vol_std_bytes` (Volume standard deviation across session records)
-  * *Consumer-Derived Rate (Feature Engineering):* $\Delta V_{UL} / \Delta t$ over consecutive polling updates.
+  * *Note on Rate Derivatives:* Throughput rate estimation from gauge volume metrics (`rate()`) is deferred pending verification of volume report interval semantics and source timestamps.
 
 ### Tier 2: Ground-Truth Validation & Reference Data (Excluded from Model Input)
 * **Core Kernel Validation:**

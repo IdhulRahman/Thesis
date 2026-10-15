@@ -55,7 +55,7 @@
         "defaults": {
           "color": { "mode": "thresholds" },
           "mappings": [
-            { "options": { "0": { "color": "orange", "text": "STALE / UNCHANGED (>45s)" }, "1": { "color": "green", "text": "FRESH URR REPORT (<=45s)" } }, "type": "value" }
+            { "options": { "0": { "color": "orange", "text": "UNCHANGED / IDLE (>45s)" }, "1": { "color": "green", "text": "VALUE CHANGED (<=45s)" } }, "type": "value" }
           ],
           "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }, { "color": "green", "value": 1 }] }
         }
@@ -65,8 +65,8 @@
       "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
       "pluginVersion": "10.1.0",
       "targets": [{ "expr": "nwdaf_comm_freshness", "refId": "A" }],
-      "title": "NWDAF AnLF Data Freshness",
-      "description": "Heuristic change indicator: 1 if source URR volume changed within 45s, else 0.",
+      "title": "NWDAF AnLF Value Change Indicator",
+      "description": "Heuristic value-change indicator: 1 if source URR volume value changed within 45s, else 0 (does NOT represent underlying source report generation timestamp).",
       "type": "stat"
     },
     {
@@ -173,18 +173,19 @@
       "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": {
         "defaults": {
-          "custom": { "fillOpacity": 20, "lineWidth": 2, "spanNulls": false },
-          "unit": "Mbps"
+          "custom": { "fillOpacity": 10, "lineInterpolation": "stepAfter", "lineWidth": 2, "spanNulls": false },
+          "unit": "bytes"
         }
       },
       "gridPos": { "h": 6, "w": 24, "x": 0, "y": 13 },
       "id": 8,
-      "options": { "tooltip": { "mode": "single" } },
+      "options": { "tooltip": { "mode": "multi" } },
       "targets": [
-        { "expr": "rate(nwdaf_comm_ul_bytes[60s]) * 8 / 1e6", "legendFormat": "Consumer Derived Throughput (rate[60s])", "refId": "A" }
+        { "expr": "nwdaf_comm_ul_bytes", "legendFormat": "Uplink Volume (Discrete Step)", "refId": "A" },
+        { "expr": "nwdaf_comm_dl_bytes", "legendFormat": "Downlink Volume (Discrete Step)", "refId": "B" }
       ],
-      "title": "Consumer-Derived Uplink Throughput from AnLF Cumulative Volume",
-      "description": "Consumer Feature Engineering: Derived derivative rate from NWDAF TS 29.520 cumulative volume (~30s cadence).",
+      "title": "NWDAF AnLF Periodic Volume Trajectory (Discrete Step Visualization, ~30s Cadence)",
+      "description": "Periodic cumulative volume updates as reported by NWDAF AnLF ue_communication.go. Step-after interpolation visualizes discrete ~30s URR batch updates. Rate derivative is deferred pending verified volume interval semantics.",
       "type": "timeseries"
     },
 
