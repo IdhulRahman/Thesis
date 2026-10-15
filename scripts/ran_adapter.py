@@ -74,13 +74,30 @@ def extract_latest_radio_stats(log_path):
 
 def send_to_collector(stats1, stats2):
     payload = {
+        "domain": "ran",
         "ran_cell_prb_utilization": {
             "1": stats1["prb_pct"],
             "2": stats2["prb_pct"]
         },
-        "ran_cell_radio_stats": {
-            "1": stats1,
-            "2": stats2
+        "ran_cell_mcs": {
+            "1": stats1["mcs"],
+            "2": stats2["mcs"]
+        },
+        "ran_cell_bler": {
+            "1": stats1["bler"],
+            "2": stats2["bler"]
+        },
+        "ran_cell_snr_db": {
+            "1": stats1["snr_db"],
+            "2": stats2["snr_db"]
+        },
+        "ran_cell_rssi_dbm": {
+            "1": stats1["rssi_dbm"],
+            "2": stats2["rssi_dbm"]
+        },
+        "ran_cell_ulsch_errors": {
+            "1": stats1["ulsch_errors"],
+            "2": stats2["ulsch_errors"]
         }
     }
     try:
