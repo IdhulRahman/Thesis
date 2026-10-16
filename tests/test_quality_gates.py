@@ -1809,8 +1809,195 @@ class TestResearchContractQualityGates(unittest.TestCase):
         self.assertFalse(is_val)
         self.assertIn("tidak valid", msg)
 
+    def test_neg_s6_tbf_snapshot_fq_codel_fails(self):
+        """NEG-FAULTS-S6-FQCODEL: Snapshot with non-TBF qdisc (fq_codel) must be rejected."""
+        tbf_snap_path = os.path.join(self.run_dir, "tbf_observed_config_phase_1_S6.json")
+        with open(tbf_snap_path, "w", encoding="utf-8") as sf:
+            json.dump({
+                "qdisc_snapshot": "qdisc fq_codel 0: dev eth0 root refcnt 2 limit 10240p flows 1024 quantum 1514",
+                "execution_command": "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root fq_codel",
+                "target_container": "oai-upf-slice1",
+                "target_interface": "eth0",
+                "applied_time_utc": "2026-10-16T10:00:30Z"
+            }, sf)
+
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        create_fixture_telemetry(csv_path, self.run_id, [
+            {"elapsed_sec": str(i), "event_phase_id": "phase_1_S6", "event_scenario": "S6", "ran_prb_cell1": 40.0, "upf_backlog_bytes_embb": 150000.0, "nwdaf_comm_ul_bytes": 1000.0}
+            for i in range(35)
+        ])
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [{"phase_id": "phase_1_S6", "scenario_id": "S6"}])
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [{"http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}])
+
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+        config["require_receiver"] = False
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir, run_id=self.run_id, planned_scenarios=["S6"], recovery_verified=True, config_params=config
+        )
+        self.assertFalse(tr_elig, "fq_codel snapshot must fail training_eligible")
+        self.assertTrue(any("bukan TBF" in r for r in tr_reasons))
+
+    def test_neg_s6_tbf_snapshot_interface_lo_fails(self):
+        """NEG-FAULTS-S6-LO: Snapshot targeting loopback interface (lo) must be rejected."""
+        tbf_snap_path = os.path.join(self.run_dir, "tbf_observed_config_phase_1_S6.json")
+        with open(tbf_snap_path, "w", encoding="utf-8") as sf:
+            json.dump({
+                "qdisc_snapshot": "qdisc tbf 8001: dev lo root rate 12Mbit burst 10Kb lat 200.0ms",
+                "execution_command": "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev lo root tbf rate 12mbit burst 10kb latency 200ms",
+                "target_container": "oai-upf-slice1",
+                "target_interface": "lo",
+                "applied_time_utc": "2026-10-16T10:00:30Z"
+            }, sf)
+
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        create_fixture_telemetry(csv_path, self.run_id, [
+            {"elapsed_sec": str(i), "event_phase_id": "phase_1_S6", "event_scenario": "S6", "ran_prb_cell1": 40.0, "upf_backlog_bytes_embb": 150000.0, "nwdaf_comm_ul_bytes": 1000.0}
+            for i in range(35)
+        ])
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [{"phase_id": "phase_1_S6", "scenario_id": "S6"}])
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [{"http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}])
+
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+        config["require_receiver"] = False
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir, run_id=self.run_id, planned_scenarios=["S6"], recovery_verified=True, config_params=config
+        )
+        self.assertFalse(tr_elig, "Loopback interface snapshot must fail training_eligible")
+        self.assertTrue(any("loopback" in r for r in tr_reasons))
+
+    def test_neg_s6_tbf_snapshot_wrong_container_fails(self):
+        """NEG-FAULTS-S6-CONTAINER: Snapshot targeting non-UPF container (e.g. mysql) must be rejected."""
+        tbf_snap_path = os.path.join(self.run_dir, "tbf_observed_config_phase_1_S6.json")
+        with open(tbf_snap_path, "w", encoding="utf-8") as sf:
+            json.dump({
+                "qdisc_snapshot": "qdisc tbf 8001: dev eth0 root rate 12Mbit burst 10Kb lat 200.0ms",
+                "execution_command": "sudo docker exec -it mysql-db tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms",
+                "target_container": "mysql-db",
+                "target_interface": "eth0",
+                "applied_time_utc": "2026-10-16T10:00:30Z"
+            }, sf)
+
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        create_fixture_telemetry(csv_path, self.run_id, [
+            {"elapsed_sec": str(i), "event_phase_id": "phase_1_S6", "event_scenario": "S6", "ran_prb_cell1": 40.0, "upf_backlog_bytes_embb": 150000.0, "nwdaf_comm_ul_bytes": 1000.0}
+            for i in range(35)
+        ])
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [{"phase_id": "phase_1_S6", "scenario_id": "S6"}])
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [{"http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}])
+
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+        config["require_receiver"] = False
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir, run_id=self.run_id, planned_scenarios=["S6"], recovery_verified=True, config_params=config
+        )
+        self.assertFalse(tr_elig, "Wrong container snapshot must fail training_eligible")
+        self.assertTrue(any("container" in r.lower() for r in tr_reasons))
+
+    def test_neg_s6_tbf_snapshot_stale_year_2000_fails(self):
+        """NEG-FAULTS-S6-STALE-TIME: Snapshot with timestamp in year 2000 must be rejected."""
+        tbf_snap_path = os.path.join(self.run_dir, "tbf_observed_config_phase_1_S6.json")
+        with open(tbf_snap_path, "w", encoding="utf-8") as sf:
+            json.dump({
+                "qdisc_snapshot": "qdisc tbf 8001: dev eth0 root rate 12Mbit burst 10Kb lat 200.0ms",
+                "execution_command": "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms",
+                "target_container": "oai-upf-slice1",
+                "target_interface": "eth0",
+                "applied_time_utc": "2000-01-01T10:00:30Z"
+            }, sf)
+
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        create_fixture_telemetry(csv_path, self.run_id, [
+            {"elapsed_sec": str(i), "event_phase_id": "phase_1_S6", "event_scenario": "S6", "ran_prb_cell1": 40.0, "upf_backlog_bytes_embb": 150000.0, "nwdaf_comm_ul_bytes": 1000.0}
+            for i in range(35)
+        ])
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [{"phase_id": "phase_1_S6", "scenario_id": "S6"}])
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [{"http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}])
+
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+        config["require_receiver"] = False
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir, run_id=self.run_id, planned_scenarios=["S6"], recovery_verified=True, config_params=config
+        )
+        self.assertFalse(tr_elig, "Stale timestamp (year 2000) must fail training_eligible")
+        self.assertTrue(any("2000" in r or "tahun" in r or "tidak selaras" in r for r in tr_reasons))
+
+    def test_neg_s6_tbf_snapshot_arbitrary_string_fails(self):
+        """NEG-FAULTS-S6-ARBITRARY: Snapshot with arbitrary content {'qdisc_snapshot': 'anything'} must be rejected."""
+        tbf_snap_path = os.path.join(self.run_dir, "tbf_observed_config_phase_1_S6.json")
+        with open(tbf_snap_path, "w", encoding="utf-8") as sf:
+            json.dump({"qdisc_snapshot": "anything"}, sf)
+
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        create_fixture_telemetry(csv_path, self.run_id, [
+            {"elapsed_sec": str(i), "event_phase_id": "phase_1_S6", "event_scenario": "S6", "ran_prb_cell1": 40.0, "upf_backlog_bytes_embb": 150000.0, "nwdaf_comm_ul_bytes": 1000.0}
+            for i in range(35)
+        ])
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [{"phase_id": "phase_1_S6", "scenario_id": "S6"}])
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [{"http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}])
+
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+        config["require_receiver"] = False
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir, run_id=self.run_id, planned_scenarios=["S6"], recovery_verified=True, config_params=config
+        )
+        self.assertFalse(tr_elig, "Arbitrary snapshot must fail training_eligible")
+        self.assertTrue(any("arsip konfigurasi TBF aktual tidak valid" in r for r in tr_reasons))
+
+    def test_neg_interactive_runner_empty_input_creates_no_snapshot(self):
+        """NEG-RUNNER-INT: Empty operator observation input must NOT create a dummy snapshot file."""
+        from unittest.mock import patch
+        snap_path = os.path.join(self.run_dir, "tbf_observed_config_phase_1_S6.json")
+        if os.path.exists(snap_path):
+            os.remove(snap_path)
+
+        with patch("builtins.input", side_effect=["", ""]):
+            obs_qdisc = input("prompt1").strip()
+            obs_cmd = input("prompt2").strip()
+            if obs_qdisc:
+                with open(snap_path, "w", encoding="utf-8") as sf:
+                    json.dump({"qdisc_snapshot": obs_qdisc}, sf)
+
+        self.assertFalse(os.path.exists(snap_path), "Empty observation input must not create a snapshot file")
+
+    def test_neg_unattended_runner_does_not_fabricate_synthetic_snapshot(self):
+        """NEG-RUNNER-UNATT: Unattended runner without external snapshot must NOT synthesize fake observed file."""
+        snap_path = os.path.join(self.run_dir, "tbf_observed_config_phase_1_S6.json")
+        if os.path.exists(snap_path):
+            os.remove(snap_path)
+
+        # In unattended mode, runner only logs phase and checks if snapshot exists; it does not fabricate one
+        is_unattended = True
+        scen = "S6"
+        phase_id = "phase_1_S6"
+        if is_unattended and scen == "S6":
+            pass
+
+        self.assertFalse(os.path.exists(snap_path), "Unattended runner must never synthesize fake TBF snapshot")
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
 
 

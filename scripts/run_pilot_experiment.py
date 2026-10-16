@@ -553,6 +553,96 @@ def validate_receiver_archive(file_path):
     return True, "Valid JSON-stream", {"bytes_received": bytes_rx}
 
 
+def validate_tbf_observed_config(s_data, ep, exp_scen, planned_config, run_id, phase_event_ts=None):
+    """
+    Validates empirical observed TBF configuration archive against strict scientific traceability gates:
+    - Must be a valid dictionary
+    - Run & Phase identity: run_id and phase_id match current run/phase if present
+    - Target container: must be oai-upf-slice1 (or UPF container)
+    - Target interface: must be eth0, strictly rejecting loopback (lo)
+    - Mechanism: qdisc must explicitly be 'qdisc tbf'
+    - Parameters: must specify rate, burst, and latency
+    - Timestamp: applied_time_utc must be valid ISO8601, realistic year (>= 2024), and aligned with phase
+    """
+    if not isinstance(s_data, dict):
+        return False, "Data snapshot bukan berupa JSON dictionary valid"
+
+    raw_snap = str(s_data.get("qdisc_snapshot", "")).strip()
+    if not raw_snap:
+        return False, "Field 'qdisc_snapshot' kosong atau tidak ditemukan"
+
+    raw_snap_lower = raw_snap.lower()
+
+    # 1. Mechanism check: must explicitly be TBF
+    if "qdisc tbf" not in raw_snap_lower:
+        return False, f"Jenis qdisc pada snapshot bukan TBF (ditemukan: '{raw_snap[:60]}')"
+
+    # 2. Parameters check: must define rate, burst, latency
+    if "rate" not in raw_snap_lower:
+        return False, "Snapshot qdisc TBF tidak memuat parameter 'rate'"
+    if "burst" not in raw_snap_lower:
+        return False, "Snapshot qdisc TBF tidak memuat parameter 'burst'"
+    if not any(k in raw_snap_lower for k in ("lat ", "latency ", "lat", "latency")):
+        return False, "Snapshot qdisc TBF tidak memuat parameter 'lat' / 'latency'"
+
+    # 3. Target container check
+    container = str(s_data.get("target_container", "")).strip().lower()
+    if container:
+        if not any(c in container for c in ("upf", "oai-upf")):
+            return False, f"Target container '{container}' tidak valid (harus container UPF: oai-upf-slice1)"
+
+    # 4. Target interface check
+    interface = str(s_data.get("target_interface", "")).strip().lower()
+    if interface in ("lo", "loopback", "127.0.0.1"):
+        return False, f"Target interface '{interface}' tidak valid (interface loopback ditolak, harus eth0)"
+    if interface and interface != "eth0":
+        return False, f"Target interface '{interface}' tidak sesuai dengan interface data plane UPF (eth0)"
+
+    # Check interface in raw snapshot text
+    if "dev lo" in raw_snap_lower or "dev loopback" in raw_snap_lower:
+        return False, "Snapshot qdisc teramati pada interface loopback ('dev lo'), bukan interface data plane eth0"
+    if "dev " in raw_snap_lower:
+        dev_match = re.search(r"dev\s+([a-zA-Z0-9_\-]+)", raw_snap)
+        if dev_match:
+            obs_dev = dev_match.group(1).lower()
+            if obs_dev in ("lo", "loopback"):
+                return False, f"Snapshot qdisc teramati pada interface loopback '{obs_dev}', bukan eth0"
+            if obs_dev != "eth0":
+                return False, f"Snapshot qdisc teramati pada interface '{obs_dev}', bukan data plane eth0"
+
+    # 5. Run & Phase identity check
+    snap_run_id = s_data.get("run_id")
+    if snap_run_id and str(snap_run_id).strip() != str(run_id).strip():
+        return False, f"run_id pada snapshot ('{snap_run_id}') tidak cocok dengan run_id pengujian ('{run_id}')"
+
+    snap_phase_id = s_data.get("phase_id")
+    if snap_phase_id and str(snap_phase_id).strip() != str(ep).strip():
+        return False, f"phase_id pada snapshot ('{snap_phase_id}') tidak cocok dengan fase ('{ep}')"
+
+    # 6. Timestamp check
+    ts_str = s_data.get("applied_time_utc") or s_data.get("timestamp_utc")
+    if not ts_str:
+        return False, "Snapshot TBF tidak memuat waktu observasi/penerapan (applied_time_utc kosong)"
+
+    try:
+        snap_dt = datetime.datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+        if snap_dt.year < 2024:
+            return False, f"Waktu snapshot TBF tidak valid: '{ts_str}' (tahun {snap_dt.year} < 2024)"
+
+        if phase_event_ts:
+            try:
+                phase_dt = datetime.datetime.fromisoformat(str(phase_event_ts).replace("Z", "+00:00"))
+                diff_sec = abs((snap_dt - phase_dt).total_seconds())
+                if diff_sec > 7200:
+                    return False, f"Waktu snapshot TBF '{ts_str}' tidak selaras dengan fase pengujian '{phase_event_ts}' (selisih {diff_sec:.0f}s > 7200s)"
+            except Exception:
+                pass
+    except Exception as ex:
+        return False, f"Format timestamp snapshot TBF tidak valid '{ts_str}': {ex}"
+
+    return True, ""
+
+
 def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=True, recovery_evidence=None, config_params=None, collector_metrics=None, initial_collector_metrics=None):
     """
     Strict multi-dimensional dataset evaluator enforcing the 3 research contract statuses:
@@ -953,6 +1043,7 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                     }
 
                     observed_config = None
+                    observed_config_validation_error = None
                     candidate_snapshot_paths = [
                         os.path.join(run_dir, f"tbf_observed_config_{ep}.json"),
                         os.path.join(run_dir, f"tbf_actual_config_{ep}.json"),
@@ -963,26 +1054,25 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                             try:
                                 with open(sp, "r", encoding="utf-8") as sf:
                                     s_data = json.load(sf)
-                                    if isinstance(s_data, dict) and s_data.get("qdisc_snapshot"):
+                                    is_ok, err_msg = validate_tbf_observed_config(
+                                        s_data, ep=ep, exp_scen=exp_scen,
+                                        planned_config=planned_config, run_id=run_id,
+                                        phase_event_ts=ev_det.get("timestamp_utc", "")
+                                    )
+                                    if is_ok:
                                         observed_config = s_data
+                                        observed_config_validation_error = None
                                         break
-                            except Exception:
-                                pass
+                                    else:
+                                        observed_config_validation_error = err_msg
+                            except Exception as ex:
+                                observed_config_validation_error = f"Gagal membaca/parse JSON snapshot TBF: {ex}"
 
-                    if not observed_config and ev_det.get("notes"):
-                        n_str = ev_det.get("notes", "")
-                        if "qdisc tbf" in n_str.lower() or ("rate" in n_str.lower() and "burst" in n_str.lower()):
-                            observed_config = {
-                                "qdisc_snapshot": n_str,
-                                "target_container": ev_det.get("target_component", "oai-upf-slice1"),
-                                "target_interface": "eth0",
-                                "execution_command": "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms",
-                                "applied_time_utc": ev_det.get("timestamp_utc", ""),
-                                "verification_source": "Operator observation note"
-                            }
-
-                    if not observed_config or not observed_config.get("qdisc_snapshot"):
-                        training_reasons.append(f"Fase '{ep}' (S6 Core Bottleneck) tidak memuat bukti arsip konfigurasi TBF aktual (qdisc snapshot/container/interface/waktu penerapan)")
+                    if not observed_config:
+                        if observed_config_validation_error:
+                            training_reasons.append(f"Fase '{ep}' (S6 Core Bottleneck) arsip konfigurasi TBF aktual tidak valid: {observed_config_validation_error}")
+                        else:
+                            training_reasons.append(f"Fase '{ep}' (S6 Core Bottleneck) tidak memuat bukti arsip konfigurasi TBF aktual (berkas snapshot qdisc/container/interface tidak ditemukan)")
 
                     fault_evidence[ep] = {
                         "scenario": exp_scen,
@@ -992,10 +1082,10 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                         "total_samples": n_samples,
                         "planned_configuration": planned_config,
                         "observed_actual_configuration": observed_config,
-                        "tbf_qdisc_config": observed_config.get("qdisc_snapshot") if observed_config else planned_config["planned_parameters"],
-                        "tbf_interface": observed_config.get("target_interface", planned_config["target_interface"]) if observed_config else planned_config["target_interface"],
-                        "tbf_applied_time_utc": observed_config.get("applied_time_utc", ev_det.get("timestamp_utc", "")) if observed_config else ev_det.get("timestamp_utc", ""),
-                        "tbf_mechanism": planned_config["planned_mechanism"]
+                        "tbf_qdisc_config": observed_config.get("qdisc_snapshot") if observed_config else None,
+                        "tbf_interface": observed_config.get("target_interface", "eth0") if observed_config else None,
+                        "tbf_applied_time_utc": observed_config.get("applied_time_utc", "") if observed_config else None,
+                        "tbf_mechanism": "TBF_RATELIMIT"
                     }
 
                 elif "S1" in exp_scen:
@@ -1160,37 +1250,35 @@ def main():
 
                 if scen == "S6":
                     print("    [TBF Observasi Aktual] Jalankan di VM-3: sudo docker exec oai-upf-slice1 tc qdisc show dev eth0")
-                    obs_qdisc = input("    -> Masukkan output 'tc qdisc show' (default: qdisc tbf 8001: dev eth0 root rate 12Mbit burst 10Kb lat 200.0ms): ").strip()
-                    if not obs_qdisc:
-                        obs_qdisc = "qdisc tbf 8001: dev eth0 root rate 12Mbit burst 10Kb lat 200.0ms"
-                    obs_cmd = input("    -> Masukkan perintah eksekusi VM-3 (default: sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms): ").strip()
-                    if not obs_cmd:
-                        obs_cmd = "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms"
-                    tbf_snap = {
-                        "qdisc_snapshot": obs_qdisc,
-                        "execution_command": obs_cmd,
-                        "target_container": "oai-upf-slice1",
-                        "target_interface": "eth0",
-                        "applied_time_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                        "verification_source": "Operator runtime terminal observation"
-                    }
-                    snap_path = os.path.join(run_dir, f"tbf_observed_config_{phase_id}.json")
-                    with open(snap_path, "w", encoding="utf-8") as sf:
-                        json.dump(tbf_snap, sf, indent=2)
+                    print("    (Contoh output: qdisc tbf 8001: dev eth0 root rate 12Mbit burst 10Kb lat 200.0ms)")
+                    obs_qdisc = input("    -> Masukkan output mentah 'tc qdisc show dev eth0' dari VM-3 (wajib diisi, kosongkan jika tidak ada): ").strip()
+                    obs_cmd = input("    -> Masukkan perintah tc yang telah dieksekusi di VM-3 (opsional): ").strip()
+
+                    if obs_qdisc:
+                        tbf_snap = {
+                            "run_id": run_id,
+                            "phase_id": phase_id,
+                            "qdisc_snapshot": obs_qdisc,
+                            "execution_command": obs_cmd if obs_cmd else "sudo docker exec oai-upf-slice1 tc qdisc show dev eth0",
+                            "target_container": "oai-upf-slice1",
+                            "target_interface": "eth0",
+                            "applied_time_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                            "verification_source": "Operator runtime terminal observation"
+                        }
+                        snap_path = os.path.join(run_dir, f"tbf_observed_config_{phase_id}.json")
+                        with open(snap_path, "w", encoding="utf-8") as sf:
+                            json.dump(tbf_snap, sf, indent=2)
+                        print("    [+] Bukti observasi TBF berhasil diarsipkan.")
+                    else:
+                        print("    [!] Input observasi TBF kosong. Berkas snapshot tidak dibuat (kelayakan training S6 akan ditolak).")
             else:
                 phase_notes = f"Phase {idx}/{len(scenarios)}: {scen}"
                 if scen == "S6":
                     snap_path = os.path.join(run_dir, f"tbf_observed_config_{phase_id}.json")
-                    if not os.path.exists(snap_path):
-                        with open(snap_path, "w", encoding="utf-8") as sf:
-                            json.dump({
-                                "qdisc_snapshot": "qdisc tbf 8001: dev eth0 root refcnt 2 rate 12Mbit burst 10Kb lat 200.0ms",
-                                "execution_command": "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms",
-                                "target_container": "oai-upf-slice1",
-                                "target_interface": "eth0",
-                                "applied_time_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                                "verification_source": "Unattended testbed orchestrator execution"
-                            }, sf, indent=2)
+                    if os.path.exists(snap_path):
+                        print(f"    [TBF Bukti Teramati] Ditemukan arsip snapshot TBF aktual di {snap_path}")
+                    else:
+                        print(f"    [!] Peringatan: Berkas bukti TBF aktual ({snap_path}) belum tersedia dari VM-3. Kelayakan training S6 akan ditolak.")
 
             if not log_event(scen, phase_notes, phase_id=phase_id):
                 raise RuntimeError(f"Gagal mencatat event label {scen} ke file event!")
