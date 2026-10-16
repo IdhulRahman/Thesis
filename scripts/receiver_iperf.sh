@@ -83,6 +83,13 @@ case "$ACTION" in
     SUMMARY_FILE="${HOST_EXPORT_DIR}/receiver_${SESSION_ID}_summary.json"
     mkdir -p "$HOST_EXPORT_DIR"
 
+    # If dedicated receiver is still running inside container, flush buffers by sending SIGINT
+    if sudo docker exec "$CONTAINER" pgrep -f "iperf3.*${PORT}" >/dev/null 2>&1; then
+      echo "[*] Flushing output buffers and terminating receiver on port $PORT..."
+      sudo docker exec "$CONTAINER" pkill -INT -f "iperf3.*${PORT}" 2>/dev/null || true
+      sleep 1
+    fi
+
     echo "[*] Checking and copying receiver JSON log from $CONTAINER:$LOG_FILE"
     if ! sudo docker exec "$CONTAINER" test -s "$LOG_FILE"; then
       echo "[ERROR] Log file $LOG_FILE inside $CONTAINER is missing or empty. Ensure client traffic has completed." >&2
@@ -125,42 +132,71 @@ try:
             elif data.get("event") == "end" and "data" in data:
                 end_data = data["data"]
                 session_complete = True
+            elif "intervals" in data and isinstance(data["intervals"], list) and data["intervals"]:
+                last_iv = data["intervals"][-1]
+                end_data = last_iv.get("sum") or last_iv
+                session_complete = False
     except json.JSONDecodeError:
         pass
 
-    # 2. If not single standard JSON, parse as JSON-Stream (one JSON object per line)
+    # 2. If not single standard JSON, check if it is formatted multi-line JSON or JSON-Stream
     if end_data is None:
         lines = [l.strip() for l in content.splitlines() if l.strip()]
         if not lines:
             print("[ERROR] No JSON lines found in receiver log", file=sys.stderr)
             sys.exit(1)
-        parsed_lines = []
-        for idx, l in enumerate(lines, 1):
-            try:
-                parsed_lines.append(json.loads(l))
-            except Exception as ex:
-                print(f"[ERROR] Corrupt JSON line #{idx} in stream: {ex}", file=sys.stderr)
-                sys.exit(1)
-        is_stream = True
 
-        for rec in reversed(parsed_lines):
-            if isinstance(rec, dict):
-                if rec.get("event") == "end" and "data" in rec:
-                    end_data = rec["data"]
-                    session_complete = True
-                    break
-                elif "end" in rec:
-                    end_data = rec["end"]
-                    session_complete = True
-                    break
+        # Distinguish between indented multi-line JSON and single-line-per-event JSON-Stream
+        if lines[0] == "{" or not lines[0].endswith("}"):
+            repaired = False
+            last_bracket = content.rfind("},")
+            if last_bracket != -1:
+                candidate = content[:last_bracket+1] + "]}}"
+                try:
+                    cdata = json.loads(candidate)
+                    if "intervals" in cdata and cdata["intervals"]:
+                        last_iv = cdata["intervals"][-1]
+                        end_data = last_iv.get("sum") or last_iv
+                        session_complete = False
+                        repaired = True
+                except Exception:
+                    pass
 
-        if end_data is None:
-            # Fallback to last interval event for partial telemetry, but mark session_complete=False
+            if not repaired and end_data is None:
+                if '"start"' in content and '"intervals"' not in content:
+                    print("[ERROR] Receiver log only contains initial handshake ('start' block); no data intervals were recorded. Ensure client iperf3 finished sending traffic before stopping the receiver.", file=sys.stderr)
+                    sys.exit(1)
+                else:
+                    print("[ERROR] Corrupt or truncated formatted JSON in receiver log", file=sys.stderr)
+                    sys.exit(1)
+        else:
+            # Real JSON-stream (one JSON object per line)
+            parsed_lines = []
+            for idx, l in enumerate(lines, 1):
+                try:
+                    parsed_lines.append(json.loads(l))
+                except Exception as ex:
+                    print(f"[ERROR] Corrupt JSON line #{idx} in stream: {ex}", file=sys.stderr)
+                    sys.exit(1)
+            is_stream = True
+
             for rec in reversed(parsed_lines):
-                if isinstance(rec, dict) and rec.get("event") == "interval" and "data" in rec:
-                    end_data = rec["data"]
-                    session_complete = False
-                    break
+                if isinstance(rec, dict):
+                    if rec.get("event") == "end" and "data" in rec:
+                        end_data = rec["data"]
+                        session_complete = True
+                        break
+                    elif "end" in rec:
+                        end_data = rec["end"]
+                        session_complete = True
+                        break
+
+            if end_data is None:
+                for rec in reversed(parsed_lines):
+                    if isinstance(rec, dict) and rec.get("event") == "interval" and "data" in rec:
+                        end_data = rec["data"]
+                        session_complete = False
+                        break
 
     if not isinstance(end_data, dict) or not end_data:
         print("[ERROR] No valid end or summary event found in receiver log", file=sys.stderr)
