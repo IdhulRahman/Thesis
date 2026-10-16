@@ -153,6 +153,7 @@ case "$ACTION" in
     cleanup
 
     IPERF_LOG=""
+    IPERF_PID=""
     UE1_PING_LOG=""
     PING_LOG=""
     UE1_NS=""
@@ -169,16 +170,17 @@ case "$ACTION" in
         > "$IPERF_LOG"
         > "$UE1_PING_LOG"
         > "${UE1_PING_LOG}.state"
-        nohup ip netns exec "$ns" iperf3 -c "$EXT_DN_IP" -u -b "${EMBB_RATE}M" -t "$(( DURATION + 10 ))" -i 1 --logfile "$IPERF_LOG" </dev/null >/dev/null 2>&1 &
-        echo $! >> "$PID_FILE"
-        nohup ip netns exec "$ns" ping -D -O -I oaitun_ue1 -i 0.2 -c $(( (DURATION + 30) * 5 )) "$EXT_DN_IP" </dev/null > "$UE1_PING_LOG" 2>&1 &
+        nohup ip netns exec "$ns" iperf3 -c "$EXT_DN_IP" -u -b "${EMBB_RATE}M" -t "$DURATION" -i 1 --logfile "$IPERF_LOG" </dev/null >/dev/null 2>&1 &
+        IPERF_PID=$!
+        echo "$IPERF_PID" >> "$PID_FILE"
+        nohup ip netns exec "$ns" ping -D -O -I oaitun_ue1 -i 0.2 -c $(( (DURATION + 5) * 5 )) "$EXT_DN_IP" </dev/null > "$UE1_PING_LOG" 2>&1 &
         echo $! >> "$PID_FILE"
       else
         UE2_NS="$ns"
         PING_LOG="$LOG_DIR/ping_${ns}_${TIMESTAMP}.log"
         > "$PING_LOG"
         > "${PING_LOG}.state"
-        nohup ip netns exec "$ns" ping -D -O -I oaitun_ue1 -i 0.1 -c $(( (DURATION + 30) * 10 )) "$EXT_DN_IP" </dev/null > "$PING_LOG" 2>&1 &
+        nohup ip netns exec "$ns" ping -D -O -I oaitun_ue1 -i 0.1 -c $(( (DURATION + 5) * 10 )) "$EXT_DN_IP" </dev/null > "$PING_LOG" 2>&1 &
         echo $! >> "$PID_FILE"
       fi
     done < "$STATE_FILE"
@@ -327,6 +329,12 @@ case "$ACTION" in
     done
 
     echo "-----------------------------------------------------------------------"
+
+    if [[ -n "$IPERF_PID" ]] && kill -0 "$IPERF_PID" 2>/dev/null; then
+      wait "$IPERF_PID" 2>/dev/null || sleep 1
+    else
+      sleep 0.5
+    fi
 
     final_tput=""
     if [[ -n "$IPERF_LOG" && -f "$IPERF_LOG" ]]; then
