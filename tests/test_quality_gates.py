@@ -2179,6 +2179,113 @@ class TestResearchContractQualityGates(unittest.TestCase):
         self.assertTrue(dq_pass, f"Data quality must pass: {dq_reasons}")
         self.assertTrue(tr_elig, f"TBF snapshot with limit instead of latency must pass: {tr_reasons}")
 
+    def test_neg_s6_tbf_snapshot_missing_rate_fails(self):
+        """NEG-FAULTS-S6-NO-RATE: Snapshot without explicit rate keyword (e.g. burst 12Mb limit 200Kb) must be rejected."""
+        tbf_snap_path = os.path.join(self.run_dir, "tbf_observed_config_phase_1_S6.json")
+        with open(tbf_snap_path, "w", encoding="utf-8") as sf:
+            json.dump({
+                "run_id": self.run_id,
+                "phase_id": "phase_1_S6",
+                "qdisc_snapshot": "qdisc tbf 8001: dev eth0 root burst 12Mb limit 200Kb",
+                "execution_command": "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf burst 12mb limit 200kb",
+                "target_container": "oai-upf-slice1",
+                "target_interface": "eth0",
+                "applied_time_utc": "2026-10-16T10:00:30Z",
+                "verification_source": "Operator runtime terminal observation"
+            }, sf)
+
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        create_fixture_telemetry(csv_path, self.run_id, [
+            {"elapsed_sec": str(i), "event_phase_id": "phase_1_S6", "event_scenario": "S6", "ran_prb_cell1": 40.0, "upf_backlog_bytes_embb": 150000.0, "nwdaf_comm_ul_bytes": 1000.0}
+            for i in range(35)
+        ])
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [{"timestamp_utc": "2026-10-16T10:00:30Z", "phase_id": "phase_1_S6", "scenario_id": "S6", "parameters": "rate=12M,latency=200ms"}])
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [{"http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}])
+
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+        config["require_receiver"] = False
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir, run_id=self.run_id, planned_scenarios=["S6"], recovery_verified=True, config_params=config
+        )
+        self.assertFalse(tr_elig, "TBF snapshot without explicit rate keyword must fail training_eligible")
+        self.assertTrue(any("rate" in r.lower() for r in tr_reasons))
+
+    def test_neg_s6_tbf_snapshot_outside_observation_window_fails(self):
+        """NEG-FAULTS-S6-OUTSIDE-WINDOW: Snapshot observed 1 hour before phase (3600s drift > 300s window) must be rejected."""
+        tbf_snap_path = os.path.join(self.run_dir, "tbf_observed_config_phase_1_S6.json")
+        with open(tbf_snap_path, "w", encoding="utf-8") as sf:
+            json.dump({
+                "run_id": self.run_id,
+                "phase_id": "phase_1_S6",
+                "qdisc_snapshot": "qdisc tbf 8001: dev eth0 root rate 12Mbit burst 10Kb lat 200.0ms",
+                "execution_command": "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms",
+                "target_container": "oai-upf-slice1",
+                "target_interface": "eth0",
+                "observed_time_utc": "2026-10-16T09:00:00Z",
+                "applied_time_utc": "2026-10-16T09:00:00Z",
+                "verification_source": "Operator runtime terminal observation"
+            }, sf)
+
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        create_fixture_telemetry(csv_path, self.run_id, [
+            {"elapsed_sec": str(i), "event_phase_id": "phase_1_S6", "event_scenario": "S6", "ran_prb_cell1": 40.0, "upf_backlog_bytes_embb": 150000.0, "nwdaf_comm_ul_bytes": 1000.0}
+            for i in range(35)
+        ])
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [{"timestamp_utc": "2026-10-16T10:00:30Z", "phase_id": "phase_1_S6", "scenario_id": "S6"}])
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [{"http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}])
+
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+        config["require_receiver"] = False
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir, run_id=self.run_id, planned_scenarios=["S6"], recovery_verified=True, config_params=config
+        )
+        self.assertFalse(tr_elig, "Snapshot observed 1 hour before phase must fail training_eligible")
+        self.assertTrue(any("jendela observasi" in r or "selisih" in r for r in tr_reasons))
+
+    def test_pos_s6_tbf_snapshot_applied_earlier_observed_during_phase_passes(self):
+        """POS-FAULTS-S6-APPLIED-EARLIER: TBF applied 1 hour earlier but observed freshly during phase passes."""
+        tbf_snap_path = os.path.join(self.run_dir, "tbf_observed_config_phase_1_S6.json")
+        with open(tbf_snap_path, "w", encoding="utf-8") as sf:
+            json.dump({
+                "run_id": self.run_id,
+                "phase_id": "phase_1_S6",
+                "qdisc_snapshot": "qdisc tbf 8001: dev eth0 root rate 12Mbit burst 10Kb lat 200.0ms",
+                "execution_command": "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms",
+                "target_container": "oai-upf-slice1",
+                "target_interface": "eth0",
+                "applied_time_utc": "2026-10-16T09:00:00Z",
+                "observed_time_utc": "2026-10-16T10:00:35Z",
+                "verification_source": "Operator runtime terminal observation"
+            }, sf)
+
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        create_fixture_telemetry(csv_path, self.run_id, [
+            {"elapsed_sec": str(i), "event_phase_id": "phase_1_S6", "event_scenario": "S6", "ran_prb_cell1": 40.0, "upf_backlog_bytes_embb": 150000.0, "nwdaf_comm_ul_bytes": 1000.0}
+            for i in range(35)
+        ])
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [{"timestamp_utc": "2026-10-16T10:00:30Z", "phase_id": "phase_1_S6", "scenario_id": "S6"}])
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [{"http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}])
+
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+        config["require_receiver"] = False
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir, run_id=self.run_id, planned_scenarios=["S6"], recovery_verified=True, config_params=config
+        )
+        self.assertTrue(dq_pass, f"Data quality must pass: {dq_reasons}")
+        self.assertTrue(tr_elig, f"Snapshot applied earlier but observed during phase must pass: {tr_reasons}")
+
 
 if __name__ == "__main__":
     unittest.main()

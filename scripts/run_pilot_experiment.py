@@ -553,20 +553,46 @@ def validate_receiver_archive(file_path):
     return True, "Valid JSON-stream", {"bytes_received": bytes_rx}
 
 
-def parse_tc_rate_bps(text):
+def parse_tc_qdisc_rate_bps(text):
     """
-    Parses rate string or tc output into bits per second (float).
-    Examples:
-    - 'rate=12M,latency=200ms' -> 12000000.0
-    - 'rate 12Mbit burst 10Kb' -> 12000000.0
-    - 'rate 1Gbit' -> 1000000000.0
-    - '12Mbps' -> 12000000.0
+    Parses rate value specifically from Linux tc qdisc output (e.g. 'tc qdisc show').
+    Strictly requires the explicit 'rate' keyword followed by value and optional unit.
+    Returns None if the 'rate' token is absent or invalid.
     """
     if not text:
         return None
-    m = re.search(r"rate[=:\s]+([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)?", text, re.IGNORECASE)
+    m = re.search(r"\brate\s+([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)?\b", text, re.IGNORECASE)
     if not m:
-        m = re.search(r"\b([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)\b", text)
+        return None
+    val = float(m.group(1))
+    unit = (m.group(2) or "").lower()
+    if unit.startswith("g"):
+        return val * 1e9
+    elif unit.startswith("m"):
+        return val * 1e6
+    elif unit.startswith("k"):
+        return val * 1e3
+    elif unit in ("bit", "bits", "bps"):
+        return val
+    elif unit in ("b", "byte", "bytes"):
+        return val * 8.0
+    return val
+
+
+def parse_planned_rate_bps(text):
+    """
+    Parses rate value from planned configuration strings or concise parameter specs.
+    Examples:
+    - 'rate=12M,latency=200ms' -> 12000000.0
+    - 'rate: 12Mbit' -> 12000000.0
+    - '12Mbit' -> 12000000.0
+    - '12M' -> 12000000.0
+    """
+    if not text:
+        return None
+    m = re.search(r"\brate[=:\s]+([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)?\b", text, re.IGNORECASE)
+    if not m:
+        m = re.match(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)?\s*$", text)
         if not m:
             return None
     val = float(m.group(1))
@@ -584,7 +610,12 @@ def parse_tc_rate_bps(text):
     return val
 
 
-def validate_tbf_observed_config(s_data, ep, exp_scen, planned_config, run_id, phase_event_ts=None):
+def parse_tc_rate_bps(text):
+    """Backward-compatible alias pointing to parse_planned_rate_bps."""
+    return parse_planned_rate_bps(text)
+
+
+def validate_tbf_observed_config(s_data, ep, exp_scen, planned_config, run_id, phase_event_ts=None, max_drift_sec=300):
     """
     Validates empirical observed TBF configuration archive against strict scientific traceability gates:
     - Must be a valid dictionary
@@ -592,8 +623,9 @@ def validate_tbf_observed_config(s_data, ep, exp_scen, planned_config, run_id, p
     - Target container: mandatory and must match planned container (oai-upf-slice1), rejecting slice2/non-UPF
     - Target interface: mandatory and must match planned interface (eth0), strictly rejecting loopback (lo)
     - Mechanism: qdisc must explicitly be 'qdisc tbf'
-    - Parameters: must specify rate matching planned rate (within 25%), burst, and (latency or limit per man 8 tc-tbf)
-    - Timestamp: applied_time_utc is mandatory, normalized to UTC, year >= 2024, and aligned with phase
+    - Parameters: must specify rate explicitly via parse_tc_qdisc_rate_bps matching planned rate (within 25%), burst, and (latency or limit per man 8 tc-tbf)
+    - Timestamp: observation timestamp is mandatory, normalized to UTC, year >= 2024, and within experiment observation window (default <= 300s of phase event)
+    - Applied vs Observed: distinguishes TBF application time from fresh snapshot observation time
     """
     if not isinstance(s_data, dict):
         return False, "Data snapshot bukan berupa JSON dictionary valid"
@@ -608,13 +640,13 @@ def validate_tbf_observed_config(s_data, ep, exp_scen, planned_config, run_id, p
     if "qdisc tbf" not in raw_snap_lower:
         return False, f"Jenis qdisc pada snapshot bukan TBF (ditemukan: '{raw_snap[:60]}')"
 
-    # 2. Parameters check: rate value, burst, and (latency or limit per man 8 tc-tbf)
-    actual_rate_bps = parse_tc_rate_bps(raw_snap)
+    # 2. Parameters check: explicit rate token, burst, and (latency or limit per man 8 tc-tbf)
+    actual_rate_bps = parse_tc_qdisc_rate_bps(raw_snap)
     if actual_rate_bps is None:
-        return False, "Snapshot qdisc TBF tidak memuat nilai parameter 'rate' yang dapat diurai"
+        return False, "Snapshot qdisc TBF tidak memuat parameter 'rate' yang eksplisit dan sah"
 
     planned_param_str = planned_config.get("planned_parameters", "")
-    planned_rate_bps = parse_tc_rate_bps(planned_param_str) or 12e6
+    planned_rate_bps = parse_planned_rate_bps(planned_param_str) or 12e6
     rate_ratio = actual_rate_bps / planned_rate_bps if planned_rate_bps > 0 else 0.0
     if not (0.75 <= rate_ratio <= 1.25):
         return False, f"Nilai rate snapshot ({actual_rate_bps/1e6:.1f} Mbps) tidak cocok dengan konfigurasi rencana ({planned_rate_bps/1e6:.1f} Mbps)"
@@ -673,25 +705,43 @@ def validate_tbf_observed_config(s_data, ep, exp_scen, planned_config, run_id, p
             if obs_dev != expected_interface:
                 return False, f"Snapshot qdisc teramati pada interface '{obs_dev}', bukan target data plane '{expected_interface}'"
 
-    # 4. Mandatory Timestamp Validation with Timezone Normalization
-    ts_str = s_data.get("applied_time_utc") or s_data.get("timestamp_utc")
-    if not ts_str:
-        return False, "Snapshot TBF tidak memuat waktu observasi/penerapan wajib (applied_time_utc kosong)"
+    # 4. Mandatory Timestamp Validation with Timezone Normalization and Observation Window Check
+    obs_ts_str = s_data.get("observed_time_utc") or s_data.get("snapshot_time_utc") or s_data.get("timestamp_utc") or s_data.get("applied_time_utc")
+    if not obs_ts_str:
+        return False, "Snapshot TBF tidak memuat waktu observasi/penerapan wajib"
 
     try:
-        snap_dt = datetime.datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+        obs_dt = datetime.datetime.fromisoformat(str(obs_ts_str).replace("Z", "+00:00"))
     except Exception as ex:
-        return False, f"Format timestamp snapshot TBF tidak valid '{ts_str}': {ex}"
+        return False, f"Format timestamp observasi TBF tidak valid '{obs_ts_str}': {ex}"
 
-    # Normalize to UTC aware
-    if snap_dt.tzinfo is None:
-        snap_dt = snap_dt.replace(tzinfo=datetime.timezone.utc)
+    # Normalize observation time to UTC aware
+    if obs_dt.tzinfo is None:
+        obs_dt = obs_dt.replace(tzinfo=datetime.timezone.utc)
     else:
-        snap_dt = snap_dt.astimezone(datetime.timezone.utc)
+        obs_dt = obs_dt.astimezone(datetime.timezone.utc)
 
-    if snap_dt.year < 2024:
-        return False, f"Waktu snapshot TBF tidak valid: '{ts_str}' (tahun {snap_dt.year} < 2024)"
+    if obs_dt.year < 2024:
+        return False, f"Waktu observasi snapshot TBF tidak valid: '{obs_ts_str}' (tahun {obs_dt.year} < 2024)"
 
+    applied_ts_str = s_data.get("applied_time_utc")
+    if applied_ts_str:
+        try:
+            app_dt = datetime.datetime.fromisoformat(str(applied_ts_str).replace("Z", "+00:00"))
+            if app_dt.tzinfo is None:
+                app_dt = app_dt.replace(tzinfo=datetime.timezone.utc)
+            else:
+                app_dt = app_dt.astimezone(datetime.timezone.utc)
+
+            if app_dt.year < 2024:
+                return False, f"Waktu penerapan TBF tidak valid: '{applied_ts_str}' (tahun {app_dt.year} < 2024)"
+
+            if app_dt > obs_dt + datetime.timedelta(seconds=60):
+                return False, f"Waktu penerapan TBF '{applied_ts_str}' tidak valid karena berada di masa depan relatif terhadap waktu observasi '{obs_ts_str}'"
+        except Exception as ex:
+            return False, f"Format timestamp penerapan TBF tidak valid '{applied_ts_str}': {ex}"
+
+    # Check observation alignment against phase event timestamp
     if phase_event_ts:
         try:
             phase_dt = datetime.datetime.fromisoformat(str(phase_event_ts).replace("Z", "+00:00"))
@@ -700,9 +750,9 @@ def validate_tbf_observed_config(s_data, ep, exp_scen, planned_config, run_id, p
             else:
                 phase_dt = phase_dt.astimezone(datetime.timezone.utc)
 
-            diff_sec = abs((snap_dt - phase_dt).total_seconds())
-            if diff_sec > 7200:
-                return False, f"Waktu snapshot TBF '{ts_str}' tidak selaras dengan fase pengujian '{phase_event_ts}' (selisih {diff_sec:.0f}s > 7200s)"
+            diff_sec = abs((obs_dt - phase_dt).total_seconds())
+            if diff_sec > max_drift_sec:
+                return False, f"Waktu observasi snapshot TBF '{obs_ts_str}' berada di luar jendela observasi fase '{phase_event_ts}' (selisih {diff_sec:.0f}s > {max_drift_sec}s)"
         except Exception as ex:
             return False, f"Format timestamp event fase tidak valid '{phase_event_ts}': {ex}"
 
@@ -1120,10 +1170,12 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                             try:
                                 with open(sp, "r", encoding="utf-8") as sf:
                                     s_data = json.load(sf)
+                                    max_drift_sec = config_params.get("tbf_snapshot_max_drift_sec", 300)
                                     is_ok, err_msg = validate_tbf_observed_config(
                                         s_data, ep=ep, exp_scen=exp_scen,
                                         planned_config=planned_config, run_id=run_id,
-                                        phase_event_ts=ev_det.get("timestamp_utc", "")
+                                        phase_event_ts=ev_det.get("timestamp_utc", ""),
+                                        max_drift_sec=max_drift_sec
                                     )
                                     if is_ok:
                                         observed_config = s_data
@@ -1151,6 +1203,7 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                         "tbf_qdisc_config": observed_config.get("qdisc_snapshot") if observed_config else None,
                         "tbf_interface": observed_config.get("target_interface", "eth0") if observed_config else None,
                         "tbf_applied_time_utc": observed_config.get("applied_time_utc", "") if observed_config else None,
+                        "tbf_observed_time_utc": observed_config.get("observed_time_utc", observed_config.get("applied_time_utc", "")) if observed_config else None,
                         "tbf_mechanism": "TBF_RATELIMIT"
                     }
 
@@ -1321,6 +1374,7 @@ def main():
                     obs_cmd = input("    -> Masukkan perintah tc yang telah dieksekusi di VM-3 (opsional): ").strip()
 
                     if obs_qdisc:
+                        now_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
                         tbf_snap = {
                             "run_id": run_id,
                             "phase_id": phase_id,
@@ -1328,7 +1382,8 @@ def main():
                             "execution_command": obs_cmd if obs_cmd else "sudo docker exec oai-upf-slice1 tc qdisc show dev eth0",
                             "target_container": "oai-upf-slice1",
                             "target_interface": "eth0",
-                            "applied_time_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                            "applied_time_utc": now_utc,
+                            "observed_time_utc": now_utc,
                             "verification_source": "Operator runtime terminal observation"
                         }
                         snap_path = os.path.join(run_dir, f"tbf_observed_config_{phase_id}.json")
