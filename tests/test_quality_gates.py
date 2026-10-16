@@ -898,6 +898,18 @@ class TestResearchContractQualityGates(unittest.TestCase):
         with open(rec_summary_path, "w", encoding="utf-8") as rf:
             json.dump({"session_complete": True, "bytes_received": 15000000, "goodput_mbps": 20.0}, rf)
 
+        # Archive observed actual TBF configuration
+        tbf_snap_path = os.path.join(self.run_dir, "tbf_observed_config_phase_3_S6.json")
+        with open(tbf_snap_path, "w", encoding="utf-8") as sf:
+            json.dump({
+                "qdisc_snapshot": "qdisc tbf 8001: dev eth0 root rate 12Mbit burst 10Kb lat 200.0ms",
+                "execution_command": "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms",
+                "target_container": "oai-upf-slice1",
+                "target_interface": "eth0",
+                "applied_time_utc": "2026-10-16T10:00:30Z",
+                "verification_source": "Operator runtime terminal observation"
+            }, sf)
+
         config = dict(self.config_params)
         config["verify_fault_signatures"] = True
         config["require_receiver"] = True
@@ -955,6 +967,18 @@ class TestResearchContractQualityGates(unittest.TestCase):
         rec_summary_path = os.path.join(self.run_dir, "receiver_s1_embb_summary.json")
         with open(rec_summary_path, "w", encoding="utf-8") as rf:
             json.dump({"session_complete": True, "bytes_received": 15000000, "goodput_mbps": 20.0}, rf)
+
+        # Archive observed actual TBF configuration
+        tbf_snap_path = os.path.join(self.run_dir, "tbf_observed_config_phase_3_S6.json")
+        with open(tbf_snap_path, "w", encoding="utf-8") as sf:
+            json.dump({
+                "qdisc_snapshot": "qdisc tbf 8001: dev eth0 root rate 12Mbit burst 10Kb lat 200.0ms",
+                "execution_command": "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms",
+                "target_container": "oai-upf-slice1",
+                "target_interface": "eth0",
+                "applied_time_utc": "2026-10-16T10:00:30Z",
+                "verification_source": "Operator runtime terminal observation"
+            }, sf)
 
         config = dict(self.config_params)
         config["verify_fault_signatures"] = True
@@ -1469,7 +1493,324 @@ class TestResearchContractQualityGates(unittest.TestCase):
         self.assertEqual(tokens2[3], "5", "Sent count must be 5 (seq 6 to 10)")
         self.assertEqual(tokens2[4], "0", "Received count must be 0")
 
+    def test_pos_trafgen_delayed_reply_does_not_credit_new_window(self):
+        """POS-PING-03: Delayed reply from earlier window updates state file but does NOT reduce loss of current window."""
+        import subprocess
+        awk_bin = shutil.which("awk")
+        if not awk_bin:
+            git_awk = r"C:\Program Files\Git\usr\bin\awk.exe"
+            if os.path.exists(git_awk):
+                awk_bin = git_awk
+
+        if not awk_bin:
+            self.skipTest("awk binary not found in system PATH")
+
+        trafgen_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts", "trafgen.sh"))
+        with open(trafgen_path, "r", encoding="utf-8") as f:
+            sh_code = f.read()
+
+        awk_marker = 'awk -v prev_seq="$prev_seq"'
+        awk_start = sh_code.find(awk_marker)
+        quote_start = sh_code.find("'", awk_start) + 1
+        quote_end = sh_code.find("\n  }'", quote_start)
+        awk_code = sh_code[quote_start:quote_end] + "\n}"
+
+        state_file = os.path.join(self.test_dir, "test_ping_delayed.log.state")
+        if os.path.exists(state_file):
+            os.remove(state_file)
+        awk_state_file = state_file.replace("\\", "/")
+
+        # Polling 1: seq 1 (reply), seq 2 (lost/unanswered), seq 3 (reply) -> sent=3, rx=2, loss=33.3%
+        poll_1_input = (
+            "[100.1] 64 bytes from 192.168.70.145: icmp_seq=1 ttl=64 time=10.0 ms\n"
+            "[100.2] no answer yet for icmp_seq=2\n"
+            "[100.3] 64 bytes from 192.168.70.145: icmp_seq=3 ttl=64 time=12.0 ms\n"
+        )
+        p1 = subprocess.run([awk_bin, "-v", "prev_seq=0", "-v", f"state_file={awk_state_file}", awk_code], input=poll_1_input, text=True, capture_output=True)
+        self.assertEqual(p1.returncode, 0, f"Awk exited with error: {p1.stderr}")
+        tokens1 = p1.stdout.strip().split()
+        self.assertEqual(tokens1[0], "3", "Max seq in polling 1 must be 3")
+        self.assertEqual(tokens1[2], "33.3", "Polling 1 loss must be 33.3%")
+        self.assertEqual(tokens1[3], "3", "Polling 1 sent must be 3")
+        self.assertEqual(tokens1[4], "2", "Polling 1 rx must be 2")
+
+        # Polling 2: seq 2 late reply arrives! Meanwhile seq 4 has no answer yet.
+        # eval_max is 4 (seq 5 not yet reached). prev_seq is 3. sent = 4 - 3 = 1.
+        # seq 2 reply is delayed (seq 2 <= prev_seq 3).
+        # seq 4 is unanswered.
+        poll_2_input = (
+            poll_1_input +
+            "[100.4] 64 bytes from 192.168.70.145: icmp_seq=2 ttl=64 time=25.0 ms\n"
+            "[100.5] no answer yet for icmp_seq=4\n"
+            "[100.6] no answer yet for icmp_seq=5\n"
+        )
+        p2 = subprocess.run([awk_bin, "-v", "prev_seq=3", "-v", f"state_file={awk_state_file}", awk_code], input=poll_2_input, text=True, capture_output=True)
+        self.assertEqual(p2.returncode, 0, f"Awk exited with error: {p2.stderr}")
+        tokens2 = p2.stdout.strip().split()
+        self.assertEqual(tokens2[0], "4", "eval_max in polling 2 must be 4")
+        self.assertEqual(tokens2[2], "100.0", "Polling 2 loss must be 100.0% (seq 2 late reply must NOT reduce new window loss)")
+        self.assertEqual(tokens2[3], "1", "Polling 2 sent must be 1 (seq 4)")
+        self.assertEqual(tokens2[4], "0", "Polling 2 rx must be 0 for new window")
+
+        # Verify state file recorded seq 2 acknowledgment
+        with open(state_file, "r", encoding="utf-8") as sf:
+            state_lines = sf.read()
+        self.assertIn("2:25", state_lines, "State file must record origin acknowledgment for delayed seq 2")
+
+    def test_neg_s6_single_drop_spike_fails_sustained(self):
+        """NEG-FAULTS-S6-SPIKE: S6 phase with 0 backlog and only 1 drop sample out of 15 (6.7% active ratio) fails training_eligible."""
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        rows = []
+        for i in range(45):
+            if i < 15:
+                phase, scen, prb, back, drops = "phase_1_S1", "S1", 35.0, 0.0, 0.0
+            elif i < 30:
+                phase, scen, prb, back, drops = "phase_2_S3", "S3", 85.0, 0.0, 0.0
+            else:
+                # 15 samples in S6: 14 samples with 0 drops, 1 sample with 5 drops (active_ratio = 1/15 = 6.7%)
+                phase, scen, prb, back = "phase_3_S6", "S6", 40.0, 0.0
+                drops = 5.0 if i == 44 else 0.0
+            rows.append({
+                "timestamp_utc": f"2026-10-16T10:00:{i:02d}Z",
+                "elapsed_sec": f"{i}.000",
+                "run_id": self.run_id,
+                "event_phase_id": phase,
+                "event_scenario": scen,
+                "ran_prb_cell1": prb,
+                "upf_backlog_bytes_embb": back,
+                "upf_queue_backlog_bytes": back,
+                "upf_drops_embb": drops,
+                "nwdaf_comm_ul_bytes": 100000.0 + i*1000
+            })
+        create_fixture_telemetry(csv_path, self.run_id, rows)
+
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [
+            {"timestamp_utc": "2026-10-16T10:00:00Z", "phase_id": "phase_1_S1", "scenario_id": "S1"},
+            {"timestamp_utc": "2026-10-16T10:00:15Z", "phase_id": "phase_2_S3", "scenario_id": "S3"},
+            {"timestamp_utc": "2026-10-16T10:00:30Z", "phase_id": "phase_3_S6", "scenario_id": "S6", "target_component": "UPF-1_Slice-1", "mechanism": "TBF_RATELIMIT", "parameters": "rate=12M,latency=200ms"},
+            {"timestamp_utc": "2026-10-16T10:00:45Z", "phase_id": "phase_clear", "scenario_id": "CLEAR"}
+        ])
+
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [
+            {"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}
+        ])
+
+        rec_summary_path = os.path.join(self.run_dir, "receiver_s1_embb_summary.json")
+        with open(rec_summary_path, "w", encoding="utf-8") as rf:
+            json.dump({"session_complete": True, "bytes_received": 15000000, "goodput_mbps": 20.0}, rf)
+
+        tbf_snap_path = os.path.join(self.run_dir, "tbf_observed_config_phase_3_S6.json")
+        with open(tbf_snap_path, "w", encoding="utf-8") as sf:
+            json.dump({
+                "qdisc_snapshot": "qdisc tbf 8001: dev eth0 root rate 12Mbit burst 10Kb lat 200.0ms",
+                "execution_command": "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms",
+                "target_container": "oai-upf-slice1",
+                "target_interface": "eth0",
+                "applied_time_utc": "2026-10-16T10:00:30Z",
+                "verification_source": "Operator runtime terminal observation"
+            }, sf)
+
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+        config["require_receiver"] = True
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1", "S3", "S6"],
+            recovery_verified=True,
+            config_params=config
+        )
+
+        self.assertTrue(dq_pass, f"Data quality must pass: {dq_reasons}")
+        self.assertFalse(tr_elig, "S6 with only 1 drop sample (6.7% active ratio) must fail training_eligible")
+        self.assertTrue(any("tidak berlangsung memadai" in r or "30%" in r for r in tr_reasons))
+
+    def test_pos_s6_backlog_with_nan_drops_passes_row_aligned(self):
+        """POS-FAULTS-S6-ROW-ALIGN: S6 phase with positive backlog and NaN drops maintains row alignment and passes training_eligible."""
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        rows = []
+        for i in range(45):
+            if i < 15:
+                phase, scen, prb, back, drops = "phase_1_S1", "S1", 35.0, 0.0, 0.0
+            elif i < 30:
+                phase, scen, prb, back, drops = "phase_2_S3", "S3", 85.0, 0.0, 0.0
+            else:
+                # S6 with positive backlog and all drops are NaN
+                phase, scen, prb, back, drops = "phase_3_S6", "S6", 40.0, 150000.0, "NaN"
+            rows.append({
+                "timestamp_utc": f"2026-10-16T10:00:{i:02d}Z",
+                "elapsed_sec": f"{i}.000",
+                "run_id": self.run_id,
+                "event_phase_id": phase,
+                "event_scenario": scen,
+                "ran_prb_cell1": prb,
+                "upf_backlog_bytes_embb": back,
+                "upf_queue_backlog_bytes": back,
+                "upf_drops_embb": drops,
+                "nwdaf_comm_ul_bytes": 100000.0 + i*1000
+            })
+        create_fixture_telemetry(csv_path, self.run_id, rows)
+
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [
+            {"timestamp_utc": "2026-10-16T10:00:00Z", "phase_id": "phase_1_S1", "scenario_id": "S1"},
+            {"timestamp_utc": "2026-10-16T10:00:15Z", "phase_id": "phase_2_S3", "scenario_id": "S3"},
+            {"timestamp_utc": "2026-10-16T10:00:30Z", "phase_id": "phase_3_S6", "scenario_id": "S6", "target_component": "UPF-1_Slice-1", "mechanism": "TBF_RATELIMIT", "parameters": "rate=12M,latency=200ms"},
+            {"timestamp_utc": "2026-10-16T10:00:45Z", "phase_id": "phase_clear", "scenario_id": "CLEAR"}
+        ])
+
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [
+            {"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}
+        ])
+
+        rec_summary_path = os.path.join(self.run_dir, "receiver_s1_embb_summary.json")
+        with open(rec_summary_path, "w", encoding="utf-8") as rf:
+            json.dump({"session_complete": True, "bytes_received": 15000000, "goodput_mbps": 20.0}, rf)
+
+        tbf_snap_path = os.path.join(self.run_dir, "tbf_observed_config_phase_3_S6.json")
+        with open(tbf_snap_path, "w", encoding="utf-8") as sf:
+            json.dump({
+                "qdisc_snapshot": "qdisc tbf 8001: dev eth0 root rate 12Mbit burst 10Kb lat 200.0ms",
+                "execution_command": "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms",
+                "target_container": "oai-upf-slice1",
+                "target_interface": "eth0",
+                "applied_time_utc": "2026-10-16T10:00:30Z",
+                "verification_source": "Operator runtime terminal observation"
+            }, sf)
+
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+        config["require_receiver"] = True
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1", "S3", "S6"],
+            recovery_verified=True,
+            config_params=config
+        )
+
+        self.assertTrue(dq_pass, f"Data quality must pass: {dq_reasons}")
+        self.assertTrue(tr_elig, f"S6 with 15 samples of positive backlog and NaN drops must pass: {tr_reasons}")
+        self.assertEqual(summary["fault_evidence"]["phase_3_S6"]["active_ratio"], 1.0)
+
+    def test_neg_s6_missing_actual_observed_tbf_config_fails(self):
+        """NEG-FAULTS-S6-TRACEABILITY: S6 phase without empirical observed TBF configuration fails training_eligible."""
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        rows = []
+        for i in range(45):
+            if i < 15:
+                phase, scen, prb, back, drops = "phase_1_S1", "S1", 35.0, 0.0, 0.0
+            elif i < 30:
+                phase, scen, prb, back, drops = "phase_2_S3", "S3", 85.0, 0.0, 0.0
+            else:
+                phase, scen, prb, back, drops = "phase_3_S6", "S6", 40.0, 150000.0, 10.0
+            rows.append({
+                "timestamp_utc": f"2026-10-16T10:00:{i:02d}Z",
+                "elapsed_sec": f"{i}.000",
+                "run_id": self.run_id,
+                "event_phase_id": phase,
+                "event_scenario": scen,
+                "ran_prb_cell1": prb,
+                "upf_backlog_bytes_embb": back,
+                "upf_queue_backlog_bytes": back,
+                "upf_drops_embb": drops,
+                "nwdaf_comm_ul_bytes": 100000.0 + i*1000
+            })
+        create_fixture_telemetry(csv_path, self.run_id, rows)
+
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [
+            {"timestamp_utc": "2026-10-16T10:00:00Z", "phase_id": "phase_1_S1", "scenario_id": "S1"},
+            {"timestamp_utc": "2026-10-16T10:00:15Z", "phase_id": "phase_2_S3", "scenario_id": "S3"},
+            {"timestamp_utc": "2026-10-16T10:00:30Z", "phase_id": "phase_3_S6", "scenario_id": "S6", "target_component": "UPF-1_Slice-1", "mechanism": "TBF_RATELIMIT", "parameters": "rate=12M,latency=200ms", "notes": "No observed qdisc"},
+            {"timestamp_utc": "2026-10-16T10:00:45Z", "phase_id": "phase_clear", "scenario_id": "CLEAR"}
+        ])
+
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [
+            {"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}
+        ])
+
+        rec_summary_path = os.path.join(self.run_dir, "receiver_s1_embb_summary.json")
+        with open(rec_summary_path, "w", encoding="utf-8") as rf:
+            json.dump({"session_complete": True, "bytes_received": 15000000, "goodput_mbps": 20.0}, rf)
+
+        # Do NOT create tbf_observed_config_phase_3_S6.json
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+        config["require_receiver"] = True
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1", "S3", "S6"],
+            recovery_verified=True,
+            config_params=config
+        )
+
+        self.assertTrue(dq_pass, f"Data quality must pass: {dq_reasons}")
+        self.assertFalse(tr_elig, "S6 without observed actual TBF config must fail training_eligible")
+        self.assertTrue(any("tidak memuat bukti arsip konfigurasi TBF aktual" in r for r in tr_reasons))
+
+    def test_neg_receiver_packet_loss_pct_invalid_fails(self):
+        """NEG-RCV-06: Receiver summary with packet_loss_pct=200 or NaN or negative must be rejected."""
+        # Case A: packet_loss_pct = 200.0
+        rec_path = os.path.join(self.run_dir, "receiver_s1_embb_summary.json")
+        with open(rec_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "session_complete": True,
+                "bytes_received": 15000000,
+                "packet_loss_pct": 200.0,
+                "goodput_mbps": 20.0
+            }, f)
+        is_val, msg, meta = run_pilot_experiment.validate_receiver_archive(rec_path)
+        self.assertFalse(is_val)
+        self.assertIn("0.0 - 100.0", msg)
+
+        # Case B: packet_loss_pct = NaN
+        with open(rec_path, "w", encoding="utf-8") as f:
+            f.write('{"session_complete": true, "bytes_received": 15000000, "packet_loss_pct": NaN, "goodput_mbps": 20.0}')
+        is_val, msg, meta = run_pilot_experiment.validate_receiver_archive(rec_path)
+        self.assertFalse(is_val)
+        self.assertIn("tidak valid", msg)
+
+        # Case C: receiver_loss_pct = -5.0
+        with open(rec_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "session_complete": True,
+                "bytes_received": 15000000,
+                "receiver_loss_pct": -5.0,
+                "goodput_mbps": 20.0
+            }, f)
+        is_val, msg, meta = run_pilot_experiment.validate_receiver_archive(rec_path)
+        self.assertFalse(is_val)
+        self.assertIn("0.0 - 100.0", msg)
+
+    def test_neg_receiver_bits_per_second_infinity_fails(self):
+        """NEG-RCV-07: Receiver raw or summary with bits_per_second=Infinity must be rejected."""
+        # Case A: Summary with bits_per_second: Infinity
+        rec_path = os.path.join(self.run_dir, "receiver_s1_embb_summary.json")
+        with open(rec_path, "w", encoding="utf-8") as f:
+            f.write('{"session_complete": true, "bytes_received": 15000000, "bits_per_second": Infinity, "goodput_mbps": 20.0}')
+        is_val, msg, meta = run_pilot_experiment.validate_receiver_archive(rec_path)
+        self.assertFalse(is_val)
+        self.assertIn("tidak valid", msg)
+
+        # Case B: Raw standard JSON with bits_per_second: Infinity
+        raw_path = os.path.join(self.run_dir, "receiver_s1_embb.json")
+        with open(raw_path, "w", encoding="utf-8") as f:
+            f.write('{"start": {}, "end": {"sum_received": {"bytes": 1000, "bits_per_second": Infinity}}}')
+        is_val, msg, meta = run_pilot_experiment.validate_receiver_archive(raw_path)
+        self.assertFalse(is_val)
+        self.assertIn("tidak valid", msg)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

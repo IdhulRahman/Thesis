@@ -77,8 +77,8 @@ parse_ping() {
             last_rtt = r;
           } else {
             delayed_rx++;
-            if (last_rtt == "" || last_rtt < 0) last_rtt = r;
           }
+          # Record ack for the sequence in state file (updating origin request state)
           new_ack_list[s] = r;
         }
       }
@@ -94,13 +94,14 @@ parse_ping() {
 
     if (eval_max > prev_seq) {
       sent = eval_max - prev_seq;
-      effective_rx = rx_count + delayed_rx;
-      if (effective_rx > sent) effective_rx = sent;
-      loss = (sent - effective_rx) * 100.0 / sent;
+      # Current window loss is strictly determined by packets transmitted within this window (rx_count).
+      # Delayed replies for requests belonging to earlier windows update their origin state in state_file
+      # and must not reduce the packet loss of newly transmitted requests.
+      loss = (sent - rx_count) * 100.0 / sent;
       if (loss < 0.0) loss = 0.0;
 
-      if (effective_rx > 0 && last_rtt >= 0.0) {
-        printf "%d %.2f %.1f %d %d\n", eval_max, last_rtt, loss, sent, effective_rx;
+      if (rx_count > 0 && last_rtt >= 0.0) {
+        printf "%d %.2f %.1f %d %d\n", eval_max, last_rtt, loss, sent, rx_count;
       } else {
         printf "%d NaN 100.0 %d 0\n", eval_max, sent;
       }

@@ -260,9 +260,11 @@ try:
         "session_complete": session_complete,
         "bytes_received": bytes_rx,
         "goodput_mbps": mbps_rx,
+        "bits_per_second": bps_rx,
         "packets_total": total_pkts,
         "packets_lost": lost_pkts,
         "packet_loss_pct": loss_pct,
+        "receiver_loss_pct": loss_pct,
         "jitter_ms": jitter_ms
     }
     with open(summary_path, "w", encoding="utf-8") as sf:

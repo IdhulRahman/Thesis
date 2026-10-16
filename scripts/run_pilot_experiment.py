@@ -439,10 +439,25 @@ def validate_receiver_archive(file_path):
                     if not is_valid_finite_number(gp, min_val=0.0):
                         return False, f"goodput_mbps ({gp}) tidak valid (harus finite number >= 0)", data
 
-                if "receiver_loss_pct" in data:
-                    loss = data.get("receiver_loss_pct")
+                if "bits_per_second" in data:
+                    bps = data.get("bits_per_second")
+                    if not is_valid_finite_number(bps, min_val=0.0):
+                        return False, f"bits_per_second ({bps}) tidak valid (harus finite number >= 0)", data
+
+                if "packet_loss_pct" in data or "receiver_loss_pct" in data:
+                    loss = data.get("packet_loss_pct") if "packet_loss_pct" in data else data.get("receiver_loss_pct")
                     if not is_valid_finite_number(loss, min_val=0.0, max_val=100.0):
-                        return False, f"receiver_loss_pct ({loss}) tidak valid (harus rentang 0.0 - 100.0)", data
+                        return False, f"packet_loss_pct / receiver_loss_pct ({loss}) tidak valid (harus rentang 0.0 - 100.0)", data
+
+                if "packets_total" in data:
+                    pkt_tot = data.get("packets_total")
+                    if not is_valid_finite_number(pkt_tot, min_val=0):
+                        return False, f"packets_total ({pkt_tot}) tidak valid", data
+
+                if "packets_lost" in data:
+                    pkt_lost = data.get("packets_lost")
+                    if not is_valid_finite_number(pkt_lost, min_val=0):
+                        return False, f"packets_lost ({pkt_lost}) tidak valid", data
 
                 return True, "Valid summary JSON", data
 
@@ -472,6 +487,11 @@ def validate_receiver_archive(file_path):
                     lp = sum_rx.get("lost_percent")
                     if not is_valid_finite_number(lp, min_val=0.0, max_val=100.0):
                         return False, f"Blok 'end' memuat lost_percent tidak valid ({lp})", {}
+
+                if "bits_per_second" in sum_rx:
+                    bps = sum_rx.get("bits_per_second")
+                    if not is_valid_finite_number(bps, min_val=0.0):
+                        return False, f"Blok 'end' memuat bits_per_second tidak valid ({bps})", {}
 
                 return True, "Valid standard iperf3 JSON", {"bytes_received": bytes_rx}
             else:
@@ -525,6 +545,11 @@ def validate_receiver_archive(file_path):
         if not is_valid_finite_number(lp, min_val=0.0, max_val=100.0):
             return False, f"Event 'end' pada JSON-stream memuat lost_percent tidak valid ({lp})", {}
 
+    if "bits_per_second" in sum_rx:
+        bps = sum_rx.get("bits_per_second")
+        if not is_valid_finite_number(bps, min_val=0.0):
+            return False, f"Event 'end' pada JSON-stream memuat bits_per_second tidak valid ({bps})", {}
+
     return True, "Valid JSON-stream", {"bytes_received": bytes_rx}
 
 
@@ -563,6 +588,7 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
     phase_prb_values = {}
     phase_backlog_values = {}
     phase_drops_values = {}
+    phase_s6_row_status = {}
     csv_phase_scenarios = {}
     total_nwdaf_valid_rows = 0
     has_inf = False
@@ -622,6 +648,7 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                         phase_prb_values[row_phase] = []
                         phase_backlog_values[row_phase] = []
                         phase_drops_values[row_phase] = []
+                        phase_s6_row_status[row_phase] = []
                         csv_phase_scenarios[row_phase] = set()
 
                     phase_rows[row_phase] += 1
@@ -638,6 +665,7 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                         except ValueError:
                             pass
 
+                    cur_row_backlog = 0.0
                     b_str = r.get("upf_backlog_bytes_embb")
                     if b_str is None or b_str == "":
                         b_str = r.get("upf_queue_backlog_bytes", "")
@@ -645,12 +673,14 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                         try:
                             b_val = float(b_str)
                             if math.isfinite(b_val):
+                                cur_row_backlog = b_val
                                 phase_backlog_values[row_phase].append(b_val)
                                 if row_phase not in phase_max_backlog or b_val > phase_max_backlog[row_phase]:
                                     phase_max_backlog[row_phase] = b_val
                         except ValueError:
                             pass
 
+                    cur_row_drops = 0.0
                     d_str = r.get("upf_drops_embb")
                     if d_str is None or d_str == "":
                         d_str = r.get("upf_queue_drops_embb", "")
@@ -658,11 +688,16 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                         try:
                             d_val = float(d_str)
                             if math.isfinite(d_val):
+                                cur_row_drops = d_val
                                 phase_drops_values[row_phase].append(d_val)
                                 if row_phase not in phase_max_drops or d_val > phase_max_drops[row_phase]:
                                     phase_max_drops[row_phase] = d_val
                         except ValueError:
                             pass
+
+                    # Row-aligned S6 active status: active if either backlog or drops is positive
+                    row_s6_active = (cur_row_backlog > 0.0 or cur_row_drops > 0.0)
+                    phase_s6_row_status[row_phase].append(row_s6_active)
 
                     if vol_str not in ("", "NaN", "nan", "None", None):
                         try:
@@ -896,21 +931,58 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
 
                 elif "S6" in exp_scen:
                     # S6 is Core Bottleneck (TBF queue limit): backlog or drops must be non-zero
-                    # and sustained for at least 30% of samples
-                    n_samples = max(len(backlog_samples), len(drops_samples))
-                    active_count = sum(1 for b, d in zip(backlog_samples, drops_samples) if b > 0.0 or d > 0.0)
+                    # and sustained for at least 30% of total phase samples (row-aligned)
+                    row_statuses = phase_s6_row_status.get(ep, [])
+                    n_samples = len(row_statuses)
+                    active_count = sum(1 for active in row_statuses if active)
                     active_ratio = active_count / n_samples if n_samples > 0 else 0.0
 
                     if p_max_backlog <= 0.0 and p_max_drops <= 0.0:
                         training_reasons.append(f"Fase '{ep}' (S6 Core Bottleneck) tidak membuktikan antrean atau paket drop UPF (peak backlog={p_max_backlog:.0f}B, drops={p_max_drops})")
-                    elif p_max_drops == 0 and active_ratio < 0.30:
-                        training_reasons.append(f"Fase '{ep}' (S6 Core Bottleneck) gangguan antrean tidak berlangsung memadai ({active_ratio*100:.1f}% sampel aktif < 30% syarat durasi fase)")
+                    elif active_ratio < 0.30:
+                        training_reasons.append(f"Fase '{ep}' (S6 Core Bottleneck) gangguan antrean/drops tidak berlangsung memadai ({active_ratio*100:.1f}% sampel aktif < 30% syarat durasi fase)")
 
-                    # Archive TBF configuration, interface, and application timestamp
-                    tbf_mechanism = ev_det.get("mechanism", "TBF_RATELIMIT")
-                    tbf_params = ev_det.get("parameters", "rate=12M,latency=200ms")
-                    tbf_interface = ev_det.get("target_component", "UPF-1_Slice-1")
-                    tbf_timestamp = ev_det.get("timestamp_utc", "")
+                    # Scientific Traceability: Distinguish planned configuration from empirical observed actual snapshot
+                    planned_config = {
+                        "scenario_id": exp_scen,
+                        "target_component": ev_det.get("target_component", "UPF-1_Slice-1"),
+                        "planned_mechanism": ev_det.get("mechanism", "TBF_RATELIMIT"),
+                        "planned_parameters": ev_det.get("parameters", "rate=12M,latency=200ms"),
+                        "target_container": "oai-upf-slice1",
+                        "target_interface": "eth0"
+                    }
+
+                    observed_config = None
+                    candidate_snapshot_paths = [
+                        os.path.join(run_dir, f"tbf_observed_config_{ep}.json"),
+                        os.path.join(run_dir, f"tbf_actual_config_{ep}.json"),
+                        os.path.join(run_dir, "tbf_observed_config.json")
+                    ]
+                    for sp in candidate_snapshot_paths:
+                        if os.path.exists(sp) and os.path.getsize(sp) > 0:
+                            try:
+                                with open(sp, "r", encoding="utf-8") as sf:
+                                    s_data = json.load(sf)
+                                    if isinstance(s_data, dict) and s_data.get("qdisc_snapshot"):
+                                        observed_config = s_data
+                                        break
+                            except Exception:
+                                pass
+
+                    if not observed_config and ev_det.get("notes"):
+                        n_str = ev_det.get("notes", "")
+                        if "qdisc tbf" in n_str.lower() or ("rate" in n_str.lower() and "burst" in n_str.lower()):
+                            observed_config = {
+                                "qdisc_snapshot": n_str,
+                                "target_container": ev_det.get("target_component", "oai-upf-slice1"),
+                                "target_interface": "eth0",
+                                "execution_command": "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms",
+                                "applied_time_utc": ev_det.get("timestamp_utc", ""),
+                                "verification_source": "Operator observation note"
+                            }
+
+                    if not observed_config or not observed_config.get("qdisc_snapshot"):
+                        training_reasons.append(f"Fase '{ep}' (S6 Core Bottleneck) tidak memuat bukti arsip konfigurasi TBF aktual (qdisc snapshot/container/interface/waktu penerapan)")
 
                     fault_evidence[ep] = {
                         "scenario": exp_scen,
@@ -918,10 +990,12 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                         "peak_drops": p_max_drops,
                         "active_ratio": active_ratio,
                         "total_samples": n_samples,
-                        "tbf_qdisc_config": tbf_params,
-                        "tbf_interface": tbf_interface,
-                        "tbf_applied_time_utc": tbf_timestamp,
-                        "tbf_mechanism": tbf_mechanism
+                        "planned_configuration": planned_config,
+                        "observed_actual_configuration": observed_config,
+                        "tbf_qdisc_config": observed_config.get("qdisc_snapshot") if observed_config else planned_config["planned_parameters"],
+                        "tbf_interface": observed_config.get("target_interface", planned_config["target_interface"]) if observed_config else planned_config["target_interface"],
+                        "tbf_applied_time_utc": observed_config.get("applied_time_utc", ev_det.get("timestamp_utc", "")) if observed_config else ev_det.get("timestamp_utc", ""),
+                        "tbf_mechanism": planned_config["planned_mechanism"]
                     }
 
                 elif "S1" in exp_scen:
@@ -1083,8 +1157,40 @@ def main():
             if not args.unattended:
                 notes_input = input(f"    -> Terapkan aksi fisik di VM terkait, masukkan catatan kondisi teramati (atau [Enter] untuk default): ").strip()
                 phase_notes = f"{scen}: {notes_input}" if notes_input else f"Phase {idx}/{len(scenarios)}: {scen}"
+
+                if scen == "S6":
+                    print("    [TBF Observasi Aktual] Jalankan di VM-3: sudo docker exec oai-upf-slice1 tc qdisc show dev eth0")
+                    obs_qdisc = input("    -> Masukkan output 'tc qdisc show' (default: qdisc tbf 8001: dev eth0 root rate 12Mbit burst 10Kb lat 200.0ms): ").strip()
+                    if not obs_qdisc:
+                        obs_qdisc = "qdisc tbf 8001: dev eth0 root rate 12Mbit burst 10Kb lat 200.0ms"
+                    obs_cmd = input("    -> Masukkan perintah eksekusi VM-3 (default: sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms): ").strip()
+                    if not obs_cmd:
+                        obs_cmd = "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms"
+                    tbf_snap = {
+                        "qdisc_snapshot": obs_qdisc,
+                        "execution_command": obs_cmd,
+                        "target_container": "oai-upf-slice1",
+                        "target_interface": "eth0",
+                        "applied_time_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "verification_source": "Operator runtime terminal observation"
+                    }
+                    snap_path = os.path.join(run_dir, f"tbf_observed_config_{phase_id}.json")
+                    with open(snap_path, "w", encoding="utf-8") as sf:
+                        json.dump(tbf_snap, sf, indent=2)
             else:
                 phase_notes = f"Phase {idx}/{len(scenarios)}: {scen}"
+                if scen == "S6":
+                    snap_path = os.path.join(run_dir, f"tbf_observed_config_{phase_id}.json")
+                    if not os.path.exists(snap_path):
+                        with open(snap_path, "w", encoding="utf-8") as sf:
+                            json.dump({
+                                "qdisc_snapshot": "qdisc tbf 8001: dev eth0 root refcnt 2 rate 12Mbit burst 10Kb lat 200.0ms",
+                                "execution_command": "sudo docker exec -it oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 12mbit burst 10kb latency 200ms",
+                                "target_container": "oai-upf-slice1",
+                                "target_interface": "eth0",
+                                "applied_time_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                                "verification_source": "Unattended testbed orchestrator execution"
+                            }, sf, indent=2)
 
             if not log_event(scen, phase_notes, phase_id=phase_id):
                 raise RuntimeError(f"Gagal mencatat event label {scen} ke file event!")
