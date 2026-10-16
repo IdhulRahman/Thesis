@@ -13,7 +13,7 @@ import math
 import os
 import sys
 
-DATA_DIR = "/opt/oran/monitoring/data"
+DATA_DIR = os.getenv("MONITORING_DATA_DIR", "/opt/oran/monitoring/data")
 
 
 def main():

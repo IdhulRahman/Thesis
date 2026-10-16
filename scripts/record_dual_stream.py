@@ -19,7 +19,7 @@ import time
 import urllib.request
 
 METRICS_URL = "http://127.0.0.1:9100/metrics"
-DATA_DIR = "/opt/oran/monitoring/data"
+DATA_DIR = os.getenv("MONITORING_DATA_DIR", "/opt/oran/monitoring/data")
 ACTIVE_EVENT_FILE = os.path.join(DATA_DIR, "active_event.json")
 RUN_STATE_FILE = os.path.join(DATA_DIR, "active_run_id.txt")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -37,7 +37,8 @@ LEGACY_CSV_FILE = os.path.join(DATA_DIR, f"telemetry_raw_{RUN_ID}_{os.getpid()}.
 
 HEADERS = [
     "timestamp_utc", "elapsed_sec", "run_id", "scrape_ok", "scrape_latency_ms",
-    "e2e_slice1_tput_mbps", "e2e_slice1_jitter_ms", "e2e_slice2_rtt_ms", "e2e_slice2_loss_pct",
+    "e2e_slice1_tput_mbps", "e2e_slice1_jitter_ms", "e2e_slice1_rtt_ms", "e2e_slice1_loss_pct",
+    "e2e_slice2_rtt_ms", "e2e_slice2_loss_pct",
     "e2e_probe_freshness",
     "nwdaf_load_embb", "nwdaf_load_urllc",
     "nwdaf_comm_ul_bytes", "nwdaf_comm_dl_bytes", "nwdaf_comm_duration_sec",
@@ -93,6 +94,7 @@ NAN_STR = "NaN"
 def extract_telemetry():
     raw_data = {
         "e2e_slice1_tput_mbps": NAN_STR, "e2e_slice1_jitter_ms": NAN_STR,
+        "e2e_slice1_rtt_ms": NAN_STR, "e2e_slice1_loss_pct": NAN_STR,
         "e2e_slice2_rtt_ms": NAN_STR, "e2e_slice2_loss_pct": NAN_STR,
         "e2e_probe_freshness": "0",
         "nwdaf_load_embb": NAN_STR, "nwdaf_load_urllc": NAN_STR,
@@ -121,6 +123,10 @@ def extract_telemetry():
                     raw_data["e2e_slice1_tput_mbps"] = val_str
                 elif name == "e2e_slice1_jitter_ms":
                     raw_data["e2e_slice1_jitter_ms"] = val_str
+                elif name == "e2e_slice1_latency_rtt_ms":
+                    raw_data["e2e_slice1_rtt_ms"] = val_str
+                elif name == "e2e_slice1_packet_loss_pct":
+                    raw_data["e2e_slice1_loss_pct"] = val_str
                 elif name == "e2e_slice2_latency_rtt_ms":
                     raw_data["e2e_slice2_rtt_ms"] = val_str
                 elif name == "e2e_slice2_packet_loss_pct":
@@ -258,6 +264,7 @@ def main():
             row = [
                 now_utc, f"{elapsed:.6f}", RUN_ID, scrape_ok, f"{scrape_lat:.3f}",
                 telemetry["e2e_slice1_tput_mbps"], telemetry["e2e_slice1_jitter_ms"],
+                telemetry["e2e_slice1_rtt_ms"], telemetry["e2e_slice1_loss_pct"],
                 telemetry["e2e_slice2_rtt_ms"], telemetry["e2e_slice2_loss_pct"],
                 telemetry["e2e_probe_freshness"],
                 telemetry["nwdaf_load_embb"], telemetry["nwdaf_load_urllc"],

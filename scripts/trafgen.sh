@@ -63,6 +63,9 @@ case "$ACTION" in
       if [[ "$slice" == *"URLLC"* ]]; then
         curl -s -m 1 -X POST -H "Content-Type: application/json" \
           -d "{\"slice\": 2, \"rtt_ms\": ${rtt}, \"packet_loss_pct\": ${loss}}" "$MONITOR_URL" >/dev/null 2>&1 &
+      else
+        curl -s -m 1 -X POST -H "Content-Type: application/json" \
+          -d "{\"slice\": 1, \"rtt_ms\": ${rtt}, \"packet_loss_pct\": ${loss}}" "$MONITOR_URL" >/dev/null 2>&1 &
       fi
     done < "$STATE_FILE"
     ;;
@@ -72,6 +75,7 @@ case "$ACTION" in
     cleanup
 
     IPERF_LOG=""
+    UE1_PING_LOG=""
     PING_LOG=""
     UE1_NS=""
     UE2_NS=""
@@ -83,8 +87,11 @@ case "$ACTION" in
       if [[ "$slice" == *"eMBB"* ]]; then
         UE1_NS="$ns"
         IPERF_LOG="$LOG_DIR/iperf_${ns}_${TIMESTAMP}.log"
+        UE1_PING_LOG="$LOG_DIR/ping_${ns}_${TIMESTAMP}.log"
         > "$IPERF_LOG"
+        > "$UE1_PING_LOG"
         nohup ip netns exec "$ns" iperf3 -c "$EXT_DN_IP" -u -b "${EMBB_RATE}M" -t "$DURATION" -i 1 --logfile "$IPERF_LOG" </dev/null >/dev/null 2>&1 &
+        nohup ip netns exec "$ns" ping -I oaitun_ue1 -i 0.2 -c $(( DURATION * 5 )) "$EXT_DN_IP" </dev/null > "$UE1_PING_LOG" 2>&1 &
       else
         UE2_NS="$ns"
         PING_LOG="$LOG_DIR/ping_${ns}_${TIMESTAMP}.log"
@@ -94,8 +101,8 @@ case "$ACTION" in
     done < "$STATE_FILE"
 
     echo "[TrafGen] Durasi: ${DURATION}s | Target: eMBB ${EMBB_RATE}M, URLLC 100ms | TSDB: 10.102.0.67"
-    printf "%-5s | %-17s | %-15s | %-12s | %-7s | %s\n" "Sec" "eMBB (Sender)" "URLLC Latency" "URLLC Jitter" "Loss %" "SLA (<20ms)"
-    echo "------+-------------------+-----------------+--------------+---------+-------------"
+    printf "%-5s | %-13s | %-11s | %-12s | %-11s | %-7s | %s\n" "Sec" "eMBB Tput" "eMBB RTT" "URLLC RTT" "URLLC Jitter" "Loss %" "SLA (<20ms)"
+    echo "------+---------------+-------------+--------------+-------------+---------+-------------"
 
     prev_rtt="0.0"
     prev_eval_seq=0
@@ -110,6 +117,15 @@ case "$ACTION" in
       if [[ -n "$IPERF_LOG" && -f "$IPERF_LOG" ]]; then
         tput=$(grep -oP '\d+(\.\d+)?(?=\s+Mbits/sec)' "$IPERF_LOG" 2>/dev/null | tail -n 1 || echo "0.0")
         [[ -z "$tput" ]] && tput="0.0"
+      fi
+
+      ue1_rtt="NaN"
+      ue1_loss_pct="0.0"
+      if [[ -n "$UE1_PING_LOG" && -f "$UE1_PING_LOG" ]]; then
+        ue1_last_reply=$(tail -n 10 "$UE1_PING_LOG" 2>/dev/null | grep -oP '(?<=time=)[0-9.]+' | tail -n 1 || true)
+        if [[ -n "$ue1_last_reply" ]]; then
+          ue1_rtt="$ue1_last_reply"
+        fi
       fi
 
       rtt="NaN"
@@ -188,8 +204,13 @@ case "$ACTION" in
         sla="VIOLATED"
       fi
 
-      curl -s -m 1 -X POST -H "Content-Type: application/json" \
-        -d "{\"slice\": 1, \"throughput_mbps\": $tput}" "$MONITOR_URL" >/dev/null 2>&1 &
+      if [[ "$ue1_rtt" != "NaN" && -n "$ue1_rtt" ]]; then
+        curl -s -m 1 -X POST -H "Content-Type: application/json" \
+          -d "{\"slice\": 1, \"throughput_mbps\": $tput, \"rtt_ms\": $ue1_rtt, \"packet_loss_pct\": $ue1_loss_pct}" "$MONITOR_URL" >/dev/null 2>&1 &
+      else
+        curl -s -m 1 -X POST -H "Content-Type: application/json" \
+          -d "{\"slice\": 1, \"throughput_mbps\": $tput, \"rtt_ms\": null, \"packet_loss_pct\": null}" "$MONITOR_URL" >/dev/null 2>&1 &
+      fi
 
       if [[ "$rtt" != "NaN" ]]; then
         curl -s -m 1 -X POST -H "Content-Type: application/json" \
@@ -201,8 +222,11 @@ case "$ACTION" in
         disp_rtt="NO_NEW_REPLY"
       fi
 
-      printf "%4ds | %-17s | %-15s | %-12s | %-7s | %s\n" \
-        "$sec" "${tput} Mbps" "$disp_rtt" "${jitter} ms" "${loss_pct}%" "$sla"
+      disp_ue1_rtt="${ue1_rtt} ms"
+      [[ "$ue1_rtt" == "NaN" ]] && disp_ue1_rtt="N/A"
+
+      printf "%4ds | %-13s | %-11s | %-12s | %-11s | %-7s | %s\n" \
+        "$sec" "${tput} Mbps" "$disp_ue1_rtt" "$disp_rtt" "${jitter} ms" "${loss_pct}%" "$sla"
     done
 
     echo "------+-------------------+-----------------+------------+--------+-------------"

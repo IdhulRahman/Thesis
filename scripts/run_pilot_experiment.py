@@ -26,7 +26,7 @@ import time
 import urllib.parse
 import urllib.request
 
-DATA_DIR = "/opt/oran/monitoring/data"
+DATA_DIR = os.getenv("MONITORING_DATA_DIR", "/opt/oran/monitoring/data")
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 RECORD_SCRIPT = os.path.join(SCRIPTS_DIR, "record_dual_stream.py")
 LOG_EVENT_SCRIPT = os.path.join(SCRIPTS_DIR, "log_event.py")
@@ -35,7 +35,8 @@ COLLECTOR_URL = "http://127.0.0.1:9100/metrics"
 
 REQUIRED_COLUMNS = [
     "timestamp_utc", "elapsed_sec", "run_id", "scrape_ok", "scrape_latency_ms",
-    "e2e_slice1_tput_mbps", "e2e_slice1_jitter_ms", "e2e_slice2_rtt_ms", "e2e_slice2_loss_pct",
+    "e2e_slice1_tput_mbps", "e2e_slice1_jitter_ms", "e2e_slice1_rtt_ms", "e2e_slice1_loss_pct",
+    "e2e_slice2_rtt_ms", "e2e_slice2_loss_pct",
     "e2e_probe_freshness",
     "nwdaf_load_embb", "nwdaf_load_urllc",
     "nwdaf_comm_ul_bytes", "nwdaf_comm_dl_bytes", "nwdaf_comm_duration_sec",
@@ -160,35 +161,42 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
         print(f"    - Jendela Stabil      : {stability_sec}s berturut-turut (Timeout: {timeout_sec}s)")
 
         consecutive_stable = 0
+        stable_start = None
         while (time.monotonic() - t_start) < timeout_sec:
             now_m = fetch_live_metrics()
             b_log = now_m["upf_backlog_embb"]
             prb = now_m["ran_prb_cell1"]
+            is_avail = bool(now_m.get("available"))
             is_finite = math.isfinite(b_log) and math.isfinite(prb)
-            is_healthy = is_finite and (b_log <= target_backlog) and (prb <= target_prb)
+            is_in_range = is_finite and (b_log >= 0.0) and (0.0 <= prb <= 100.0)
+            is_healthy = is_avail and is_in_range and (b_log <= target_backlog) and (prb <= target_prb)
 
+            now_mono = time.monotonic()
             evidence["samples"].append({
-                "elapsed_sec": round(time.monotonic() - t_start, 1),
+                "elapsed_sec": round(now_mono - t_start, 1),
                 "backlog": b_log,
                 "prb": prb,
-                "available": now_m["available"],
+                "available": is_avail,
                 "healthy": is_healthy
             })
 
             if is_healthy:
-                consecutive_stable += 1
-                print(f"    -> Kondisi normal teramati: Backlog={b_log:.0f}B, PRB={prb:.1f}% ({consecutive_stable}/{stability_sec}s)...")
-                if consecutive_stable >= stability_sec:
+                if stable_start is None:
+                    stable_start = now_mono
+                stable_duration = now_mono - stable_start
+                print(f"    -> Kondisi normal teramati: Backlog={b_log:.0f}B, PRB={prb:.1f}% (stabil: {stable_duration:.1f}/{stability_sec}s)...")
+                if stable_duration >= stability_sec:
                     evidence["verified_time_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                    evidence["duration_sec"] = round(time.monotonic() - t_start, 1)
-                    evidence["evidence_source"] = f"Collector :9100 live metric polling ({consecutive_stable}s continuous stability)"
+                    evidence["duration_sec"] = round(now_mono - t_start, 1)
+                    evidence["stable_window_sec"] = round(stable_duration, 1)
+                    evidence["evidence_source"] = f"Collector :9100 live metric polling ({round(stable_duration, 1)}s continuous monotonic stability)"
                     evidence["final_backlog"] = b_log
                     evidence["final_prb"] = prb
                     print(f"[+] Pemulihan terverifikasi secara objektif dalam {evidence['duration_sec']} detik!")
                     return True, evidence, "Verified stable baseline"
             else:
-                consecutive_stable = 0
-                print(f"    -> Menunggu drain: Backlog={b_log}B, PRB={prb}% (elapsed: {round(time.monotonic() - t_start)}s)...")
+                stable_start = None
+                print(f"    -> Menunggu drain/tersedia: Backlog={b_log}B, PRB={prb}%, Avail={is_avail} (elapsed: {round(now_mono - t_start)}s)...")
 
             time.sleep(1.0)
 
@@ -210,21 +218,28 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
             p_val = float(obs_p)
             win_val = float(obs_win)
 
+            is_valid_input = (
+                math.isfinite(b_val) and (b_val >= 0.0) and
+                math.isfinite(p_val) and (0.0 <= p_val <= 100.0) and
+                math.isfinite(win_val) and (win_val >= 5.0) and
+                bool(obs_src)
+            )
+
             evidence["verified_time_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
             evidence["final_backlog"] = b_val
             evidence["final_prb"] = p_val
             evidence["evidence_source"] = obs_src
             evidence["duration_sec"] = win_val
 
-            if b_val <= target_backlog and p_val <= target_prb and win_val >= 5.0 and obs_src:
+            if is_valid_input and b_val <= target_backlog and p_val <= target_prb:
                 return True, evidence, "Verified by operator with empirical proof"
             else:
-                return False, evidence, f"Input operator tidak memenuhi syarat baseline (Backlog={b_val}, PRB={p_val}, Window={win_val}s)"
+                return False, evidence, f"Input operator tidak memenuhi syarat baseline (Backlog={b_val}, PRB={p_val}, Window={win_val}s, Source='{obs_src}')"
         except Exception as e:
             return False, evidence, f"Gagal membaca input verifikasi operator: {e}"
 
 
-def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=True, recovery_evidence=None, config_params=None):
+def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=True, recovery_evidence=None, config_params=None, collector_metrics=None):
     """
     Strict multi-dimensional dataset evaluator enforcing the 3 research contract statuses:
     - execution_complete: Experiment completed all scheduled phases without crash/abort
@@ -245,10 +260,16 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
     events_path = os.path.join(run_dir, f"experiment_events_{run_id}.csv")
     jsonl_path = os.path.join(run_dir, "nwdaf_raw_poll_responses.jsonl")
 
+    # Planned phase definitions for exact semantic matching
+    expected_phases = [f"phase_{idx}_{scen}" for idx, scen in enumerate(planned_scenarios, 1)]
+    expected_phase_scenarios = {f"phase_{idx}_{scen}": scen for idx, scen in enumerate(planned_scenarios, 1)}
+
     total_rows = 0
     phase_rows = {}
     phase_ran_valid = {}
     phase_nwdaf_valid = {}
+    csv_phase_scenarios = {}
+    total_nwdaf_valid_rows = 0
     has_inf = False
     has_out_of_range = False
     invalid_run_ids = 0
@@ -303,8 +324,10 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                         phase_rows[row_phase] = 0
                         phase_ran_valid[row_phase] = 0
                         phase_nwdaf_valid[row_phase] = 0
+                        csv_phase_scenarios[row_phase] = set()
 
                     phase_rows[row_phase] += 1
+                    csv_phase_scenarios[row_phase].add(row_scen)
 
                     if prb_str not in ("", "NaN", "nan", "None", None):
                         try:
@@ -317,6 +340,7 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                         try:
                             if math.isfinite(float(vol_str)):
                                 phase_nwdaf_valid[row_phase] += 1
+                                total_nwdaf_valid_rows += 1
                         except ValueError:
                             pass
 
@@ -332,11 +356,20 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
             if total_rows < min_total_rows:
                 data_quality_reasons.append(f"Jumlah sampel telemetri tidak memadai ({total_rows} < {min_total_rows})")
 
+            # Validate that CSV recorded scenarios match planned scenarios for each planned phase
+            for ep in expected_phases:
+                if ep in csv_phase_scenarios:
+                    exp_scen = expected_phase_scenarios[ep]
+                    for actual_scen in csv_phase_scenarios[ep]:
+                        if actual_scen != "UNINITIALIZED" and not actual_scen.startswith(exp_scen):
+                            data_quality_reasons.append(f"Inkonsistensi skenario pada CSV untuk fase '{ep}': tercatat '{actual_scen}' yang tidak cocok dengan skenario terencana '{exp_scen}'")
+
         except Exception as e:
             data_quality_reasons.append(f"Gagal membaca/mem-parsing CSV telemetri: {e}")
 
-    # 2. Evaluate Event CSV Annotations
+    # 2. Evaluate Event CSV Annotations (Strict Timestamp & Semantic Matching)
     events_count = 0
+    event_phases = {}
     if not os.path.exists(events_path) or os.path.getsize(events_path) == 0:
         data_quality_reasons.append("Berkas event anotasi ground-truth hilang atau 0 byte")
     else:
@@ -348,27 +381,49 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                 for ev in reader:
                     events_count += 1
                     ts_str = ev.get("timestamp_utc", "")
-                    if ts_str:
+                    if not ts_str:
+                        data_quality_reasons.append("Ditemukan event dengan timestamp_utc kosong")
+                    else:
                         try:
                             cur_ts = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
                             if prev_ts and cur_ts < prev_ts:
                                 ts_decreasing = True
                             prev_ts = cur_ts
-                        except Exception:
-                            pass
-                    if ev.get("run_id") != run_id:
-                        data_quality_reasons.append(f"Event run_id '{ev.get('run_id')}' tidak cocok dengan '{run_id}'")
+                        except Exception as ex:
+                            data_quality_reasons.append(f"Format timestamp event tidak valid '{ts_str}': {ex}")
+
+                    ev_run_id = ev.get("run_id", "")
+                    if ev_run_id != run_id:
+                        data_quality_reasons.append(f"Event run_id '{ev_run_id}' tidak cocok dengan '{run_id}'")
+
+                    ev_phase = ev.get("phase_id", "")
+                    ev_scen = ev.get("scenario_id", "")
+                    if ev_phase:
+                        event_phases[ev_phase] = ev_scen
+                    if ev_phase in expected_phase_scenarios:
+                        exp_scen = expected_phase_scenarios[ev_phase]
+                        if ev_scen != exp_scen:
+                            data_quality_reasons.append(f"Event fase '{ev_phase}' memiliki scenario_id '{ev_scen}' yang tidak cocok dengan skenario terencana '{exp_scen}'")
 
                 if events_count == 0:
                     data_quality_reasons.append("Berkas event hanya berisi header tanpa record event nyata")
                 if ts_decreasing:
                     data_quality_reasons.append("Stempel waktu event tidak terurut secara monotonik naik")
+
+                # Verify all expected planned phases are recorded in events
+                for ep in expected_phases:
+                    if ep not in event_phases:
+                        data_quality_reasons.append(f"Fase terencana '{ep}' tidak tercatat dalam berkas event ground-truth")
+
         except Exception as e:
             data_quality_reasons.append(f"Gagal membaca/mem-parsing event CSV: {e}")
 
-    # 3. Evaluate Raw NWDAF JSONL Archive
+    # 3. Evaluate Raw NWDAF JSONL Archive (Run ID, HTTP 200, and AnLF Feature Payload)
     jsonl_lines = 0
     raw_polls_with_200 = 0
+    raw_polls_with_valid_payload = 0
+    foreign_poll_run_ids = 0
+
     if not os.path.exists(jsonl_path) or os.path.getsize(jsonl_path) == 0:
         data_quality_reasons.append("Berkas arsip raw NWDAF JSONL hilang atau 0 byte")
     else:
@@ -380,16 +435,57 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                         continue
                     rec = json.loads(line)
                     jsonl_lines += 1
+
+                    # Check run_id identity
+                    poll_run_id = rec.get("run_id", "")
+                    if poll_run_id and poll_run_id != run_id:
+                        foreign_poll_run_ids += 1
+
                     if rec.get("http_status") == 200:
                         raw_polls_with_200 += 1
+
+                        # Strict AnLF feature payload check (TS 29.520 §5.1.6.2.37)
+                        # Empty body {} or HTTP 200 without substantive analytic metrics is NOT valid training evidence
+                        body = rec.get("response_body")
+                        has_payload = False
+                        if isinstance(body, dict) and body:
+                            ue_comms = body.get("ueComms")
+                            if isinstance(ue_comms, list) and len(ue_comms) > 0:
+                                for comm in ue_comms:
+                                    if isinstance(comm, dict):
+                                        if (comm.get("commDur", 0) > 0 or 
+                                            comm.get("ulVol", 0) > 0 or 
+                                            comm.get("dlVol", 0) > 0 or 
+                                            comm.get("numSamples", 0) > 0 or 
+                                            comm.get("dataWindow")):
+                                            has_payload = True
+                                            break
+                            elif any(k in body for k in ("sliceLoadLevel", "loads", "congestionInfo", "nwPerfInfos")):
+                                has_payload = True
+
+                        if has_payload:
+                            raw_polls_with_valid_payload += 1
+
             if jsonl_lines == 0:
                 data_quality_reasons.append("Berkas arsip raw NWDAF JSONL tidak memuat entri poll valid")
+            if foreign_poll_run_ids > 0:
+                data_quality_reasons.append(f"Poll raw NWDAF mencantumkan run_id eksperimen lain ({foreign_poll_run_ids} record asing)")
+
         except Exception as e:
             data_quality_reasons.append(f"Berkas arsip raw NWDAF JSONL korup / gagal di-parse: {e}")
 
+    # 4. Evaluate Archive Failure Counter (H5)
+    if collector_metrics:
+        polls_failed = collector_metrics.get("nwdaf_raw_polls_failed", 0)
+        if polls_failed > 0:
+            data_quality_reasons.append(f"Terjadi kegagalan penulisan arsip raw NWDAF ({polls_failed} poll gagal diarsipkan)")
+        polls_written = collector_metrics.get("nwdaf_raw_polls_written", 0)
+        if polls_written > 0 and jsonl_lines != polls_written:
+            data_quality_reasons.append(f"Ketidaksesuaian jumlah baris arsip raw NWDAF ({jsonl_lines} di JSONL vs {polls_written} di exporter)")
+
     data_quality_pass = (len(data_quality_reasons) == 0)
 
-    # 4. Evaluate Training Eligibility
+    # 5. Evaluate Training Eligibility (Strict Scientific & Empirical Gates)
     if not data_quality_pass:
         training_reasons.append("Gagal di tahap validasi kualitas dasar (data_quality_pass == False)")
     else:
@@ -399,19 +495,25 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
         if uninitialized_test_rows > 0:
             training_reasons.append(f"Ditemukan {uninitialized_test_rows} baris dengan label 'UNINITIALIZED' pada fase pengujian aktif")
 
-        for scen in planned_scenarios:
-            scen_total = sum(phase_rows[p] for p in phase_rows if scen in p)
-            scen_ran = sum(phase_ran_valid[p] for p in phase_ran_valid if scen in p)
+        # Exact planned phase matching
+        for ep in expected_phases:
+            scen_total = phase_rows.get(ep, 0)
+            scen_ran = phase_ran_valid.get(ep, 0)
 
             if scen_total < min_phase_rows:
-                training_reasons.append(f"Fase skenario {scen} kekurangan sampel ({scen_total} baris < {min_phase_rows})")
+                training_reasons.append(f"Fase terencana '{ep}' kekurangan sampel ({scen_total} baris < {min_phase_rows})")
             else:
                 cov = scen_ran / scen_total if scen_total > 0 else 0.0
                 if cov < min_ran_coverage:
-                    training_reasons.append(f"Fase skenario {scen} cakupan telemetri RAN di bawah ambang batas ({cov*100:.1f}% < {min_ran_coverage*100:.1f}%)")
+                    training_reasons.append(f"Fase terencana '{ep}' cakupan telemetri RAN di bawah ambang batas ({cov*100:.1f}% < {min_ran_coverage*100:.1f}%)")
 
+        # Strict NWDAF eligibility (TS 29.520 §5.1.6.2.37)
         if raw_polls_with_200 == 0:
             training_reasons.append("Tidak ada observasi sumber NWDAF yang berhasil terekam (HTTP 200 tidak ditemukan di arsip raw poll)")
+        if raw_polls_with_valid_payload == 0:
+            training_reasons.append("Tidak ada payload analitik NWDAF yang valid dalam arsip raw poll (body kosong atau tanpa fitur AnLF ueComms/durasi/volume)")
+        if total_nwdaf_valid_rows == 0:
+            training_reasons.append("Seluruh data observasi volume/durasi NWDAF bernilai NaN pada CSV telemetri (kelayakan NWDAF tidak terpenuhi)")
 
     training_eligible = (data_quality_pass and len(training_reasons) == 0)
 
@@ -420,6 +522,8 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
         "events_count": events_count,
         "jsonl_polls": jsonl_lines,
         "raw_polls_with_200": raw_polls_with_200,
+        "raw_polls_with_valid_payload": raw_polls_with_valid_payload,
+        "total_nwdaf_valid_rows": total_nwdaf_valid_rows,
         "phase_breakdown": {}
     }
     for p, count in phase_rows.items():
@@ -586,13 +690,15 @@ def main():
             log_proc.wait()
 
         # 7. Evaluate Dataset under 3-Status Research Contract
+        final_collector_metrics = fetch_live_metrics()
         data_quality_pass, training_eligible, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
             run_dir=run_dir,
             run_id=run_id,
             planned_scenarios=scenarios,
             recovery_verified=recovery_verified,
             recovery_evidence=recovery_evidence,
-            config_params=config_params
+            config_params=config_params,
+            collector_metrics=final_collector_metrics
         )
 
         # 8. Run Analyzer for statistical summary text

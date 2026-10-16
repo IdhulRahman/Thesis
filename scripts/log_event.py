@@ -13,7 +13,7 @@ import json
 import os
 import sys
 
-DATA_DIR = "/opt/oran/monitoring/data"
+DATA_DIR = os.getenv("MONITORING_DATA_DIR", "/opt/oran/monitoring/data")
 ACTIVE_EVENT_FILE = os.path.join(DATA_DIR, "active_event.json")
 RUN_STATE_FILE = os.path.join(DATA_DIR, "active_run_id.txt")
 

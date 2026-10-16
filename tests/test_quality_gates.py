@@ -82,6 +82,7 @@ class TestResearchContractQualityGates(unittest.TestCase):
 
     def setUp(self):
         self.test_dir = tempfile.mkdtemp(prefix="test_pilot_gate_")
+        os.environ["MONITORING_DATA_DIR"] = self.test_dir
         self.run_id = "TEST_RUN_01"
         self.run_dir = os.path.join(self.test_dir, "raw", self.run_id)
         os.makedirs(self.run_dir, exist_ok=True)
@@ -93,6 +94,7 @@ class TestResearchContractQualityGates(unittest.TestCase):
         }
 
     def tearDown(self):
+        os.environ.pop("MONITORING_DATA_DIR", None)
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_pos_01_clean_healthy_run(self):
@@ -438,6 +440,194 @@ class TestResearchContractQualityGates(unittest.TestCase):
             self.assertIn("Permission Denied", telemetry_collector.raw_poll_stats["last_error"])
         finally:
             telemetry_collector.RUN_STATE_FILE = orig_state_file
+
+    def test_neg_10_empty_nwdaf_body_with_all_nan_volume_must_fail_training_eligible(self):
+        """NEG-10: All NWDAF volume NaN in CSV and JSONL has HTTP 200 with empty body -> must fail training_eligible."""
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        rows = []
+        for i in range(35):
+            phase, scen = ("phase_1_S1", "S1") if i < 18 else ("phase_2_S3", "S3")
+            rows.append({
+                "timestamp_utc": f"2026-10-16T10:00:{i:02d}Z",
+                "elapsed_sec": f"{i}.000",
+                "run_id": self.run_id,
+                "event_phase_id": phase,
+                "event_scenario": scen,
+                "ran_prb_cell1": 35.0,
+                "nwdaf_comm_ul_bytes": "NaN",  # Entire volume NaN!
+                "upf_backlog_bytes_embb": 0.0
+            })
+        create_fixture_telemetry(csv_path, self.run_id, rows)
+
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [
+            {"timestamp_utc": "2026-10-16T10:00:00Z", "phase_id": "phase_1_S1", "scenario_id": "S1"},
+            {"timestamp_utc": "2026-10-16T10:00:18Z", "phase_id": "phase_2_S3", "scenario_id": "S3"},
+        ])
+
+        # JSONL has HTTP 200 with empty body {} (no AnLF analytic payload)
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [
+            {"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {}}
+        ])
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1", "S3"],
+            recovery_verified=True,
+            config_params=self.config_params
+        )
+
+        self.assertTrue(dq_pass, f"Syntax is valid so data_quality should pass: {dq_reasons}")
+        self.assertFalse(tr_elig, "Empty NWDAF body and NaN volume must NOT be training eligible")
+        self.assertTrue(any("payload analitik NWDAF" in r or "kelayakan NWDAF" in r for r in tr_reasons))
+
+    def test_neg_11_invalid_event_timestamp_and_phase_mismatch_must_fail_data_quality(self):
+        """NEG-11: Event contains unparseable timestamp or scenario mismatch -> must fail data_quality_pass."""
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        create_fixture_telemetry(csv_path, self.run_id, [{
+            "elapsed_sec": str(i),
+            "ran_prb_cell1": 35.0,
+            "nwdaf_comm_ul_bytes": 1000.0,
+            "event_phase_id": "phase_1_S1",
+            "event_scenario": "S1"
+        } for i in range(35)])
+
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        # Record event with malformed timestamp
+        create_fixture_events(events_path, self.run_id, [
+            {"timestamp_utc": "NOT_AN_ISO_TIMESTAMP", "phase_id": "phase_1_S1", "scenario_id": "S1"}
+        ])
+
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [
+            {"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}
+        ])
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1"],
+            recovery_verified=True,
+            config_params=self.config_params
+        )
+
+        self.assertFalse(dq_pass, "Unparseable event timestamp must fail data_quality_pass")
+        self.assertTrue(any("timestamp event tidak valid" in r for r in dq_reasons))
+
+    def test_neg_12_foreign_run_id_in_raw_polling_must_fail_data_quality(self):
+        """NEG-12: Raw polling listing a foreign run_id from another experiment -> must fail data_quality_pass."""
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        create_fixture_telemetry(csv_path, self.run_id, [{
+            "elapsed_sec": str(i),
+            "ran_prb_cell1": 35.0,
+            "nwdaf_comm_ul_bytes": 1000.0,
+            "event_phase_id": "phase_1_S1",
+            "event_scenario": "S1"
+        } for i in range(35)])
+
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [{"phase_id": "phase_1_S1", "scenario_id": "S1"}])
+
+        # JSONL contains record stamped with foreign run_id
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [
+            {"poll_timestamp_utc": "2026-10-16T10:00:05Z", "run_id": "FOREIGN_EXPERIMENT_999", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}
+        ])
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1"],
+            recovery_verified=True,
+            config_params=self.config_params
+        )
+
+        self.assertFalse(dq_pass, "Raw poll with foreign run_id must fail data_quality_pass")
+        self.assertTrue(any("eksperimen lain" in r for r in dq_reasons))
+
+    def test_neg_13_recovery_with_available_false_must_fail(self):
+        """NEG-13: Recovery receiving partial parsing with available=False must not be verified as recovered."""
+        from unittest.mock import patch
+        partial_metrics = {
+            "upf_backlog_embb": 0.0,
+            "ran_prb_cell1": 35.0,
+            "nwdaf_comm_freshness": 1,
+            "available": False
+        }
+        with patch("run_pilot_experiment.fetch_live_metrics", return_value=partial_metrics):
+            verified, evidence, reason = run_pilot_experiment.verify_recovery(
+                unattended=True,
+                timeout_sec=1.5,
+                stability_sec=1.0,
+                target_backlog=0.0,
+                target_prb=40.0
+            )
+            self.assertFalse(verified, "available=False must not be verified even if values look nominal")
+            self.assertIn("Recovery timeout", reason)
+
+    def test_neg_14_interactive_recovery_rejects_negative_and_inf_inputs(self):
+        """NEG-14: Interactive recovery inputs with -inf, inf, or negative values must be rejected."""
+        from unittest.mock import patch
+        
+        # Test 1: -inf backlog input
+        with patch("builtins.input", side_effect=["-inf", "35.0", "Grafana Panel 4", "5.0"]):
+            verified, evidence, reason = run_pilot_experiment.verify_recovery(
+                unattended=False,
+                target_backlog=0.0,
+                target_prb=40.0
+            )
+            self.assertFalse(verified, "Negative infinity input must be rejected")
+            self.assertIn("tidak memenuhi syarat", reason)
+
+        # Test 2: negative PRB input
+        with patch("builtins.input", side_effect=["0.0", "-10.0", "Grafana Panel 4", "5.0"]):
+            verified, evidence, reason = run_pilot_experiment.verify_recovery(
+                unattended=False,
+                target_backlog=0.0,
+                target_prb=40.0
+            )
+            self.assertFalse(verified, "Negative PRB input must be rejected")
+            self.assertIn("tidak memenuhi syarat", reason)
+
+    def test_neg_15_archive_failure_counter_fails_quality_gate(self):
+        """NEG-15: nwdaf_raw_polls_failed > 0 during run must fail data_quality_pass."""
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        create_fixture_telemetry(csv_path, self.run_id, [{
+            "elapsed_sec": str(i),
+            "ran_prb_cell1": 35.0,
+            "nwdaf_comm_ul_bytes": 1000.0,
+            "event_phase_id": "phase_1_S1",
+            "event_scenario": "S1"
+        } for i in range(35)])
+
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [{"phase_id": "phase_1_S1", "scenario_id": "S1"}])
+
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [
+            {"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}
+        ])
+
+        # Exporter reports failure in archiving
+        collector_metrics = {
+            "nwdaf_raw_polls_total": 2,
+            "nwdaf_raw_polls_written": 1,
+            "nwdaf_raw_polls_failed": 1
+        }
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1"],
+            recovery_verified=True,
+            config_params=self.config_params,
+            collector_metrics=collector_metrics
+        )
+
+        self.assertFalse(dq_pass, "Collector failure counter > 0 must fail data_quality_pass")
+        self.assertTrue(any("kegagalan penulisan arsip" in r for r in dq_reasons))
 
 
 if __name__ == "__main__":

@@ -20,7 +20,8 @@ import urllib.error
 
 LISTEN_PORT = 9100
 LISTEN_HOST = "0.0.0.0"
-RUN_STATE_FILE = "/opt/oran/monitoring/data/active_run_id.txt"
+DATA_DIR = os.getenv("MONITORING_DATA_DIR", "/opt/oran/monitoring/data")
+RUN_STATE_FILE = os.path.join(DATA_DIR, "active_run_id.txt")
 COLLECTOR_START_TIME = datetime.now(timezone.utc)
 
 METRICS_LOCK = threading.Lock()
@@ -28,6 +29,8 @@ metrics_store = {
     # Domain 4: End-to-End UE Metrics (VM-5)
     "e2e_slice1_throughput_mbps": float("nan"),
     "e2e_slice1_jitter_ms": float("nan"),
+    "e2e_slice1_latency_rtt_ms": float("nan"),
+    "e2e_slice1_packet_loss_pct": float("nan"),
     "e2e_slice2_latency_rtt_ms": float("nan"),
     "e2e_slice2_packet_loss_pct": float("nan"),
     "e2e_slice2_last_seq": float("nan"),
@@ -145,6 +148,8 @@ def format_prometheus_metrics():
         if not ue1_reporting:
             metrics_store["e2e_slice1_throughput_mbps"] = float("nan")
             metrics_store["e2e_slice1_jitter_ms"] = float("nan")
+            metrics_store["e2e_slice1_latency_rtt_ms"] = float("nan")
+            metrics_store["e2e_slice1_packet_loss_pct"] = float("nan")
 
         if not ue2_reporting:
             metrics_store["e2e_slice2_packet_loss_pct"] = float("nan")
@@ -198,6 +203,14 @@ def format_prometheus_metrics():
         lines.append("# HELP e2e_slice1_jitter_ms End-to-end jitter for Slice 1 (eMBB) in ms")
         lines.append("# TYPE e2e_slice1_jitter_ms gauge")
         lines.append(f"e2e_slice1_jitter_ms {fmt_val(metrics_store['e2e_slice1_jitter_ms'], '.3f')}")
+
+        lines.append("# HELP e2e_slice1_latency_rtt_ms End-to-end RTT latency for Slice 1 (eMBB/UPF-1) in ms")
+        lines.append("# TYPE e2e_slice1_latency_rtt_ms gauge")
+        lines.append(f"e2e_slice1_latency_rtt_ms {fmt_val(metrics_store['e2e_slice1_latency_rtt_ms'])}")
+
+        lines.append("# HELP e2e_slice1_packet_loss_pct End-to-end packet loss percentage for Slice 1 (eMBB/UPF-1)")
+        lines.append("# TYPE e2e_slice1_packet_loss_pct gauge")
+        lines.append(f"e2e_slice1_packet_loss_pct {fmt_val(metrics_store['e2e_slice1_packet_loss_pct'])}")
 
         lines.append("# HELP e2e_slice2_latency_rtt_ms End-to-end precision RTT latency for Slice 2 (URLLC) in ms")
         lines.append("# TYPE e2e_slice2_latency_rtt_ms gauge")
@@ -375,6 +388,16 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
                                 metrics_store["e2e_slice1_throughput_mbps"] = float(payload["throughput_mbps"])
                             if "jitter_ms" in payload:
                                 metrics_store["e2e_slice1_jitter_ms"] = float(payload["jitter_ms"])
+                            rtt_val1 = payload.get("rtt_ms")
+                            if rtt_val1 is not None and str(rtt_val1).lower() not in ("nan", "none", "null"):
+                                metrics_store["e2e_slice1_latency_rtt_ms"] = float(rtt_val1)
+                            else:
+                                metrics_store["e2e_slice1_latency_rtt_ms"] = float("nan")
+                            loss_val1 = payload.get("packet_loss_pct")
+                            if loss_val1 is not None and str(loss_val1).lower() not in ("nan", "none", "null"):
+                                metrics_store["e2e_slice1_packet_loss_pct"] = float(loss_val1)
+                            else:
+                                metrics_store["e2e_slice1_packet_loss_pct"] = float("nan")
                         elif slice_id in ("2", "urllc"):
                             last_report_ue2 = time.time()
                             rtt_val = payload.get("rtt_ms")
@@ -583,7 +606,9 @@ def log_raw_nwdaf_poll(poll_record):
     if not active_run_id:
         return
 
-    data_dir = "/opt/oran/monitoring/data"
+    data_dir = os.getenv("MONITORING_DATA_DIR", "/opt/oran/monitoring/data")
+    if "run_id" not in poll_record:
+        poll_record["run_id"] = active_run_id
     line = json.dumps(poll_record) + "\n"
     run_dir = os.path.join(data_dir, "raw", active_run_id)
     write_success = True
