@@ -136,6 +136,8 @@ def fetch_live_metrics(url=COLLECTOR_URL):
         "ue2_loss_pct": float("nan"),
         "e2e_rtt_ms": float("nan"),
         "e2e_loss_pct": float("nan"),
+        "ue1_probe_freshness": 0,
+        "ue2_probe_freshness": 0,
         "e2e_probe_freshness": 0,
         "nwdaf_comm_freshness": 0,
         "nwdaf_raw_polls_total": 0,
@@ -182,6 +184,10 @@ def fetch_live_metrics(url=COLLECTOR_URL):
                         res["e2e_loss_pct"] = val_float
                     elif name == "nwdaf_comm_freshness":
                         res["nwdaf_comm_freshness"] = int(val_float) if not math.isnan(val_float) else 0
+                    elif name == "e2e_slice1_probe_freshness":
+                        res["ue1_probe_freshness"] = int(val_float) if not math.isnan(val_float) else 0
+                    elif name == "e2e_slice2_probe_freshness":
+                        res["ue2_probe_freshness"] = int(val_float) if not math.isnan(val_float) else 0
                     elif name == "e2e_probe_freshness":
                         res["e2e_probe_freshness"] = int(val_float) if not math.isnan(val_float) else 0
                     elif name == "nwdaf_raw_polls_total":
@@ -244,7 +250,10 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
             prb = now_m["ran_prb_cell1"]
             u1_rtt = now_m.get("ue1_rtt_ms", float("nan"))
             u1_loss = now_m.get("ue1_loss_pct", float("nan"))
-            probe_fresh = now_m.get("e2e_probe_freshness", 0)
+            probe_fresh = now_m.get("ue1_probe_freshness", now_m.get("e2e_probe_freshness", 0))
+            u2_rtt = now_m.get("ue2_rtt_ms", float("nan"))
+            u2_loss = now_m.get("ue2_loss_pct", float("nan"))
+            u2_fresh = now_m.get("ue2_probe_freshness", now_m.get("e2e_probe_freshness", 0))
 
             is_avail = bool(now_m.get("available"))
             is_finite = math.isfinite(b_log) and math.isfinite(prb)
@@ -271,7 +280,10 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
                 "prb": prb,
                 "ue1_rtt_ms": u1_rtt,
                 "ue1_loss_pct": u1_loss,
-                "probe_freshness": probe_fresh,
+                "ue1_probe_freshness": probe_fresh,
+                "ue2_rtt_ms": u2_rtt,
+                "ue2_loss_pct": u2_loss,
+                "ue2_probe_freshness": u2_fresh,
                 "available": is_avail,
                 "resource_ok": resource_ok,
                 "service_ok": service_ok,
@@ -282,7 +294,7 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
                 if stable_start is None:
                     stable_start = now_mono
                 stable_duration = now_mono - stable_start
-                print(f"    -> Kondisi normal teramati: Backlog={b_log:.0f}B, PRB={prb:.1f}%, UE1_Loss={u1_loss:.1f}% (stabil: {stable_duration:.1f}/{stability_sec}s)...")
+                print(f"    -> Kondisi normal teramati: Backlog={b_log:.0f}B, PRB={prb:.1f}%, UE1_Loss={u1_loss:.1f}%, UE1_Fresh={probe_fresh} (stabil: {stable_duration:.1f}/{stability_sec}s)...")
                 if stable_duration >= stability_sec:
                     evidence["verified_time_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
                     evidence["duration_sec"] = round(now_mono - t_start, 1)
@@ -292,12 +304,17 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
                     evidence["final_prb"] = prb
                     evidence["final_ue1_rtt_ms"] = u1_rtt
                     evidence["final_ue1_loss_pct"] = u1_loss
-                    evidence["final_probe_freshness"] = probe_fresh
+                    evidence["final_ue1_probe_freshness"] = probe_fresh
+                    evidence["ue2_isolation_control"] = {
+                        "rtt_ms": u2_rtt,
+                        "loss_pct": u2_loss,
+                        "freshness": u2_fresh
+                    }
                     print(f"[+] Pemulihan terverifikasi secara objektif dalam {evidence['duration_sec']} detik!")
                     return True, evidence, "Verified stable baseline"
             else:
                 stable_start = None
-                print(f"    -> Menunggu drain/tersedia: Backlog={b_log}B, PRB={prb}%, UE1_Loss={u1_loss}%, ProbeFresh={probe_fresh}, Avail={is_avail} (elapsed: {round(now_mono - t_start)}s)...")
+                print(f"    -> Menunggu drain/tersedia: Backlog={b_log}B, PRB={prb}%, UE1_Loss={u1_loss}%, UE1_Fresh={probe_fresh}, Avail={is_avail} (elapsed: {round(now_mono - t_start)}s)...")
 
             time.sleep(1.0)
 
@@ -309,32 +326,67 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
         try:
             obs_b = input(f"    -> Masukkan Backlog UPF-1 teramati (Bytes) [Target <={target_backlog}]: ").strip()
             obs_p = input(f"    -> Masukkan PRB Cell-1 teramati (%) [Target <={target_prb}%]: ").strip()
-            obs_src = input("    -> Sumber bukti pemulihan & status probe (misal: Grafana Panel 4 / tc qdisc / ping RTT=12ms): ").strip()
-            obs_win = input("    -> Durasi pengamatan kondisi stabil (detik) [min 5s]: ").strip()
-
             b_val = float(obs_b)
             p_val = float(obs_p)
+
+            is_probe_valid = True
+            rtt_val = float("nan")
+            loss_val = float("nan")
+            fresh_val = 0
+
+            if require_probe:
+                obs_rtt = input(f"    -> Masukkan RTT UE-1 teramati (ms) [Target <={target_rtt_ms}ms]: ").strip()
+                obs_loss = input(f"    -> Masukkan Packet Loss UE-1 teramati (%) [Target <={target_loss_pct}%]: ").strip()
+                obs_fresh = input("    -> Masukkan Freshness Probe UE-1 (1=Fresh, 0=Stale) [Target == 1]: ").strip()
+                rtt_val = float(obs_rtt)
+                loss_val = float(obs_loss)
+                fresh_val = int(obs_fresh)
+
+                is_probe_valid = (
+                    math.isfinite(rtt_val) and (0.0 < rtt_val <= target_rtt_ms) and
+                    math.isfinite(loss_val) and (0.0 <= loss_val <= target_loss_pct) and
+                    (fresh_val == 1)
+                )
+
+            obs_src = input("    -> Sumber bukti pemulihan & status probe (misal: Grafana Panel 4 / tc qdisc / ping RTT=12ms): ").strip()
+            obs_win = input("    -> Durasi pengamatan kondisi stabil (detik) [min 5s]: ").strip()
             win_val = float(obs_win)
 
             is_valid_input = (
                 math.isfinite(b_val) and (b_val >= 0.0) and
                 math.isfinite(p_val) and (0.0 <= p_val <= 100.0) and
                 math.isfinite(win_val) and (win_val >= 5.0) and
-                bool(obs_src)
+                bool(obs_src) and
+                is_probe_valid
             )
 
             evidence["verified_time_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
             evidence["final_backlog"] = b_val
             evidence["final_prb"] = p_val
+            evidence["final_ue1_rtt_ms"] = rtt_val
+            evidence["final_ue1_loss_pct"] = loss_val
+            evidence["final_ue1_probe_freshness"] = fresh_val
             evidence["evidence_source"] = obs_src
             evidence["duration_sec"] = win_val
 
             if is_valid_input and b_val <= target_backlog and p_val <= target_prb:
                 return True, evidence, "Verified by operator with empirical proof"
             else:
-                return False, evidence, f"Input operator tidak memenuhi syarat baseline (Backlog={b_val}, PRB={p_val}, Window={win_val}s, Source='{obs_src}')"
+                return False, evidence, f"Input operator tidak memenuhi syarat baseline (Backlog={b_val}, PRB={p_val}, RTT={rtt_val}, Loss={loss_val}, Freshness={fresh_val}, Window={win_val}s, Source='{obs_src}')"
         except Exception as e:
             return False, evidence, f"Gagal membaca input verifikasi operator: {e}"
+
+
+def is_valid_finite_number(val, min_val=None, max_val=None):
+    if val is None or isinstance(val, bool) or not isinstance(val, (int, float)):
+        return False
+    if not math.isfinite(val):
+        return False
+    if min_val is not None and val < min_val:
+        return False
+    if max_val is not None and val > max_val:
+        return False
+    return True
 
 
 def validate_receiver_archive(file_path):
@@ -344,6 +396,7 @@ def validate_receiver_archive(file_path):
     2. JSON-stream (iperf3 --json-stream)
     3. Summary JSON (receiver_*_summary.json with session_complete)
     
+    Enforces strict boolean type checks and finite numeric validations for bytes, duration, goodput, and loss.
     Returns: (is_valid: bool, reason: str, metadata: dict)
     """
     if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
@@ -363,12 +416,34 @@ def validate_receiver_archive(file_path):
         data = json.loads(content)
         if isinstance(data, dict):
             # Case 1A: Exported Summary JSON (from receiver_iperf.sh export)
-            if "session_complete" in data or "goodput_mbps" in data:
-                if not data.get("session_complete"):
-                    return False, "Sesi receiver tidak lengkap (session_complete == False)", data
-                bytes_rx = data.get("bytes_received", 0)
-                if not (isinstance(bytes_rx, (int, float)) and bytes_rx > 0):
-                    return False, f"Jumlah bytes_received ({bytes_rx}) tidak valid", data
+            if "session_complete" in data or "goodput_mbps" in data or "bytes_received" in data:
+                if data.get("session_complete") is not True:
+                    return False, "Sesi receiver tidak lengkap (session_complete harus bernilai boolean True)", data
+                
+                bytes_rx = data.get("bytes_received")
+                if not is_valid_finite_number(bytes_rx, min_val=1):
+                    return False, f"Jumlah bytes_received ({bytes_rx}) tidak valid (harus finite number > 0)", data
+
+                if "raw_bytes_received" in data:
+                    raw_b = data.get("raw_bytes_received")
+                    if not is_valid_finite_number(raw_b, min_val=0):
+                        return False, f"Jumlah raw_bytes_received ({raw_b}) tidak valid (harus finite number >= 0)", data
+
+                if "duration_seconds" in data:
+                    dur = data.get("duration_seconds")
+                    if not is_valid_finite_number(dur, min_val=0.001):
+                        return False, f"duration_seconds ({dur}) tidak valid (harus finite number > 0)", data
+
+                if "goodput_mbps" in data:
+                    gp = data.get("goodput_mbps")
+                    if not is_valid_finite_number(gp, min_val=0.0):
+                        return False, f"goodput_mbps ({gp}) tidak valid (harus finite number >= 0)", data
+
+                if "receiver_loss_pct" in data:
+                    loss = data.get("receiver_loss_pct")
+                    if not is_valid_finite_number(loss, min_val=0.0, max_val=100.0):
+                        return False, f"receiver_loss_pct ({loss}) tidak valid (harus rentang 0.0 - 100.0)", data
+
                 return True, "Valid summary JSON", data
 
             # Case 1B: Standard iperf3 full JSON
@@ -381,9 +456,24 @@ def validate_receiver_archive(file_path):
                           (end_val.get("streams", [{}])[0].get("receiver") if end_val.get("streams") else None) or
                           (end_val.get("streams", [{}])[0].get("udp") if end_val.get("streams") else None) or
                           end_val)
-                if not isinstance(sum_rx, dict) or sum_rx.get("bytes", 0) <= 0:
-                    return False, "Blok 'end' tidak memuat ringkasan bytes yang valid (>0)", {}
-                return True, "Valid standard iperf3 JSON", {"bytes_received": sum_rx.get("bytes")}
+                if not isinstance(sum_rx, dict):
+                    return False, "Blok 'end' tidak memuat ringkasan sum yang valid", {}
+                
+                bytes_rx = sum_rx.get("bytes")
+                if not is_valid_finite_number(bytes_rx, min_val=1):
+                    return False, f"Blok 'end' tidak memuat ringkasan bytes yang valid (>0, received: {bytes_rx})", {}
+
+                if "seconds" in sum_rx:
+                    sec = sum_rx.get("seconds")
+                    if not is_valid_finite_number(sec, min_val=0.001):
+                        return False, f"Blok 'end' memuat seconds tidak valid ({sec})", {}
+
+                if "lost_percent" in sum_rx:
+                    lp = sum_rx.get("lost_percent")
+                    if not is_valid_finite_number(lp, min_val=0.0, max_val=100.0):
+                        return False, f"Blok 'end' memuat lost_percent tidak valid ({lp})", {}
+
+                return True, "Valid standard iperf3 JSON", {"bytes_received": bytes_rx}
             else:
                 return False, "JSON standar tidak memuat blok 'end' atau 'session_complete'", {}
     except json.JSONDecodeError:
@@ -418,10 +508,24 @@ def validate_receiver_archive(file_path):
               end_data.get("sum") or 
               (end_data.get("streams", [{}])[0].get("receiver") if end_data.get("streams") else None) or
               end_data)
-    if not isinstance(sum_rx, dict) or sum_rx.get("bytes", 0) <= 0:
-        return False, "Event 'end' pada JSON-stream tidak memuat bytes received valid", {}
+    if not isinstance(sum_rx, dict):
+        return False, "Event 'end' pada JSON-stream tidak memuat ringkasan sum yang valid", {}
 
-    return True, "Valid JSON-stream", {"bytes_received": sum_rx.get("bytes")}
+    bytes_rx = sum_rx.get("bytes")
+    if not is_valid_finite_number(bytes_rx, min_val=1):
+        return False, f"Event 'end' pada JSON-stream tidak memuat bytes received valid ({bytes_rx})", {}
+
+    if "seconds" in sum_rx:
+        sec = sum_rx.get("seconds")
+        if not is_valid_finite_number(sec, min_val=0.001):
+            return False, f"Event 'end' pada JSON-stream memuat seconds tidak valid ({sec})", {}
+
+    if "lost_percent" in sum_rx:
+        lp = sum_rx.get("lost_percent")
+        if not is_valid_finite_number(lp, min_val=0.0, max_val=100.0):
+            return False, f"Event 'end' pada JSON-stream memuat lost_percent tidak valid ({lp})", {}
+
+    return True, "Valid JSON-stream", {"bytes_received": bytes_rx}
 
 
 def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=True, recovery_evidence=None, config_params=None, collector_metrics=None, initial_collector_metrics=None):
@@ -456,6 +560,9 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
     phase_max_prb = {}
     phase_max_backlog = {}
     phase_max_drops = {}
+    phase_prb_values = {}
+    phase_backlog_values = {}
+    phase_drops_values = {}
     csv_phase_scenarios = {}
     total_nwdaf_valid_rows = 0
     has_inf = False
@@ -512,6 +619,9 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                         phase_rows[row_phase] = 0
                         phase_ran_valid[row_phase] = 0
                         phase_nwdaf_valid[row_phase] = 0
+                        phase_prb_values[row_phase] = []
+                        phase_backlog_values[row_phase] = []
+                        phase_drops_values[row_phase] = []
                         csv_phase_scenarios[row_phase] = set()
 
                     phase_rows[row_phase] += 1
@@ -522,26 +632,33 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                             p_val = float(prb_str)
                             if math.isfinite(p_val):
                                 phase_ran_valid[row_phase] += 1
+                                phase_prb_values[row_phase].append(p_val)
                                 if row_phase not in phase_max_prb or p_val > phase_max_prb[row_phase]:
                                     phase_max_prb[row_phase] = p_val
                         except ValueError:
                             pass
 
-                    b_str = r.get("upf_backlog_bytes_embb", "")
+                    b_str = r.get("upf_backlog_bytes_embb")
+                    if b_str is None or b_str == "":
+                        b_str = r.get("upf_queue_backlog_bytes", "")
                     if b_str not in ("", "NaN", "nan", "None", None):
                         try:
                             b_val = float(b_str)
                             if math.isfinite(b_val):
+                                phase_backlog_values[row_phase].append(b_val)
                                 if row_phase not in phase_max_backlog or b_val > phase_max_backlog[row_phase]:
                                     phase_max_backlog[row_phase] = b_val
                         except ValueError:
                             pass
 
-                    d_str = r.get("upf_drops_embb", "")
+                    d_str = r.get("upf_drops_embb")
+                    if d_str is None or d_str == "":
+                        d_str = r.get("upf_queue_drops_embb", "")
                     if d_str not in ("", "NaN", "nan", "None", None):
                         try:
                             d_val = float(d_str)
                             if math.isfinite(d_val):
+                                phase_drops_values[row_phase].append(d_val)
                                 if row_phase not in phase_max_drops or d_val > phase_max_drops[row_phase]:
                                     phase_max_drops[row_phase] = d_val
                         except ValueError:
@@ -581,6 +698,7 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
     # 2. Evaluate Event CSV Annotations (Strict Timestamp & Semantic Matching)
     events_count = 0
     event_phases = {}
+    event_details = {}
     if not os.path.exists(events_path) or os.path.getsize(events_path) == 0:
         data_quality_reasons.append("Berkas event anotasi ground-truth hilang atau 0 byte")
     else:
@@ -611,6 +729,15 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                     ev_scen = ev.get("scenario_id", "")
                     if ev_phase:
                         event_phases[ev_phase] = ev_scen
+                        event_details[ev_phase] = {
+                            "timestamp_utc": ts_str,
+                            "scenario_id": ev_scen,
+                            "event_type": ev.get("event_type", ""),
+                            "target_component": ev.get("target_component", ""),
+                            "mechanism": ev.get("mechanism", ""),
+                            "parameters": ev.get("parameters", ""),
+                            "notes": ev.get("notes", "")
+                        }
                     if ev_phase in expected_phase_scenarios:
                         exp_scen = expected_phase_scenarios[ev_phase]
                         if not is_scenario_matching(ev_scen, exp_scen):
@@ -714,6 +841,7 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
     data_quality_pass = (len(data_quality_reasons) == 0)
 
     # 5. Evaluate Training Eligibility (Strict Scientific & Empirical Gates)
+    fault_evidence = {}
     if not data_quality_pass:
         training_reasons.append("Gagal di tahap validasi kualitas dasar (data_quality_pass == False)")
     else:
@@ -743,21 +871,71 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                 p_max_prb = phase_max_prb.get(ep, 0.0)
                 p_max_backlog = phase_max_backlog.get(ep, 0.0)
                 p_max_drops = phase_max_drops.get(ep, 0.0)
+                prb_samples = phase_prb_values.get(ep, [])
+                backlog_samples = phase_backlog_values.get(ep, [])
+                drops_samples = phase_drops_values.get(ep, [])
+                ev_det = event_details.get(ep, {})
 
                 if "S3" in exp_scen:
                     # S3 is RAN Overload: peak PRB must show radio saturation (>= 65.0%)
+                    # and must be sustained over the phase (>= 50% of valid samples >= 60.0%)
+                    elevated_count = sum(1 for p in prb_samples if p >= 60.0)
+                    elevated_ratio = elevated_count / len(prb_samples) if prb_samples else 0.0
                     if p_max_prb < 65.0:
                         training_reasons.append(f"Fase '{ep}' (S3 RAN Overload) tidak membuktikan signature saturasi radio (peak PRB {p_max_prb:.1f}% < 65.0%)")
+                    elif elevated_ratio < 0.50:
+                        training_reasons.append(f"Fase '{ep}' (S3 RAN Overload) tidak membuktikan overload yang berkelanjutan ({elevated_ratio*100:.1f}% sampel >= 60.0% < 50% syarat durasi fase)")
+                    
+                    fault_evidence[ep] = {
+                        "scenario": exp_scen,
+                        "peak_prb": p_max_prb,
+                        "elevated_ratio": elevated_ratio,
+                        "total_samples": len(prb_samples),
+                        "sustained": elevated_ratio >= 0.50
+                    }
+
                 elif "S6" in exp_scen:
                     # S6 is Core Bottleneck (TBF queue limit): backlog or drops must be non-zero
+                    # and sustained for at least 30% of samples
+                    n_samples = max(len(backlog_samples), len(drops_samples))
+                    active_count = sum(1 for b, d in zip(backlog_samples, drops_samples) if b > 0.0 or d > 0.0)
+                    active_ratio = active_count / n_samples if n_samples > 0 else 0.0
+
                     if p_max_backlog <= 0.0 and p_max_drops <= 0.0:
                         training_reasons.append(f"Fase '{ep}' (S6 Core Bottleneck) tidak membuktikan antrean atau paket drop UPF (peak backlog={p_max_backlog:.0f}B, drops={p_max_drops})")
+                    elif p_max_drops == 0 and active_ratio < 0.30:
+                        training_reasons.append(f"Fase '{ep}' (S6 Core Bottleneck) gangguan antrean tidak berlangsung memadai ({active_ratio*100:.1f}% sampel aktif < 30% syarat durasi fase)")
+
+                    # Archive TBF configuration, interface, and application timestamp
+                    tbf_mechanism = ev_det.get("mechanism", "TBF_RATELIMIT")
+                    tbf_params = ev_det.get("parameters", "rate=12M,latency=200ms")
+                    tbf_interface = ev_det.get("target_component", "UPF-1_Slice-1")
+                    tbf_timestamp = ev_det.get("timestamp_utc", "")
+
+                    fault_evidence[ep] = {
+                        "scenario": exp_scen,
+                        "peak_backlog_bytes": p_max_backlog,
+                        "peak_drops": p_max_drops,
+                        "active_ratio": active_ratio,
+                        "total_samples": n_samples,
+                        "tbf_qdisc_config": tbf_params,
+                        "tbf_interface": tbf_interface,
+                        "tbf_applied_time_utc": tbf_timestamp,
+                        "tbf_mechanism": tbf_mechanism
+                    }
+
                 elif "S1" in exp_scen:
                     # S1 is Baseline Normal: PRB must be nominal (<= 55.0%) and backlog == 0
                     if p_max_backlog > 0.0:
                         training_reasons.append(f"Fase '{ep}' (S1 Baseline) terdeteksi memiliki backlog antrean UPF ({p_max_backlog:.0f}B > 0B)")
                     if p_max_prb > 60.0:
                         training_reasons.append(f"Fase '{ep}' (S1 Baseline) terdeteksi kelebihan beban radio (peak PRB {p_max_prb:.1f}% > 60.0%)")
+
+                    fault_evidence[ep] = {
+                        "scenario": exp_scen,
+                        "peak_prb": p_max_prb,
+                        "peak_backlog_bytes": p_max_backlog
+                    }
 
         # Strict NWDAF eligibility (3GPP TS 29.520 V17.8.0 §5.1.6.2.13 Type UeCommunication)
         if raw_polls_with_200 == 0:
@@ -799,7 +977,8 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
         "raw_polls_with_200": raw_polls_with_200,
         "raw_polls_with_valid_payload": raw_polls_with_valid_payload,
         "total_nwdaf_valid_rows": total_nwdaf_valid_rows,
-        "phase_breakdown": {}
+        "phase_breakdown": {},
+        "fault_evidence": fault_evidence
     }
     for p, count in phase_rows.items():
         summary["phase_breakdown"][p] = {

@@ -873,6 +873,7 @@ class TestResearchContractQualityGates(unittest.TestCase):
                 "event_phase_id": phase,
                 "event_scenario": scen,
                 "ran_prb_cell1": prb,
+                "upf_backlog_bytes_embb": back,
                 "upf_queue_backlog_bytes": back,
                 "upf_drops_embb": drops,
                 "nwdaf_comm_ul_bytes": 100000.0 + i*1000
@@ -883,7 +884,7 @@ class TestResearchContractQualityGates(unittest.TestCase):
         create_fixture_events(events_path, self.run_id, [
             {"timestamp_utc": "2026-10-16T10:00:00Z", "phase_id": "phase_1_S1", "scenario_id": "S1"},
             {"timestamp_utc": "2026-10-16T10:00:15Z", "phase_id": "phase_2_S3", "scenario_id": "S3"},
-            {"timestamp_utc": "2026-10-16T10:00:30Z", "phase_id": "phase_3_S6", "scenario_id": "S6"},
+            {"timestamp_utc": "2026-10-16T10:00:30Z", "phase_id": "phase_3_S6", "scenario_id": "S6", "target_component": "UPF-1_Slice-1", "mechanism": "TBF_RATELIMIT", "parameters": "rate=12M,latency=200ms"},
             {"timestamp_utc": "2026-10-16T10:00:45Z", "phase_id": "phase_clear", "scenario_id": "CLEAR"}
         ])
 
@@ -912,6 +913,117 @@ class TestResearchContractQualityGates(unittest.TestCase):
         self.assertTrue(dq_pass, f"Data quality must pass: {dq_reasons}")
         self.assertTrue(tr_elig, f"Training eligibility must pass when physical fault signatures exist: {tr_reasons}")
 
+    def test_pos_s6_backlog_positive_drops_zero_pass(self):
+        """POS-FAULTS-S6: S6 phase with positive backlog bytes and zero drops passes physical fault realization."""
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        rows = []
+        for i in range(45):
+            if i < 15:
+                phase, scen, prb, back, drops = "phase_1_S1", "S1", 35.0, 0.0, 0.0
+            elif i < 30:
+                phase, scen, prb, back, drops = "phase_2_S3", "S3", 85.0, 0.0, 0.0
+            else:
+                # S6 with positive backlog and zero drops (active buffering)
+                phase, scen, prb, back, drops = "phase_3_S6", "S6", 40.0, 150000.0, 0.0
+            rows.append({
+                "timestamp_utc": f"2026-10-16T10:00:{i:02d}Z",
+                "elapsed_sec": f"{i}.000",
+                "run_id": self.run_id,
+                "event_phase_id": phase,
+                "event_scenario": scen,
+                "ran_prb_cell1": prb,
+                "upf_backlog_bytes_embb": back,
+                "upf_queue_backlog_bytes": back,
+                "upf_drops_embb": drops,
+                "nwdaf_comm_ul_bytes": 100000.0 + i*1000
+            })
+        create_fixture_telemetry(csv_path, self.run_id, rows)
+
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [
+            {"timestamp_utc": "2026-10-16T10:00:00Z", "phase_id": "phase_1_S1", "scenario_id": "S1"},
+            {"timestamp_utc": "2026-10-16T10:00:15Z", "phase_id": "phase_2_S3", "scenario_id": "S3"},
+            {"timestamp_utc": "2026-10-16T10:00:30Z", "phase_id": "phase_3_S6", "scenario_id": "S6", "target_component": "UPF-1_Slice-1", "mechanism": "TBF_RATELIMIT", "parameters": "rate=12M,latency=200ms"},
+            {"timestamp_utc": "2026-10-16T10:00:45Z", "phase_id": "phase_clear", "scenario_id": "CLEAR"}
+        ])
+
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [
+            {"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}
+        ])
+
+        rec_summary_path = os.path.join(self.run_dir, "receiver_s1_embb_summary.json")
+        with open(rec_summary_path, "w", encoding="utf-8") as rf:
+            json.dump({"session_complete": True, "bytes_received": 15000000, "goodput_mbps": 20.0}, rf)
+
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+        config["require_receiver"] = True
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1", "S3", "S6"],
+            recovery_verified=True,
+            config_params=config
+        )
+
+        self.assertTrue(dq_pass, f"Data quality must pass: {dq_reasons}")
+        self.assertTrue(tr_elig, f"S6 with positive backlog and zero drops must pass: {tr_reasons}")
+
+    def test_neg_s3_single_spike_not_sustained_fails(self):
+        """NEG-FAULTS-S3-SPIKE: S3 phase with 14 samples at 6% PRB and only 1 sample at 65% fails due to non-sustained overload."""
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        rows = []
+        for i in range(45):
+            if i < 15:
+                phase, scen, prb, back = "phase_1_S1", "S1", 35.0, 0.0
+            elif i < 30:
+                # 14 samples at 6%, only the 15th sample at 65% (spike)
+                phase, scen, prb, back = "phase_2_S3", "S3", (65.0 if i == 29 else 6.0), 0.0
+            else:
+                phase, scen, prb, back = "phase_3_S6", "S6", 40.0, 250000.0
+            rows.append({
+                "timestamp_utc": f"2026-10-16T10:00:{i:02d}Z",
+                "elapsed_sec": f"{i}.000",
+                "run_id": self.run_id,
+                "event_phase_id": phase,
+                "event_scenario": scen,
+                "ran_prb_cell1": prb,
+                "upf_backlog_bytes_embb": back,
+                "upf_queue_backlog_bytes": back,
+                "nwdaf_comm_ul_bytes": 100000.0 + i*1000
+            })
+        create_fixture_telemetry(csv_path, self.run_id, rows)
+
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [
+            {"timestamp_utc": "2026-10-16T10:00:00Z", "phase_id": "phase_1_S1", "scenario_id": "S1"},
+            {"timestamp_utc": "2026-10-16T10:00:15Z", "phase_id": "phase_2_S3", "scenario_id": "S3"},
+            {"timestamp_utc": "2026-10-16T10:00:30Z", "phase_id": "phase_3_S6", "scenario_id": "S6", "target_component": "UPF-1_Slice-1", "mechanism": "TBF_RATELIMIT", "parameters": "rate=12M,latency=200ms"},
+            {"timestamp_utc": "2026-10-16T10:00:45Z", "phase_id": "phase_clear", "scenario_id": "CLEAR"}
+        ])
+
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [
+            {"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}
+        ])
+
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1", "S3", "S6"],
+            recovery_verified=True,
+            config_params=config
+        )
+
+        self.assertTrue(dq_pass)
+        self.assertFalse(tr_elig, "S3 momentary spike without sustained duration must fail training_eligible")
+        self.assertTrue(any("tidak membuktikan overload yang berkelanjutan" in r for r in tr_reasons))
+
     def test_neg_s3_without_ran_overload_signature_fails(self):
         """NEG-FAULTS-S3: S3 phase with PRB 6% fails training_eligible due to lack of RAN overload signature."""
         csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
@@ -931,6 +1043,7 @@ class TestResearchContractQualityGates(unittest.TestCase):
                 "event_phase_id": phase,
                 "event_scenario": scen,
                 "ran_prb_cell1": prb,
+                "upf_backlog_bytes_embb": back,
                 "upf_queue_backlog_bytes": back,
                 "nwdaf_comm_ul_bytes": 100000.0 + i*1000
             })
@@ -983,6 +1096,7 @@ class TestResearchContractQualityGates(unittest.TestCase):
                 "event_phase_id": phase,
                 "event_scenario": scen,
                 "ran_prb_cell1": prb,
+                "upf_backlog_bytes_embb": back,
                 "upf_queue_backlog_bytes": back,
                 "upf_drops_embb": drops,
                 "nwdaf_comm_ul_bytes": 100000.0 + i*1000
@@ -1175,6 +1289,76 @@ class TestResearchContractQualityGates(unittest.TestCase):
                 stability_sec=1,
                 require_probe=True
             )
+            self.assertTrue(verified, f"Recovery should pass with healthy metrics: {reason}")
+            self.assertEqual(evidence["final_ue1_probe_freshness"], 1)
+
+    def test_pos_interactive_recovery_valid_probe_passes(self):
+        """POS-RECOV-INT-01: Interactive recovery passes when operator inputs healthy finite probe values."""
+        from unittest.mock import patch
+        # Backlog, PRB, RTT, Loss, Freshness, Source, Window
+        user_inputs = ["0.0", "35.0", "15.0", "0.0", "1", "Grafana Panel 4 + UE-1 Ping", "5.0"]
+        with patch("builtins.input", side_effect=user_inputs):
+            verified, evidence, reason = run_pilot_experiment.verify_recovery(
+                unattended=False,
+                target_backlog=0.0,
+                target_prb=40.0,
+                target_rtt_ms=30.0,
+                target_loss_pct=5.0,
+                require_probe=True
+            )
+            self.assertTrue(verified, f"Valid operator input must pass: {reason}")
+            self.assertEqual(evidence["final_ue1_probe_freshness"], 1)
+
+    def test_neg_interactive_recovery_missing_probe_fails(self):
+        """NEG-RECOV-INT-02: Interactive recovery fails if operator provides invalid probe or stale freshness."""
+        from unittest.mock import patch
+        # Backlog 0, PRB 10, RTT 45.0 (target <= 30), Loss 0, Freshness 0 (stale), Source, Window
+        user_inputs = ["0.0", "10.0", "45.0", "0.0", "0", "Grafana", "5.0"]
+        with patch("builtins.input", side_effect=user_inputs):
+            verified, evidence, reason = run_pilot_experiment.verify_recovery(
+                unattended=False,
+                target_backlog=0.0,
+                target_prb=40.0,
+                target_rtt_ms=30.0,
+                target_loss_pct=5.0,
+                require_probe=True
+            )
+            self.assertFalse(verified, "Interactive recovery with stale probe / RTT > 30 must fail")
+
+    def test_neg_receiver_session_complete_string_false_fails(self):
+        """NEG-RCV-03: Receiver summary with string 'false' must be rejected (strict boolean check)."""
+        rec_path = os.path.join(self.run_dir, "receiver_s1_embb_summary.json")
+        with open(rec_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "session_complete": "false",
+                "bytes_received": 15000000,
+                "goodput_mbps": 20.0
+            }, f)
+        
+        is_val, msg, meta = run_pilot_experiment.validate_receiver_archive(rec_path)
+        self.assertFalse(is_val)
+        self.assertIn("boolean True", msg)
+
+    def test_neg_receiver_bytes_infinity_fails(self):
+        """NEG-RCV-04: Receiver summary with Infinity bytes_received must be rejected."""
+        rec_path = os.path.join(self.run_dir, "receiver_s1_embb_summary.json")
+        with open(rec_path, "w", encoding="utf-8") as f:
+            f.write('{"session_complete": true, "bytes_received": Infinity, "goodput_mbps": 20.0}')
+        
+        is_val, msg, meta = run_pilot_experiment.validate_receiver_archive(rec_path)
+        self.assertFalse(is_val)
+        self.assertIn("tidak valid", msg)
+
+    def test_neg_receiver_bytes_nan_fails(self):
+        """NEG-RCV-05: Receiver summary with NaN raw_bytes_received must be rejected."""
+        rec_path = os.path.join(self.run_dir, "receiver_s1_embb_summary.json")
+        with open(rec_path, "w", encoding="utf-8") as f:
+            f.write('{"session_complete": true, "bytes_received": 15000000, "raw_bytes_received": NaN, "goodput_mbps": 20.0}')
+        
+        is_val, msg, meta = run_pilot_experiment.validate_receiver_archive(rec_path)
+        self.assertFalse(is_val)
+        self.assertIn("tidak valid", msg)
+
     def test_pos_trafgen_ping_parser_dedup_and_delayed_reply(self):
         """POS-PING-01: Awk ping parser in trafgen.sh must deduplicate sequences and handle delayed replies."""
         import subprocess
@@ -1191,7 +1375,11 @@ class TestResearchContractQualityGates(unittest.TestCase):
         with open(trafgen_path, "r", encoding="utf-8") as f:
             sh_code = f.read()
 
-        awk_code = sh_code.split("awk -v prev_seq=\"$prev_seq\" '")[1].split("}'")[0] + "}"
+        awk_marker = 'awk -v prev_seq="$prev_seq"'
+        awk_start = sh_code.find(awk_marker)
+        quote_start = sh_code.find("'", awk_start) + 1
+        quote_end = sh_code.find("\n  }'", quote_start)
+        awk_code = sh_code[quote_start:quote_end] + "\n}"
 
         # Case 1: Duplicate seq 1, lost seq 2, reply seq 3 -> must yield 33.3% loss
         fixture_dup = (
@@ -1200,7 +1388,7 @@ class TestResearchContractQualityGates(unittest.TestCase):
             "[100.3] no answer yet for icmp_seq=2\n"
             "[100.4] 64 bytes from 192.168.70.145: icmp_seq=3 ttl=64 time=12.0 ms\n"
         )
-        p = subprocess.run([awk_bin, "-v", "prev_seq=0", awk_code], input=fixture_dup, text=True, capture_output=True)
+        p = subprocess.run([awk_bin, "-v", "prev_seq=0", "-v", "state_file=", awk_code], input=fixture_dup, text=True, capture_output=True)
         self.assertEqual(p.returncode, 0, f"Awk exited with error: {p.stderr}")
         tokens = p.stdout.strip().split()
         self.assertEqual(tokens[0], "3", "Max seq should be 3")
@@ -1214,11 +1402,72 @@ class TestResearchContractQualityGates(unittest.TestCase):
             "[100.2] 64 bytes from 192.168.70.145: icmp_seq=3 ttl=64 time=12.0 ms\n"
             "[100.3] 64 bytes from 192.168.70.145: icmp_seq=2 ttl=64 time=25.0 ms\n"
         )
-        p = subprocess.run([awk_bin, "-v", "prev_seq=0", awk_code], input=fixture_ooo, text=True, capture_output=True)
+        p = subprocess.run([awk_bin, "-v", "prev_seq=0", "-v", "state_file=", awk_code], input=fixture_ooo, text=True, capture_output=True)
         self.assertEqual(p.returncode, 0)
         tokens = p.stdout.strip().split()
         self.assertEqual(tokens[2], "0.0", "Out of order packets must not cause packet loss")
         self.assertEqual(tokens[4], "3", "All 3 packets received")
+
+    def test_pos_trafgen_multi_polling_healthy_to_outage_transition(self):
+        """POS-PING-02: Stateful multi-polling parser does not recount old acks; healthy -> outage transition reports 100% loss."""
+        import subprocess
+        awk_bin = shutil.which("awk")
+        if not awk_bin:
+            git_awk = r"C:\Program Files\Git\usr\bin\awk.exe"
+            if os.path.exists(git_awk):
+                awk_bin = git_awk
+
+        if not awk_bin:
+            self.skipTest("awk binary not found in system PATH")
+
+        trafgen_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts", "trafgen.sh"))
+        with open(trafgen_path, "r", encoding="utf-8") as f:
+            sh_code = f.read()
+
+        awk_marker = 'awk -v prev_seq="$prev_seq"'
+        awk_start = sh_code.find(awk_marker)
+        quote_start = sh_code.find("'", awk_start) + 1
+        quote_end = sh_code.find("\n  }'", quote_start)
+        awk_code = sh_code[quote_start:quote_end] + "\n}"
+
+        state_file = os.path.join(self.test_dir, "test_ping.log.state")
+        if os.path.exists(state_file):
+            os.remove(state_file)
+        awk_state_file = state_file.replace("\\", "/")
+
+        # Polling 1: Healthy sequence 1 to 5
+        poll_1_input = (
+            "[100.1] 64 bytes from 192.168.70.145: icmp_seq=1 ttl=64 time=10.2 ms\n"
+            "[100.2] 64 bytes from 192.168.70.145: icmp_seq=2 ttl=64 time=10.5 ms\n"
+            "[100.3] 64 bytes from 192.168.70.145: icmp_seq=3 ttl=64 time=11.0 ms\n"
+            "[100.4] 64 bytes from 192.168.70.145: icmp_seq=4 ttl=64 time=10.8 ms\n"
+            "[100.5] 64 bytes from 192.168.70.145: icmp_seq=5 ttl=64 time=11.2 ms\n"
+        )
+        p1 = subprocess.run([awk_bin, "-v", "prev_seq=0", "-v", f"state_file={awk_state_file}", awk_code], input=poll_1_input, text=True, capture_output=True)
+        self.assertEqual(p1.returncode, 0, f"Awk exited with error: {p1.stderr}")
+        tokens1 = p1.stdout.strip().split()
+        self.assertEqual(tokens1[0], "5")
+        self.assertEqual(tokens1[2], "0.0", "Polling 1 loss must be 0.0%")
+        self.assertTrue(os.path.exists(state_file), "State file must be created")
+
+        # Polling 2: Tail still contains seq 1 to 5 from earlier, but new seq 6 to 10 are completely unanswered (outage)
+        poll_2_input = (
+            poll_1_input +
+            "[100.6] no answer yet for icmp_seq=6\n"
+            "[100.7] no answer yet for icmp_seq=7\n"
+            "[100.8] no answer yet for icmp_seq=8\n"
+            "[100.9] no answer yet for icmp_seq=9\n"
+            "[101.0] no answer yet for icmp_seq=10\n"
+            "[101.1] no answer yet for icmp_seq=11\n"
+        )
+        p2 = subprocess.run([awk_bin, "-v", "prev_seq=5", "-v", f"state_file={awk_state_file}", awk_code], input=poll_2_input, text=True, capture_output=True)
+        self.assertEqual(p2.returncode, 0, f"Awk exited with error: {p2.stderr}")
+        tokens2 = p2.stdout.strip().split()
+        self.assertEqual(tokens2[0], "10", "Max seq in polling 2 must be 10")
+        self.assertEqual(tokens2[1], "NaN", "RTT during 100% loss outage must be NaN")
+        self.assertEqual(tokens2[2], "100.0", "Polling 2 loss must be 100.0% during outage, NOT 0.0% from old replies")
+        self.assertEqual(tokens2[3], "5", "Sent count must be 5 (seq 6 to 10)")
+        self.assertEqual(tokens2[4], "0", "Received count must be 0")
 
 
 if __name__ == "__main__":

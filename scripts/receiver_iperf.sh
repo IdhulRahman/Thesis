@@ -84,19 +84,41 @@ case "$ACTION" in
     SUMMARY_FILE="${HOST_EXPORT_DIR}/receiver_${SESSION_ID}_summary.json"
     mkdir -p "$HOST_EXPORT_DIR"
 
+    PID_FILE_CONTAINER="/tmp/receiver_${RUN_ID}_${SESSION_ID}.pid"
+    REC_PID=""
+    if sudo docker exec "$CONTAINER" test -s "$PID_FILE_CONTAINER"; then
+      REC_PID=$(sudo docker exec "$CONTAINER" cat "$PID_FILE_CONTAINER" 2>/dev/null | tr -d '\r\n')
+    fi
+
+    is_receiver_running() {
+      if [ -n "$REC_PID" ] && [[ "$REC_PID" =~ ^[0-9]+$ ]]; then
+        sudo docker exec "$CONTAINER" kill -0 "$REC_PID" >/dev/null 2>&1
+      else
+        sudo docker exec "$CONTAINER" pgrep -f "iperf3.*${PORT}" >/dev/null 2>&1
+      fi
+    }
+
+    terminate_receiver() {
+      if [ -n "$REC_PID" ] && [[ "$REC_PID" =~ ^[0-9]+$ ]]; then
+        sudo docker exec "$CONTAINER" kill -INT "$REC_PID" 2>/dev/null || true
+      else
+        sudo docker exec "$CONTAINER" pkill -INT -f "iperf3.*${PORT}" 2>/dev/null || true
+      fi
+    }
+
     # Wait for receiver session to finish naturally instead of immediately sending SIGINT
     WAIT_TIMEOUT=10
     WAIT_COUNT=0
     FORCE_ABORT=0
-    while sudo docker exec "$CONTAINER" pgrep -f "iperf3.*${PORT}" >/dev/null 2>&1; do
+    while is_receiver_running; do
       if [ "$WAIT_COUNT" -ge "$WAIT_TIMEOUT" ]; then
-        echo "[WARNING] Receiver on port $PORT still running after ${WAIT_TIMEOUT}s timeout. Sesi belum selesai secara normal; menghentikan paksa..." >&2
-        sudo docker exec "$CONTAINER" pkill -INT -f "iperf3.*${PORT}" 2>/dev/null || true
+        echo "[WARNING] Receiver (PID: ${REC_PID:-port $PORT}) still running after ${WAIT_TIMEOUT}s timeout. Sesi belum selesai secara normal; menghentikan paksa..." >&2
+        terminate_receiver
         FORCE_ABORT=1
         sleep 1
         break
       fi
-      echo "[*] Menunggu receiver pada port $PORT selesai secara normal (${WAIT_COUNT}/${WAIT_TIMEOUT}s)..."
+      echo "[*] Menunggu receiver (PID: ${REC_PID:-port $PORT}) selesai secara normal (${WAIT_COUNT}/${WAIT_TIMEOUT}s)..."
       sleep 1
       WAIT_COUNT=$((WAIT_COUNT + 1))
     done

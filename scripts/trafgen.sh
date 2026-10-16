@@ -33,9 +33,10 @@ cleanup() {
       fi
     done < "$PID_FILE"
     rm -f "$PID_FILE"
+  else
+    pkill -f "iperf3.*$EXT_DN_IP" 2>/dev/null || true
+    pkill -f "ping.*$EXT_DN_IP" 2>/dev/null || true
   fi
-  pkill -f "iperf3.*$EXT_DN_IP" 2>/dev/null || true
-  pkill -f "ping.*$EXT_DN_IP" 2>/dev/null || true
 }
 
 trap 'cleanup; echo ""; exit 0' INT TERM
@@ -43,7 +44,19 @@ trap 'cleanup; echo ""; exit 0' INT TERM
 parse_ping() {
   local log_file="$1"
   local prev_seq="$2"
-  tail -n 60 "$log_file" 2>/dev/null | awk -v prev_seq="$prev_seq" '
+  local state_file="${log_file}.state"
+  tail -n 60 "$log_file" 2>/dev/null | awk -v prev_seq="$prev_seq" -v state_file="$state_file" '
+  BEGIN {
+    if (state_file != "") {
+      while ((getline line < state_file) > 0) {
+        split(line, arr, ":");
+        if (arr[1] != "") {
+          already_acked[arr[1] + 0] = 1;
+        }
+      }
+      close(state_file);
+    }
+  }
   {
     s = 0; r = -1; is_no_ans = 0;
     for (i = 1; i <= NF; i++) {
@@ -58,23 +71,22 @@ parse_ping() {
         has_no_ans[s] = 1;
       }
       if (r >= 0.0) {
-        if (s > prev_seq) {
-          if (!seen_rx[s]++) {
+        if (!already_acked[s] && !newly_rx[s]++) {
+          if (s > prev_seq) {
             rx_count++;
             last_rtt = r;
-          }
-        } else {
-          if (!seen_delayed[s]++) {
+          } else {
             delayed_rx++;
             if (last_rtt == "" || last_rtt < 0) last_rtt = r;
           }
+          new_ack_list[s] = r;
         }
       }
     }
   }
   END {
     eval_max = max_seen;
-    if (eval_max > prev_seq && has_no_ans[eval_max] && !seen_rx[eval_max]) {
+    if (eval_max > prev_seq && has_no_ans[eval_max] && !newly_rx[eval_max] && !already_acked[eval_max]) {
       if (eval_max - 1 > prev_seq) {
         eval_max = eval_max - 1;
       }
@@ -94,6 +106,13 @@ parse_ping() {
       }
     } else {
       printf "%d NaN 0.0 0 0\n", prev_seq;
+    }
+
+    if (state_file != "") {
+      for (sq in new_ack_list) {
+        print sq ":" new_ack_list[sq] >> state_file;
+      }
+      close(state_file);
     }
   }'
 }
@@ -143,6 +162,7 @@ case "$ACTION" in
         UE1_PING_LOG="$LOG_DIR/ping_${ns}_${TIMESTAMP}.log"
         > "$IPERF_LOG"
         > "$UE1_PING_LOG"
+        > "${UE1_PING_LOG}.state"
         nohup ip netns exec "$ns" iperf3 -c "$EXT_DN_IP" -u -b "${EMBB_RATE}M" -t "$DURATION" -i 1 --logfile "$IPERF_LOG" </dev/null >/dev/null 2>&1 &
         echo $! >> "$PID_FILE"
         nohup ip netns exec "$ns" ping -D -O -I oaitun_ue1 -i 0.2 -c $(( DURATION * 5 )) "$EXT_DN_IP" </dev/null > "$UE1_PING_LOG" 2>&1 &
@@ -151,6 +171,7 @@ case "$ACTION" in
         UE2_NS="$ns"
         PING_LOG="$LOG_DIR/ping_${ns}_${TIMESTAMP}.log"
         > "$PING_LOG"
+        > "${PING_LOG}.state"
         nohup ip netns exec "$ns" ping -D -O -I oaitun_ue1 -i 0.1 -c $(( DURATION * 10 )) "$EXT_DN_IP" </dev/null > "$PING_LOG" 2>&1 &
         echo $! >> "$PID_FILE"
       fi
