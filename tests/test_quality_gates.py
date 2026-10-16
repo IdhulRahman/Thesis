@@ -271,18 +271,20 @@ class TestResearchContractQualityGates(unittest.TestCase):
 
         cases = [
             # 1. Standard single JSON
-            ("standard", json.dumps({"end": {"sum_received": {"bytes": 12500000, "bits_per_second": 10000000.0, "lost_packets": 10, "packets": 100, "lost_percent": 10.0, "jitter_ms": 1.2}}}), 0, 10.0, 10.0),
-            # 2. ESnet JSON-stream
-            ("stream", '{"event": "start", "data": {}}\n{"event": "end", "data": {"sum_received": {"bytes": 12500000, "bits_per_second": 10000000.0, "lost_packets": 10, "packets": 100, "lost_percent": 10.0, "jitter_ms": 1.2}}}', 0, 10.0, 10.0),
-            # 3. Corrupt JSON stream (must fail, not silent 0)
-            ("corrupt", '{"event": "start"}\n{"event": "broken json line', 1, None, None),
-            # 4. Incomplete JSON without mandatory bytes (must fail)
-            ("incomplete", json.dumps({"end": {"sum_received": {"jitter_ms": 1.2}}}), 1, None, None),
-            # 5. Empty JSON (must fail)
-            ("empty", "   ", 1, None, None)
+            ("standard", json.dumps({"end": {"sum_received": {"bytes": 12500000, "bits_per_second": 10000000.0, "lost_packets": 10, "packets": 100, "lost_percent": 10.0, "jitter_ms": 1.2}}}), 0, 10.0, 10.0, True),
+            # 2. ESnet JSON-stream with final end event
+            ("stream", '{"event": "start", "data": {}}\n{"event": "end", "data": {"sum_received": {"bytes": 12500000, "bits_per_second": 10000000.0, "lost_packets": 10, "packets": 100, "lost_percent": 10.0, "jitter_ms": 1.2}}}', 0, 10.0, 10.0, True),
+            # 3. ESnet JSON-stream with ONLY interval (session incomplete, must fail export with code 1)
+            ("partial_stream", '{"event": "start", "data": {}}\n{"event": "interval", "data": {"sum": {"bytes": 1250000, "bits_per_second": 10000000.0, "lost_packets": 0, "packets": 10, "lost_percent": 0.0, "jitter_ms": 1.0}}}', 1, 10.0, 0.0, False),
+            # 4. Corrupt JSON stream (must fail, not silent 0)
+            ("corrupt", '{"event": "start"}\n{"event": "broken json line', 1, None, None, None),
+            # 5. Incomplete JSON without mandatory bytes (must fail)
+            ("incomplete", json.dumps({"end": {"sum_received": {"jitter_ms": 1.2}}}), 1, None, None, None),
+            # 6. Empty JSON (must fail)
+            ("empty", "   ", 1, None, None, None)
         ]
 
-        for label, raw_input, exp_exit, exp_mbps, exp_loss in cases:
+        for label, raw_input, exp_exit, exp_mbps, exp_loss, exp_complete in cases:
             tf = os.path.join(self.test_dir, f"test_{label}_input.json")
             sf = os.path.join(self.test_dir, f"test_{label}_summary.json")
             with open(tf, "w", encoding="utf-8") as f:
@@ -291,11 +293,13 @@ class TestResearchContractQualityGates(unittest.TestCase):
             proc = subprocess.run([sys.executable, "-c", py_parser_code, tf, sf], capture_output=True, text=True)
             self.assertEqual(proc.returncode, exp_exit, f"Case {label} unexpected exit code {proc.returncode} (stderr: {proc.stderr})")
 
-            if exp_exit == 0:
+            if exp_complete is not None and os.path.exists(sf):
                 with open(sf, "r", encoding="utf-8") as f:
                     res = json.load(f)
-                self.assertEqual(res["goodput_mbps"], exp_mbps)
-                self.assertEqual(res["packet_loss_pct"], exp_loss)
+                self.assertEqual(res.get("session_complete"), exp_complete, f"Case {label} session_complete mismatch")
+                if exp_exit == 0:
+                    self.assertEqual(res["goodput_mbps"], exp_mbps)
+                    self.assertEqual(res["packet_loss_pct"], exp_loss)
 
     def test_pos_05_analyze_dataset_both_slices_output(self):
         """POS-05: analyze_dataset.py must report both Slice 1 (eMBB) and Slice 2 (URLLC) explicitly."""
@@ -329,6 +333,87 @@ class TestResearchContractQualityGates(unittest.TestCase):
         self.assertIn("10.50 M", res.stdout)
         self.assertIn("12.40 ms", res.stdout)
         self.assertIn("8.50 ms", res.stdout)
+
+    def test_pos_06_consecutive_runs_archive_counter_isolation(self):
+        """POS-06: Consecutive runs sharing the same long-running collector daemon must isolate archive counters."""
+        run_a_id = "TEST_RUN_A"
+        run_b_id = "TEST_RUN_B"
+        run_a_dir = os.path.join(self.test_dir, "raw", run_a_id)
+        run_b_dir = os.path.join(self.test_dir, "raw", run_b_id)
+        os.makedirs(run_a_dir, exist_ok=True)
+        os.makedirs(run_b_dir, exist_ok=True)
+
+        # 1. Setup RUN_A: 1 jsonl line
+        jsonl_a = os.path.join(run_a_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_a, run_a_id, [
+            {"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}
+        ])
+        csv_a = os.path.join(run_a_dir, f"telemetry_{run_a_id}.csv")
+        create_fixture_telemetry(csv_a, run_a_id, [{
+            "elapsed_sec": str(i),
+            "ran_prb_cell1": 35.0,
+            "nwdaf_comm_ul_bytes": 1000.0,
+            "event_phase_id": "phase_1_S1",
+            "event_scenario": "S1"
+        } for i in range(35)])
+        events_a = os.path.join(run_a_dir, f"experiment_events_{run_a_id}.csv")
+        create_fixture_events(events_a, run_a_id, [{"phase_id": "phase_1_S1", "scenario_id": "S1"}])
+
+        # 2. Setup RUN_B: 1 jsonl line
+        jsonl_b = os.path.join(run_b_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_b, run_b_id, [
+            {"poll_timestamp_utc": "2026-10-16T10:01:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 20}]}}
+        ])
+        csv_b = os.path.join(run_b_dir, f"telemetry_{run_b_id}.csv")
+        create_fixture_telemetry(csv_b, run_b_id, [{
+            "elapsed_sec": str(i),
+            "ran_prb_cell1": 35.0,
+            "nwdaf_comm_ul_bytes": 2000.0,
+            "event_phase_id": "phase_1_S1",
+            "event_scenario": "S1"
+        } for i in range(35)])
+        events_b = os.path.join(run_b_dir, f"experiment_events_{run_b_id}.csv")
+        create_fixture_events(events_b, run_b_id, [{"phase_id": "phase_1_S1", "scenario_id": "S1"}])
+
+        # Test Scenario 1: Using explicit per-run metrics from updated collector
+        collector_metrics_b = {
+            "nwdaf_raw_polls_total": 3,
+            "nwdaf_raw_polls_written": 2,
+            "nwdaf_raw_polls_failed": 1,
+            "nwdaf_run_raw_polls_written": 1,
+            "nwdaf_run_raw_polls_failed": 0
+        }
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=run_b_dir,
+            run_id=run_b_id,
+            planned_scenarios=["S1"],
+            recovery_verified=True,
+            config_params=self.config_params,
+            collector_metrics=collector_metrics_b
+        )
+        self.assertTrue(dq_pass, f"RUN_B must pass when using per-run metrics: {dq_reasons}")
+        self.assertEqual(len(dq_reasons), 0)
+
+        # Test Scenario 2: Using initial/final delta without per-run keys (fallback for older exporter)
+        initial_metrics_b = {
+            "nwdaf_raw_polls_written": 1,
+            "nwdaf_raw_polls_failed": 1
+        }
+        final_metrics_b = {
+            "nwdaf_raw_polls_written": 2,
+            "nwdaf_raw_polls_failed": 1
+        }
+        dq_pass2, tr_elig2, summary2, dq_reasons2, tr_reasons2 = evaluate_run_dataset(
+            run_dir=run_b_dir,
+            run_id=run_b_id,
+            planned_scenarios=["S1"],
+            recovery_verified=True,
+            config_params=self.config_params,
+            collector_metrics=final_metrics_b,
+            initial_collector_metrics=initial_metrics_b
+        )
+        self.assertTrue(dq_pass2, f"RUN_B must pass using delta between initial and final metrics: {dq_reasons2}")
+        self.assertEqual(len(dq_reasons2), 0)
 
     def test_neg_01_single_valid_row_coverage_failure(self):
         """NEG-01: 30 rows but only 1 row valid float -> passes data_quality_pass (syntax ok), fails training_eligible."""

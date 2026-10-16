@@ -49,9 +49,12 @@ metrics_store = {
     "nwdaf_comm_dl_bytes": float("nan"),
     "nwdaf_comm_vol_std_bytes": float("nan"),
     "nwdaf_comm_freshness": 0,        # 1 = Fresh source measurement received within 45s, 0 = Stale / unchanged / expired
-    "nwdaf_raw_polls_total": 0,       # Counter: total NWDAF raw poll attempts
-    "nwdaf_raw_polls_written": 0,     # Counter: total NWDAF raw poll responses successfully written to archive
-    "nwdaf_raw_polls_failed": 0,      # Counter: total NWDAF raw poll archive write failures
+    "nwdaf_raw_polls_total": 0,       # Lifetime Counter: total NWDAF raw poll attempts
+    "nwdaf_raw_polls_written": 0,     # Lifetime Counter: total NWDAF raw poll responses successfully written to archive
+    "nwdaf_raw_polls_failed": 0,      # Lifetime Counter: total NWDAF raw poll archive write failures
+    "nwdaf_run_raw_polls_total": 0,   # Per-Run Counter: total poll attempts for active_run_id
+    "nwdaf_run_raw_polls_written": 0, # Per-Run Counter: polls successfully written for active_run_id
+    "nwdaf_run_raw_polls_failed": 0,  # Per-Run Counter: poll archive failures for active_run_id
     "estimated_slice_load_level": {
         "01000001": float("nan"),     # Empirical load estimate (Tx / Quota * 100%)
         "de00007b": float("nan")
@@ -122,6 +125,12 @@ active_run_id = None
 active_run_mtime = 0.0
 active_run_start_dt = None
 raw_poll_stats = {
+    "total": 0,
+    "written": 0,
+    "failed": 0,
+    "last_error": ""
+}
+run_poll_stats = {
     "total": 0,
     "written": 0,
     "failed": 0,
@@ -272,6 +281,14 @@ def format_prometheus_metrics():
         lines.append("# HELP nwdaf_raw_polls_failed Total raw NWDAF poll responses that failed to write to archive")
         lines.append("# TYPE nwdaf_raw_polls_failed counter")
         lines.append(f"nwdaf_raw_polls_failed {int(metrics_store['nwdaf_raw_polls_failed'])}")
+
+        lines.append("# HELP nwdaf_run_raw_polls_written Raw NWDAF poll responses successfully written for current active run")
+        lines.append("# TYPE nwdaf_run_raw_polls_written gauge")
+        lines.append(f"nwdaf_run_raw_polls_written {int(metrics_store['nwdaf_run_raw_polls_written'])}")
+
+        lines.append("# HELP nwdaf_run_raw_polls_failed Raw NWDAF poll responses that failed to write for current active run")
+        lines.append("# TYPE nwdaf_run_raw_polls_failed gauge")
+        lines.append(f"nwdaf_run_raw_polls_failed {int(metrics_store['nwdaf_run_raw_polls_failed'])}")
 
         lines.append("# HELP estimated_slice_load_level Estimated slice load percentage derived from UPF interface Tx throughput")
         lines.append("# TYPE estimated_slice_load_level gauge")
@@ -575,6 +592,12 @@ def check_run_state_change():
         else:
             active_run_start_dt = COLLECTOR_START_TIME
 
+        # Reset per-run archive counters and error history for the new active run
+        run_poll_stats["total"] = 0
+        run_poll_stats["written"] = 0
+        run_poll_stats["failed"] = 0
+        run_poll_stats["last_error"] = ""
+
         # Explicitly reset NWDAF state and freshness upon run transition
         last_nwdaf_signature = None
         last_nwdaf_data_change_time = 0.0
@@ -584,6 +607,9 @@ def check_run_state_change():
             metrics_store["nwdaf_comm_ul_bytes"] = float("nan")
             metrics_store["nwdaf_comm_dl_bytes"] = float("nan")
             metrics_store["nwdaf_comm_vol_std_bytes"] = float("nan")
+            metrics_store["nwdaf_run_raw_polls_total"] = 0
+            metrics_store["nwdaf_run_raw_polls_written"] = 0
+            metrics_store["nwdaf_run_raw_polls_failed"] = 0
 
     # If NWDAF_START_TIME override is set, use it for query window,
     # but active_run_id has already been updated above!
@@ -600,8 +626,10 @@ def log_raw_nwdaf_poll(poll_record):
     """Archives every raw NWDAF NBI poll response to ensure complete traceability."""
     global active_run_id
     raw_poll_stats["total"] += 1
+    run_poll_stats["total"] += 1
     with METRICS_LOCK:
         metrics_store["nwdaf_raw_polls_total"] = raw_poll_stats["total"]
+        metrics_store["nwdaf_run_raw_polls_total"] = run_poll_stats["total"]
 
     if not active_run_id:
         return
@@ -631,13 +659,18 @@ def log_raw_nwdaf_poll(poll_record):
 
     if write_success:
         raw_poll_stats["written"] += 1
+        run_poll_stats["written"] += 1
     else:
         raw_poll_stats["failed"] += 1
+        run_poll_stats["failed"] += 1
         raw_poll_stats["last_error"] = last_err
+        run_poll_stats["last_error"] = last_err
 
     with METRICS_LOCK:
         metrics_store["nwdaf_raw_polls_written"] = raw_poll_stats["written"]
         metrics_store["nwdaf_raw_polls_failed"] = raw_poll_stats["failed"]
+        metrics_store["nwdaf_run_raw_polls_written"] = run_poll_stats["written"]
+        metrics_store["nwdaf_run_raw_polls_failed"] = run_poll_stats["failed"]
 
 
 def get_nwdaf_query_window():

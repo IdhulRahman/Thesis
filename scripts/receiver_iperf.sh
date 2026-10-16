@@ -113,6 +113,7 @@ try:
 
     is_stream = False
     end_data = None
+    session_complete = False
 
     # 1. Try parsing as single standard JSON
     try:
@@ -120,8 +121,10 @@ try:
         if isinstance(data, dict):
             if "end" in data:
                 end_data = data["end"]
+                session_complete = True
             elif data.get("event") == "end" and "data" in data:
                 end_data = data["data"]
+                session_complete = True
     except json.JSONDecodeError:
         pass
 
@@ -144,15 +147,19 @@ try:
             if isinstance(rec, dict):
                 if rec.get("event") == "end" and "data" in rec:
                     end_data = rec["data"]
+                    session_complete = True
                     break
                 elif "end" in rec:
                     end_data = rec["end"]
+                    session_complete = True
                     break
 
         if end_data is None:
+            # Fallback to last interval event for partial telemetry, but mark session_complete=False
             for rec in reversed(parsed_lines):
                 if isinstance(rec, dict) and rec.get("event") == "interval" and "data" in rec:
                     end_data = rec["data"]
+                    session_complete = False
                     break
 
     if not isinstance(end_data, dict) or not end_data:
@@ -184,6 +191,7 @@ try:
 
     summary = {
         "format": "json_stream" if is_stream else "standard_json",
+        "session_complete": session_complete,
         "bytes_received": bytes_rx,
         "goodput_mbps": mbps_rx,
         "packets_total": total_pkts,
@@ -196,7 +204,12 @@ try:
 
     loss_disp = f"{loss_pct}% ({lost_pkts}/{total_pkts} pkts)" if loss_pct is not None else "N/A"
     jitter_disp = f"{jitter_ms} ms" if jitter_ms is not None else "N/A"
-    print(f"[SUCCESS] Receiver Goodput: {mbps_rx} Mbps | Loss: {loss_disp} | Jitter: {jitter_disp} | Format: {'Stream' if is_stream else 'Single'}")
+
+    if not session_complete:
+        print(f"[ERROR] Receiver session incomplete: log stream contains only partial interval reports without an 'end' summary event (session_complete=False). Goodput: {mbps_rx} Mbps", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"[SUCCESS] Receiver Goodput: {mbps_rx} Mbps | Loss: {loss_disp} | Jitter: {jitter_disp} | Format: {'Stream' if is_stream else 'Single'} | Session: COMPLETE")
     sys.exit(0)
 
 except Exception as ex:

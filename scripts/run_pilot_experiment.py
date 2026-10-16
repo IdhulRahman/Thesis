@@ -135,6 +135,8 @@ def fetch_live_metrics(url=COLLECTOR_URL):
         "nwdaf_raw_polls_total": 0,
         "nwdaf_raw_polls_written": 0,
         "nwdaf_raw_polls_failed": 0,
+        "nwdaf_run_raw_polls_written": 0,
+        "nwdaf_run_raw_polls_failed": 0,
         "available": False
     }
     try:
@@ -172,6 +174,10 @@ def fetch_live_metrics(url=COLLECTOR_URL):
                         res["nwdaf_raw_polls_written"] = int(val_float) if not math.isnan(val_float) else 0
                     elif name == "nwdaf_raw_polls_failed":
                         res["nwdaf_raw_polls_failed"] = int(val_float) if not math.isnan(val_float) else 0
+                    elif name == "nwdaf_run_raw_polls_written":
+                        res["nwdaf_run_raw_polls_written"] = int(val_float) if not math.isnan(val_float) else 0
+                    elif name == "nwdaf_run_raw_polls_failed":
+                        res["nwdaf_run_raw_polls_failed"] = int(val_float) if not math.isnan(val_float) else 0
     except Exception:
         res["available"] = False
     return res
@@ -287,7 +293,7 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
             return False, evidence, f"Gagal membaca input verifikasi operator: {e}"
 
 
-def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=True, recovery_evidence=None, config_params=None, collector_metrics=None):
+def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=True, recovery_evidence=None, config_params=None, collector_metrics=None, initial_collector_metrics=None):
     """
     Strict multi-dimensional dataset evaluator enforcing the 3 research contract statuses:
     - execution_complete: Experiment completed all scheduled phases without crash/abort
@@ -522,12 +528,29 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
         except Exception as e:
             data_quality_reasons.append(f"Berkas arsip raw NWDAF JSONL korup / gagal di-parse: {e}")
 
-    # 4. Evaluate Archive Failure Counter (H5)
+    # 4. Evaluate Archive Failure Counter (H5 / Isolated Per-Run)
     if collector_metrics:
-        polls_failed = collector_metrics.get("nwdaf_raw_polls_failed", 0)
+        # Determine per-run written and failed counts:
+        # Priority 1: Explicit per-run counters from exporter
+        if "nwdaf_run_raw_polls_written" in collector_metrics:
+            polls_written = collector_metrics.get("nwdaf_run_raw_polls_written", 0)
+            polls_failed = collector_metrics.get("nwdaf_run_raw_polls_failed", 0)
+        # Priority 2: Counter delta between run start and run end
+        elif initial_collector_metrics:
+            c_written = collector_metrics.get("nwdaf_raw_polls_written", 0)
+            i_written = initial_collector_metrics.get("nwdaf_raw_polls_written", 0)
+            polls_written = max(0, c_written - i_written)
+
+            c_failed = collector_metrics.get("nwdaf_raw_polls_failed", 0)
+            i_failed = initial_collector_metrics.get("nwdaf_raw_polls_failed", 0)
+            polls_failed = max(0, c_failed - i_failed)
+        # Priority 3: Fallback to cumulative counter (isolated single-run tests)
+        else:
+            polls_written = collector_metrics.get("nwdaf_raw_polls_written", 0)
+            polls_failed = collector_metrics.get("nwdaf_raw_polls_failed", 0)
+
         if polls_failed > 0:
             data_quality_reasons.append(f"Terjadi kegagalan penulisan arsip raw NWDAF ({polls_failed} poll gagal diarsipkan)")
-        polls_written = collector_metrics.get("nwdaf_raw_polls_written", 0)
         if polls_written > 0 and jsonl_lines != polls_written:
             data_quality_reasons.append(f"Ketidaksesuaian jumlah baris arsip raw NWDAF ({jsonl_lines} di JSONL vs {polls_written} di exporter)")
 
@@ -635,6 +658,9 @@ def main():
         print("    Pastikan telemetry_collector.py sudah berjalan di VM-6.")
         if not args.unattended:
             input("    Tekan [Enter] jika ingin tetap melanjutkan atau Ctrl+C untuk batal...")
+
+    # Take initial baseline snapshot of collector metrics before run begins
+    initial_collector_metrics = fetch_live_metrics()
 
     # 2. Start Telemetry Logger as subprocess
     log_proc = subprocess.Popen([sys.executable, RECORD_SCRIPT, run_id])
@@ -746,7 +772,8 @@ def main():
             recovery_verified=recovery_verified,
             recovery_evidence=recovery_evidence,
             config_params=config_params,
-            collector_metrics=final_collector_metrics
+            collector_metrics=final_collector_metrics,
+            initial_collector_metrics=initial_collector_metrics
         )
 
         # 8. Run Analyzer for statistical summary text
