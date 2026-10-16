@@ -553,16 +553,47 @@ def validate_receiver_archive(file_path):
     return True, "Valid JSON-stream", {"bytes_received": bytes_rx}
 
 
+def parse_tc_rate_bps(text):
+    """
+    Parses rate string or tc output into bits per second (float).
+    Examples:
+    - 'rate=12M,latency=200ms' -> 12000000.0
+    - 'rate 12Mbit burst 10Kb' -> 12000000.0
+    - 'rate 1Gbit' -> 1000000000.0
+    - '12Mbps' -> 12000000.0
+    """
+    if not text:
+        return None
+    m = re.search(r"rate[=:\s]+([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)?", text, re.IGNORECASE)
+    if not m:
+        m = re.search(r"\b([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)\b", text)
+        if not m:
+            return None
+    val = float(m.group(1))
+    unit = (m.group(2) or "").lower()
+    if unit.startswith("g"):
+        return val * 1e9
+    elif unit.startswith("m"):
+        return val * 1e6
+    elif unit.startswith("k"):
+        return val * 1e3
+    elif unit in ("bit", "bits", "bps"):
+        return val
+    elif unit in ("b", "byte", "bytes"):
+        return val * 8.0
+    return val
+
+
 def validate_tbf_observed_config(s_data, ep, exp_scen, planned_config, run_id, phase_event_ts=None):
     """
     Validates empirical observed TBF configuration archive against strict scientific traceability gates:
     - Must be a valid dictionary
-    - Run & Phase identity: run_id and phase_id match current run/phase if present
-    - Target container: must be oai-upf-slice1 (or UPF container)
-    - Target interface: must be eth0, strictly rejecting loopback (lo)
+    - Run & Phase identity: run_id and phase_id are mandatory and must match current run/phase
+    - Target container: mandatory and must match planned container (oai-upf-slice1), rejecting slice2/non-UPF
+    - Target interface: mandatory and must match planned interface (eth0), strictly rejecting loopback (lo)
     - Mechanism: qdisc must explicitly be 'qdisc tbf'
-    - Parameters: must specify rate, burst, and latency
-    - Timestamp: applied_time_utc must be valid ISO8601, realistic year (>= 2024), and aligned with phase
+    - Parameters: must specify rate matching planned rate (within 25%), burst, and (latency or limit per man 8 tc-tbf)
+    - Timestamp: applied_time_utc is mandatory, normalized to UTC, year >= 2024, and aligned with phase
     """
     if not isinstance(s_data, dict):
         return False, "Data snapshot bukan berupa JSON dictionary valid"
@@ -577,26 +608,58 @@ def validate_tbf_observed_config(s_data, ep, exp_scen, planned_config, run_id, p
     if "qdisc tbf" not in raw_snap_lower:
         return False, f"Jenis qdisc pada snapshot bukan TBF (ditemukan: '{raw_snap[:60]}')"
 
-    # 2. Parameters check: must define rate, burst, latency
-    if "rate" not in raw_snap_lower:
-        return False, "Snapshot qdisc TBF tidak memuat parameter 'rate'"
+    # 2. Parameters check: rate value, burst, and (latency or limit per man 8 tc-tbf)
+    actual_rate_bps = parse_tc_rate_bps(raw_snap)
+    if actual_rate_bps is None:
+        return False, "Snapshot qdisc TBF tidak memuat nilai parameter 'rate' yang dapat diurai"
+
+    planned_param_str = planned_config.get("planned_parameters", "")
+    planned_rate_bps = parse_tc_rate_bps(planned_param_str) or 12e6
+    rate_ratio = actual_rate_bps / planned_rate_bps if planned_rate_bps > 0 else 0.0
+    if not (0.75 <= rate_ratio <= 1.25):
+        return False, f"Nilai rate snapshot ({actual_rate_bps/1e6:.1f} Mbps) tidak cocok dengan konfigurasi rencana ({planned_rate_bps/1e6:.1f} Mbps)"
+
     if "burst" not in raw_snap_lower:
         return False, "Snapshot qdisc TBF tidak memuat parameter 'burst'"
-    if not any(k in raw_snap_lower for k in ("lat ", "latency ", "lat", "latency")):
-        return False, "Snapshot qdisc TBF tidak memuat parameter 'lat' / 'latency'"
 
-    # 3. Target container check
+    has_latency_or_limit = any(k in raw_snap_lower for k in ("lat ", "latency ", "lat", "latency", "limit ", "limit"))
+    if not has_latency_or_limit:
+        return False, "Snapshot qdisc TBF tidak memuat parameter antrean yang sah ('latency' atau 'limit' sesuai man 8 tc-tbf)"
+
+    # 3. Mandatory Identity Checks: run_id, phase_id, target_container, target_interface
+    snap_run_id = str(s_data.get("run_id", "")).strip()
+    if not snap_run_id:
+        return False, "Snapshot TBF tidak memuat identitas 'run_id' wajib"
+    if snap_run_id != str(run_id).strip():
+        return False, f"run_id pada snapshot ('{snap_run_id}') tidak cocok dengan target run ('{run_id}')"
+
+    snap_phase_id = str(s_data.get("phase_id", "")).strip()
+    if not snap_phase_id:
+        return False, "Snapshot TBF tidak memuat identitas 'phase_id' wajib"
+    if snap_phase_id != str(ep).strip():
+        return False, f"phase_id pada snapshot ('{snap_phase_id}') tidak cocok dengan target fase ('{ep}')"
+
+    expected_container = planned_config.get("target_container", "oai-upf-slice1").strip().lower()
     container = str(s_data.get("target_container", "")).strip().lower()
-    if container:
-        if not any(c in container for c in ("upf", "oai-upf")):
-            return False, f"Target container '{container}' tidak valid (harus container UPF: oai-upf-slice1)"
+    if not container:
+        return False, "Snapshot TBF tidak memuat identitas 'target_container' wajib"
+    if "slice2" in container or "oai-upf-slice2" in container:
+        return False, f"Target container '{container}' menargetkan slice2, bukan target UPF-1 ('{expected_container}')"
+    if container != expected_container and container not in ("upf-1_slice-1", "upf-1"):
+        return False, f"Target container '{container}' tidak cocok dengan target skenario UPF-1 ('{expected_container}')"
 
-    # 4. Target interface check
+    exec_cmd = str(s_data.get("execution_command", "")).strip().lower()
+    if "oai-upf-slice2" in exec_cmd or "slice2" in exec_cmd:
+        return False, f"Execution command snapshot menargetkan slice2 ('{exec_cmd}'), bukan target UPF-1 ('{expected_container}')"
+
+    expected_interface = planned_config.get("target_interface", "eth0").strip().lower()
     interface = str(s_data.get("target_interface", "")).strip().lower()
+    if not interface:
+        return False, "Snapshot TBF tidak memuat identitas 'target_interface' wajib"
     if interface in ("lo", "loopback", "127.0.0.1"):
-        return False, f"Target interface '{interface}' tidak valid (interface loopback ditolak, harus eth0)"
-    if interface and interface != "eth0":
-        return False, f"Target interface '{interface}' tidak sesuai dengan interface data plane UPF (eth0)"
+        return False, f"Target interface '{interface}' tidak valid (interface loopback ditolak)"
+    if interface != expected_interface:
+        return False, f"Target interface '{interface}' tidak cocok dengan target interface skenario ('{expected_interface}')"
 
     # Check interface in raw snapshot text
     if "dev lo" in raw_snap_lower or "dev loopback" in raw_snap_lower:
@@ -607,38 +670,41 @@ def validate_tbf_observed_config(s_data, ep, exp_scen, planned_config, run_id, p
             obs_dev = dev_match.group(1).lower()
             if obs_dev in ("lo", "loopback"):
                 return False, f"Snapshot qdisc teramati pada interface loopback '{obs_dev}', bukan eth0"
-            if obs_dev != "eth0":
-                return False, f"Snapshot qdisc teramati pada interface '{obs_dev}', bukan data plane eth0"
+            if obs_dev != expected_interface:
+                return False, f"Snapshot qdisc teramati pada interface '{obs_dev}', bukan target data plane '{expected_interface}'"
 
-    # 5. Run & Phase identity check
-    snap_run_id = s_data.get("run_id")
-    if snap_run_id and str(snap_run_id).strip() != str(run_id).strip():
-        return False, f"run_id pada snapshot ('{snap_run_id}') tidak cocok dengan run_id pengujian ('{run_id}')"
-
-    snap_phase_id = s_data.get("phase_id")
-    if snap_phase_id and str(snap_phase_id).strip() != str(ep).strip():
-        return False, f"phase_id pada snapshot ('{snap_phase_id}') tidak cocok dengan fase ('{ep}')"
-
-    # 6. Timestamp check
+    # 4. Mandatory Timestamp Validation with Timezone Normalization
     ts_str = s_data.get("applied_time_utc") or s_data.get("timestamp_utc")
     if not ts_str:
-        return False, "Snapshot TBF tidak memuat waktu observasi/penerapan (applied_time_utc kosong)"
+        return False, "Snapshot TBF tidak memuat waktu observasi/penerapan wajib (applied_time_utc kosong)"
 
     try:
         snap_dt = datetime.datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
-        if snap_dt.year < 2024:
-            return False, f"Waktu snapshot TBF tidak valid: '{ts_str}' (tahun {snap_dt.year} < 2024)"
-
-        if phase_event_ts:
-            try:
-                phase_dt = datetime.datetime.fromisoformat(str(phase_event_ts).replace("Z", "+00:00"))
-                diff_sec = abs((snap_dt - phase_dt).total_seconds())
-                if diff_sec > 7200:
-                    return False, f"Waktu snapshot TBF '{ts_str}' tidak selaras dengan fase pengujian '{phase_event_ts}' (selisih {diff_sec:.0f}s > 7200s)"
-            except Exception:
-                pass
     except Exception as ex:
         return False, f"Format timestamp snapshot TBF tidak valid '{ts_str}': {ex}"
+
+    # Normalize to UTC aware
+    if snap_dt.tzinfo is None:
+        snap_dt = snap_dt.replace(tzinfo=datetime.timezone.utc)
+    else:
+        snap_dt = snap_dt.astimezone(datetime.timezone.utc)
+
+    if snap_dt.year < 2024:
+        return False, f"Waktu snapshot TBF tidak valid: '{ts_str}' (tahun {snap_dt.year} < 2024)"
+
+    if phase_event_ts:
+        try:
+            phase_dt = datetime.datetime.fromisoformat(str(phase_event_ts).replace("Z", "+00:00"))
+            if phase_dt.tzinfo is None:
+                phase_dt = phase_dt.replace(tzinfo=datetime.timezone.utc)
+            else:
+                phase_dt = phase_dt.astimezone(datetime.timezone.utc)
+
+            diff_sec = abs((snap_dt - phase_dt).total_seconds())
+            if diff_sec > 7200:
+                return False, f"Waktu snapshot TBF '{ts_str}' tidak selaras dengan fase pengujian '{phase_event_ts}' (selisih {diff_sec:.0f}s > 7200s)"
+        except Exception as ex:
+            return False, f"Format timestamp event fase tidak valid '{phase_event_ts}': {ex}"
 
     return True, ""
 
