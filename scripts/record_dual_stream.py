@@ -50,7 +50,7 @@ HEADERS = [
     "ran_bler_cell1", "ran_bler_cell2",
     "ran_snr_cell1", "ran_snr_cell2",
     "rapp_diagnosed_bottleneck", "rapp_confidence",
-    "event_scenario", "event_domain", "event_component"
+    "event_phase_id", "event_scenario", "event_domain", "event_component"
 ]
 
 PROM_LINE_RE = re.compile(r'^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+([^\s]+)(?:\s+\d+)?$')
@@ -202,10 +202,15 @@ def get_active_event():
         try:
             with open(ACTIVE_EVENT_FILE, "r") as f:
                 ev = json.load(f)
-                return ev.get("scenario", "UNINITIALIZED"), ev.get("domain", "UNINITIALIZED"), ev.get("component", "NONE")
+                return (
+                    ev.get("phase_id", "UNINITIALIZED"),
+                    ev.get("scenario", "UNINITIALIZED"),
+                    ev.get("domain", "UNINITIALIZED"),
+                    ev.get("component", "NONE")
+                )
         except Exception:
             pass
-    return "UNINITIALIZED", "UNINITIALIZED", "NONE"
+    return "UNINITIALIZED", "UNINITIALIZED", "UNINITIALIZED", "NONE"
 
 
 def main():
@@ -218,7 +223,7 @@ def main():
     # Initial atomic initialization
     tmp_init = ACTIVE_EVENT_FILE + ".tmp"
     with open(tmp_init, "w") as f:
-        json.dump({"scenario": "UNINITIALIZED", "domain": "UNINITIALIZED", "component": "NONE"}, f)
+        json.dump({"phase_id": "UNINITIALIZED", "scenario": "UNINITIALIZED", "domain": "UNINITIALIZED", "component": "NONE"}, f)
     os.replace(tmp_init, ACTIVE_EVENT_FILE)
 
     # Initialize manifest.json in RUN_DIR
@@ -248,7 +253,7 @@ def main():
             elapsed = time.monotonic() - start_mono
 
             telemetry, scrape_ok, scrape_lat = extract_telemetry()
-            scen, domain, comp = get_active_event()
+            phase_id, scen, domain, comp = get_active_event()
 
             row = [
                 now_utc, f"{elapsed:.6f}", RUN_ID, scrape_ok, f"{scrape_lat:.3f}",
@@ -267,7 +272,7 @@ def main():
                 telemetry["ran_bler_cell1"], telemetry["ran_bler_cell2"],
                 telemetry["ran_snr_cell1"], telemetry["ran_snr_cell2"],
                 telemetry["rapp_diagnosed_bottleneck"], telemetry["rapp_confidence"],
-                scen, domain, comp
+                phase_id, scen, domain, comp
             ]
             writer.writerow(row)
             f.flush()

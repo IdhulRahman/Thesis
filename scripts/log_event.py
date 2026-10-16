@@ -28,7 +28,7 @@ if os.path.exists(RUN_STATE_FILE):
         pass
 
 EVENT_CSV = os.path.join(DATA_DIR, f"experiment_events_{RUN_ID}.csv")
-HEADERS = ["timestamp_utc", "run_id", "event_type", "scenario_id", "target_domain", "target_component", "mechanism", "parameters", "notes"]
+HEADERS = ["timestamp_utc", "run_id", "phase_id", "event_type", "scenario_id", "target_domain", "target_component", "mechanism", "parameters", "notes"]
 
 if not os.path.exists(EVENT_CSV):
     try:
@@ -46,6 +46,7 @@ PRESETS = {
     "S10_A": ("STEP_RECOVERY", "S10_A_RELEASE_RAN", "CORE", "UPF-1_Slice-1", "TRAFFIC_DROP_TO_20M", "load=20M,core_tbf=12M", "Transisi S10: Turunkan offered load ke 20M, amati Core bottleneck berlanjut"),
     "S10_B": ("STEP_RECOVERY", "S10_B_RELEASE_CORE", "BASELINE", "NONE", "CLEAR_TBF", "load=20M,tbf=none", "Transisi S10: Hapus limit TBF UPF-1, amati backlog drain ke Normal"),
     "RECOVERY": ("STEP_RECOVERY", "RECOVERY_TRANSITION", "TRANSITION", "ALL", "DRAIN", "load=10M,tbf=none", "Transisi pemulihan: Gangguan dilepas, menunggu drain antrean ke Normal"),
+    "RECOVERY_TIMEOUT": ("TIMEOUT_ABORT", "RECOVERY_FAILED", "TRANSITION", "ALL", "TIMEOUT", "load=10M,tbf=none", "Pemulihan gagal: Batas waktu stabilisasi habis sebelum parameter kembali normal"),
     "ABORT": ("ABORT_RUN", "RUN_ABORTED", "INVALID", "NONE", "NONE", "none", "Eksperimen dibatalkan sebelum selesai"),
     "CLEAR": ("CLEAR_FAULT", "S1_NORMAL_LIGHT", "BASELINE", "ALL", "NONE", "load=10M", "Seluruh gangguan dinonaktifkan")
 }
@@ -53,11 +54,27 @@ PRESETS = {
 
 def main():
     if len(sys.argv) < 2:
-        print("Penggunaan: python3 log_event.py <S1|S2|S3|S6|S9|S10_A|S10_B|RECOVERY|CLEAR|ABORT> [catatan]")
+        print("Penggunaan: python3 log_event.py <S1|S2|S3|S6|S9|S10_A|S10_B|RECOVERY|CLEAR|ABORT> [catatan] [--phase-id PHASE_ID]")
         sys.exit(1)
 
-    key = sys.argv[1].upper()
-    notes_extra = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else ""
+    raw_args = sys.argv[1:]
+    phase_id = ""
+    clean_args = []
+    i = 0
+    while i < len(raw_args):
+        if raw_args[i] in ("--phase-id", "-p") and i + 1 < len(raw_args):
+            phase_id = raw_args[i + 1]
+            i += 2
+        else:
+            clean_args.append(raw_args[i])
+            i += 1
+
+    if not clean_args:
+        print("Penggunaan: python3 log_event.py <EVENT_KEY> [catatan] [--phase-id PHASE_ID]")
+        sys.exit(1)
+
+    key = clean_args[0].upper()
+    notes_extra = " ".join(clean_args[1:]) if len(clean_args) > 1 else ""
 
     if key in PRESETS:
         ev_type, scen_id, domain, comp, mech, param, desc = PRESETS[key]
@@ -65,18 +82,21 @@ def main():
     else:
         ev_type, scen_id, domain, comp, mech, param, notes = "CUSTOM_EVENT", key, "UNKNOWN", "NONE", "MANUAL", "NONE", notes_extra
 
+    if not phase_id:
+        phase_id = f"phase_{scen_id}"
+
     now_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     try:
         # 1. Update atomik ke active_event.json
         tmp_file = ACTIVE_EVENT_FILE + ".tmp"
         with open(tmp_file, "w") as f:
-            json.dump({"scenario": scen_id, "domain": domain, "component": comp, "param": param}, f)
+            json.dump({"phase_id": phase_id, "scenario": scen_id, "domain": domain, "component": comp, "param": param}, f)
         os.replace(tmp_file, ACTIVE_EVENT_FILE)
 
         # 2. Catat event ke CSV
         with open(EVENT_CSV, "a", newline="") as f:
-            csv.writer(f).writerow([now_utc, RUN_ID, ev_type, scen_id, domain, comp, mech, param, notes])
+            csv.writer(f).writerow([now_utc, RUN_ID, phase_id, ev_type, scen_id, domain, comp, mech, param, notes])
 
         run_dir = os.path.join(DATA_DIR, "raw", RUN_ID)
         if os.path.exists(run_dir):
@@ -86,12 +106,12 @@ def main():
                 writer = csv.writer(rf)
                 if write_header:
                     writer.writerow(HEADERS)
-                writer.writerow([now_utc, RUN_ID, ev_type, scen_id, domain, comp, mech, param, notes])
+                writer.writerow([now_utc, RUN_ID, phase_id, ev_type, scen_id, domain, comp, mech, param, notes])
     except Exception as e:
         print(f"[FATAL ERROR] Gagal mencatat event: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[EVENT LOGGED] {now_utc} | Run: {RUN_ID} | {scen_id} | {domain} | {comp} | {param}")
+    print(f"[EVENT LOGGED] {now_utc} | Run: {RUN_ID} | Phase: {phase_id} | {scen_id} | {domain} | {comp} | {param}")
 
 
 if __name__ == "__main__":

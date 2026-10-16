@@ -46,6 +46,9 @@ metrics_store = {
     "nwdaf_comm_dl_bytes": float("nan"),
     "nwdaf_comm_vol_std_bytes": float("nan"),
     "nwdaf_comm_freshness": 0,        # 1 = Fresh source measurement received within 45s, 0 = Stale / unchanged / expired
+    "nwdaf_raw_polls_total": 0,       # Counter: total NWDAF raw poll attempts
+    "nwdaf_raw_polls_written": 0,     # Counter: total NWDAF raw poll responses successfully written to archive
+    "nwdaf_raw_polls_failed": 0,      # Counter: total NWDAF raw poll archive write failures
     "estimated_slice_load_level": {
         "01000001": float("nan"),     # Empirical load estimate (Tx / Quota * 100%)
         "de00007b": float("nan")
@@ -115,6 +118,12 @@ last_nwdaf_signature = None
 active_run_id = None
 active_run_mtime = 0.0
 active_run_start_dt = None
+raw_poll_stats = {
+    "total": 0,
+    "written": 0,
+    "failed": 0,
+    "last_error": ""
+}
 
 
 def fmt_val(v, fmt=".2f"):
@@ -238,6 +247,18 @@ def format_prometheus_metrics():
         lines.append("# HELP nwdaf_comm_freshness Freshness indicator for NWDAF user-plane telemetry (1=Fresh source report within 45s, 0=Stale/Unchanged)")
         lines.append("# TYPE nwdaf_comm_freshness gauge")
         lines.append(f"nwdaf_comm_freshness {int(metrics_store['nwdaf_comm_freshness'])}")
+
+        lines.append("# HELP nwdaf_raw_polls_total Total raw NWDAF poll requests attempted")
+        lines.append("# TYPE nwdaf_raw_polls_total counter")
+        lines.append(f"nwdaf_raw_polls_total {int(metrics_store['nwdaf_raw_polls_total'])}")
+
+        lines.append("# HELP nwdaf_raw_polls_written Total raw NWDAF poll responses successfully written to archive")
+        lines.append("# TYPE nwdaf_raw_polls_written counter")
+        lines.append(f"nwdaf_raw_polls_written {int(metrics_store['nwdaf_raw_polls_written'])}")
+
+        lines.append("# HELP nwdaf_raw_polls_failed Total raw NWDAF poll responses that failed to write to archive")
+        lines.append("# TYPE nwdaf_raw_polls_failed counter")
+        lines.append(f"nwdaf_raw_polls_failed {int(metrics_store['nwdaf_raw_polls_failed'])}")
 
         lines.append("# HELP estimated_slice_load_level Estimated slice load percentage derived from UPF interface Tx throughput")
         lines.append("# TYPE estimated_slice_load_level gauge")
@@ -510,10 +531,6 @@ def check_run_state_change():
     global active_run_id, active_run_mtime, active_run_start_dt
     global last_nwdaf_signature, last_nwdaf_data_change_time
 
-    env_start = os.getenv("NWDAF_START_TIME")
-    if env_start:
-        return env_start
-
     current_id = None
     current_mtime = 0.0
     if os.path.exists(RUN_STATE_FILE):
@@ -545,6 +562,12 @@ def check_run_state_change():
             metrics_store["nwdaf_comm_dl_bytes"] = float("nan")
             metrics_store["nwdaf_comm_vol_std_bytes"] = float("nan")
 
+    # If NWDAF_START_TIME override is set, use it for query window,
+    # but active_run_id has already been updated above!
+    env_start = os.getenv("NWDAF_START_TIME")
+    if env_start:
+        return env_start
+
     if active_run_start_dt:
         return active_run_start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     return COLLECTOR_START_TIME.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -553,22 +576,43 @@ def check_run_state_change():
 def log_raw_nwdaf_poll(poll_record):
     """Archives every raw NWDAF NBI poll response to ensure complete traceability."""
     global active_run_id
+    raw_poll_stats["total"] += 1
+    with METRICS_LOCK:
+        metrics_store["nwdaf_raw_polls_total"] = raw_poll_stats["total"]
+
     if not active_run_id:
         return
+
     data_dir = "/opt/oran/monitoring/data"
     line = json.dumps(poll_record) + "\n"
     run_dir = os.path.join(data_dir, "raw", active_run_id)
+    write_success = True
+    last_err = ""
+
     if os.path.exists(run_dir):
         try:
             with open(os.path.join(run_dir, "nwdaf_raw_poll_responses.jsonl"), "a", encoding="utf-8") as f:
                 f.write(line)
-        except Exception:
-            pass
+        except Exception as e:
+            write_success = False
+            last_err = f"run_dir write error: {e}"
+
     try:
         with open(os.path.join(data_dir, f"nwdaf_raw_poll_{active_run_id}.jsonl"), "a", encoding="utf-8") as f:
             f.write(line)
-    except Exception:
-        pass
+    except Exception as e:
+        write_success = False
+        last_err = f"{last_err}; data_dir write error: {e}".strip("; ")
+
+    if write_success:
+        raw_poll_stats["written"] += 1
+    else:
+        raw_poll_stats["failed"] += 1
+        raw_poll_stats["last_error"] = last_err
+
+    with METRICS_LOCK:
+        metrics_store["nwdaf_raw_polls_written"] = raw_poll_stats["written"]
+        metrics_store["nwdaf_raw_polls_failed"] = raw_poll_stats["failed"]
 
 
 def get_nwdaf_query_window():
