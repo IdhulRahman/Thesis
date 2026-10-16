@@ -148,27 +148,11 @@ try:
 
         # Distinguish between indented multi-line JSON and single-line-per-event JSON-Stream
         if lines[0] == "{" or not lines[0].endswith("}"):
-            repaired = False
-            last_bracket = content.rfind("},")
-            if last_bracket != -1:
-                candidate = content[:last_bracket+1] + "]}}"
-                try:
-                    cdata = json.loads(candidate)
-                    if "intervals" in cdata and cdata["intervals"]:
-                        last_iv = cdata["intervals"][-1]
-                        end_data = last_iv.get("sum") or last_iv
-                        session_complete = False
-                        repaired = True
-                except Exception:
-                    pass
-
-            if not repaired and end_data is None:
-                if '"start"' in content and '"intervals"' not in content:
-                    print("[ERROR] Receiver log only contains initial handshake ('start' block); no data intervals were recorded. Ensure client iperf3 finished sending traffic before stopping the receiver.", file=sys.stderr)
-                    sys.exit(1)
-                else:
-                    print("[ERROR] Corrupt or truncated formatted JSON in receiver log", file=sys.stderr)
-                    sys.exit(1)
+            if '"start"' in content and '"end"' not in content:
+                print("[ERROR] Receiver session incomplete: log file contains initial connection ('start' block) but lacks final 'end' summary event. iperf3 was interrupted or unfinished.", file=sys.stderr)
+            else:
+                print("[ERROR] Corrupt or unclosed formatted JSON in receiver log", file=sys.stderr)
+            sys.exit(1)
         else:
             # Real JSON-stream (one JSON object per line)
             parsed_lines = []

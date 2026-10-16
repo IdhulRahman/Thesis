@@ -137,6 +137,8 @@ def fetch_live_metrics(url=COLLECTOR_URL):
         "nwdaf_raw_polls_failed": 0,
         "nwdaf_run_raw_polls_written": 0,
         "nwdaf_run_raw_polls_failed": 0,
+        "e2e_rtt_ms": float("nan"),
+        "e2e_loss_pct": float("nan"),
         "available": False
     }
     try:
@@ -164,6 +166,10 @@ def fetch_live_metrics(url=COLLECTOR_URL):
                         res["upf_backlog_embb"] = val_float
                     elif name == "ran_cell_prb_utilization" and labels.get("cell_id") == "1":
                         res["ran_prb_cell1"] = val_float
+                    elif name == "e2e_slice2_latency_rtt_ms":
+                        res["e2e_rtt_ms"] = val_float
+                    elif name == "e2e_slice2_packet_loss_pct":
+                        res["e2e_loss_pct"] = val_float
                     elif name == "nwdaf_comm_freshness":
                         res["nwdaf_comm_freshness"] = int(val_float) if not math.isnan(val_float) else 0
                     elif name == "e2e_probe_freshness":
@@ -220,16 +226,26 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
             now_m = fetch_live_metrics()
             b_log = now_m["upf_backlog_embb"]
             prb = now_m["ran_prb_cell1"]
+            rtt = now_m.get("e2e_rtt_ms", float("nan"))
+            loss = now_m.get("e2e_loss_pct", float("nan"))
             is_avail = bool(now_m.get("available"))
             is_finite = math.isfinite(b_log) and math.isfinite(prb)
             is_in_range = is_finite and (b_log >= 0.0) and (0.0 <= prb <= 100.0)
-            is_healthy = is_avail and is_in_range and (b_log <= target_backlog) and (prb <= target_prb)
+            
+            # Check probe status if probe freshness indicates active reporting
+            probe_ok = True
+            if now_m.get("e2e_probe_freshness", 0) > 0 and math.isfinite(loss):
+                probe_ok = (loss <= 10.0)
+
+            is_healthy = is_avail and is_in_range and (b_log <= target_backlog) and (prb <= target_prb) and probe_ok
 
             now_mono = time.monotonic()
             evidence["samples"].append({
                 "elapsed_sec": round(now_mono - t_start, 1),
                 "backlog": b_log,
                 "prb": prb,
+                "rtt_ms": rtt,
+                "loss_pct": loss,
                 "available": is_avail,
                 "healthy": is_healthy
             })
@@ -238,7 +254,7 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
                 if stable_start is None:
                     stable_start = now_mono
                 stable_duration = now_mono - stable_start
-                print(f"    -> Kondisi normal teramati: Backlog={b_log:.0f}B, PRB={prb:.1f}% (stabil: {stable_duration:.1f}/{stability_sec}s)...")
+                print(f"    -> Kondisi normal teramati: Backlog={b_log:.0f}B, PRB={prb:.1f}%, ProbeLoss={loss:.1f}% (stabil: {stable_duration:.1f}/{stability_sec}s)...")
                 if stable_duration >= stability_sec:
                     evidence["verified_time_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
                     evidence["duration_sec"] = round(now_mono - t_start, 1)
@@ -246,16 +262,18 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
                     evidence["evidence_source"] = f"Collector :9100 live metric polling ({round(stable_duration, 1)}s continuous monotonic stability)"
                     evidence["final_backlog"] = b_log
                     evidence["final_prb"] = prb
+                    evidence["final_rtt_ms"] = rtt
+                    evidence["final_loss_pct"] = loss
                     print(f"[+] Pemulihan terverifikasi secara objektif dalam {evidence['duration_sec']} detik!")
                     return True, evidence, "Verified stable baseline"
             else:
                 stable_start = None
-                print(f"    -> Menunggu drain/tersedia: Backlog={b_log}B, PRB={prb}%, Avail={is_avail} (elapsed: {round(now_mono - t_start)}s)...")
+                print(f"    -> Menunggu drain/tersedia: Backlog={b_log}B, PRB={prb}%, ProbeLoss={loss}%, Avail={is_avail} (elapsed: {round(now_mono - t_start)}s)...")
 
             time.sleep(1.0)
 
         evidence["duration_sec"] = round(time.monotonic() - t_start, 1)
-        return False, evidence, f"Recovery timeout ({timeout_sec}s): antrean atau PRB radio belum kembali normal"
+        return False, evidence, f"Recovery timeout ({timeout_sec}s): antrean, PRB radio, atau probe belum kembali normal"
 
     else:
         print("\n" + "=" * 85)
@@ -265,7 +283,7 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
         try:
             obs_b = input(f"    -> Masukkan Backlog UPF-1 teramati (Bytes) [Target <={target_backlog}]: ").strip()
             obs_p = input(f"    -> Masukkan PRB Cell-1 teramati (%) [Target <={target_prb}%]: ").strip()
-            obs_src = input("    -> Sumber bukti (misal: Grafana Panel 4 / tc qdisc terminal): ").strip()
+            obs_src = input("    -> Sumber bukti pemulihan & status probe (misal: Grafana Panel 4 / tc qdisc / ping RTT=12ms): ").strip()
             obs_win = input("    -> Durasi pengamatan kondisi stabil (detik) [min 5s]: ").strip()
 
             b_val = float(obs_b)
@@ -586,6 +604,18 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
         if total_nwdaf_valid_rows == 0:
             training_reasons.append("Seluruh data observasi volume/durasi NWDAF bernilai NaN pada CSV telemetri (kelayakan NWDAF tidak terpenuhi)")
 
+        # Strict Receiver verification: if any receiver export exists in run_dir, verify completeness
+        receiver_files = [f for f in os.listdir(run_dir) if f.startswith("receiver_") and f.endswith(".json")]
+        for rf in receiver_files:
+            rf_path = os.path.join(run_dir, rf)
+            try:
+                with open(rf_path, "r", encoding="utf-8") as f:
+                    rc_json = json.load(f)
+                    if "end" not in rc_json:
+                        training_reasons.append(f"Berkas arsip receiver '{rf}' tidak lengkap (tidak memuat blok 'end' summary)")
+            except Exception as e:
+                training_reasons.append(f"Berkas arsip receiver '{rf}' korup atau gagal diparse: {e}")
+
     training_eligible = (data_quality_pass and len(training_reasons) == 0)
 
     summary = {
@@ -627,6 +657,11 @@ def main():
 
     run_dir = os.path.join(DATA_DIR, "raw", run_id)
     os.makedirs(run_dir, exist_ok=True)
+
+    # Immediately synchronize active_run_id.txt before ANY events are logged
+    run_state_file = os.path.join(DATA_DIR, "active_run_id.txt")
+    with open(run_state_file, "w") as f:
+        f.write(run_id + "\n")
 
     config_params = {
         "phase_duration_sec": phase_dur,
@@ -698,9 +733,12 @@ def main():
             print("-" * 90)
 
             if not args.unattended:
-                input(f"    -> Terapkan aksi fisik di VM terkait, lalu tekan [Enter] untuk mencatat event {scen}...")
+                notes_input = input(f"    -> Terapkan aksi fisik di VM terkait, masukkan catatan kondisi teramati (atau [Enter] untuk default): ").strip()
+                phase_notes = f"{scen}: {notes_input}" if notes_input else f"Phase {idx}/{len(scenarios)}: {scen}"
+            else:
+                phase_notes = f"Phase {idx}/{len(scenarios)}: {scen}"
 
-            if not log_event(scen, f"Phase {idx}/{len(scenarios)}: {scen}", phase_id=phase_id):
+            if not log_event(scen, phase_notes, phase_id=phase_id):
                 raise RuntimeError(f"Gagal mencatat event label {scen} ke file event!")
 
             for sec_left in range(phase_dur, 0, -10):
