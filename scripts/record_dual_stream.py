@@ -220,11 +220,7 @@ def get_active_event():
 
 
 def main():
-    print("=" * 90)
-    print(f"  5G O-RAN High-Precision Telemetry Logger (Run: {RUN_ID})")
-    print(f"  Target File: {CSV_FILE}")
-    print("  Engine: Monotonic Clock (Zero Drift) | Raw Floats | Mode 'x' Exclusive")
-    print("=" * 90)
+    print(f"[Logger] Target: {CSV_FILE} (Monotonic 1.0Hz)")
 
     # Initial atomic initialization (preserve if already pre-set by runner)
     if not os.path.exists(ACTIVE_EVENT_FILE) or os.path.getsize(ACTIVE_EVENT_FILE) == 0:

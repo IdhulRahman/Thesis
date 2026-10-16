@@ -1,25 +1,16 @@
 #!/usr/bin/env bash
-
-# ==============================================================================
-# Automated Multi-Slice Traffic Generator (VM-5 ue-emulator)
-# Location on VM-5: /opt/oran/ue/scripts/trafgen.sh
-# ==============================================================================
-# Usage:
-#   sudo ./trafgen.sh ping                  # Uji konektivitas ping cepat ke EXT-DN
-#   sudo ./trafgen.sh start [sec] [mbps]    # Jalankan benchmark simultan (default: 30s, 30M)
-#   sudo ./trafgen.sh status                # Pantau status proses pengujian
-#   sudo ./trafgen.sh stop                  # Hentikan semua proses pengujian
-# ==============================================================================
+# Multi-slice traffic generator (VM-5)
+# Usage: ./trafgen.sh [start|ping|status|stop] [sec] [mbps]
 
 STATE_FILE="/opt/oran/ue/active_ues.txt"
 LOG_DIR="/opt/oran/ue/logs"
 EXT_DN_IP="192.168.70.145"
+MONITOR_URL="http://10.102.0.67:9100/report"
 
 mkdir -p "$LOG_DIR"
 
 if [[ ! -f "$STATE_FILE" || ! -s "$STATE_FILE" ]]; then
-  echo "[ERROR] File status UE ($STATE_FILE) tidak ditemukan atau kosong!"
-  echo "Jalankan spawn_multi_ue.sh terlebih dahulu untuk mengaktifkan UE."
+  echo "Error: file status UE ($STATE_FILE) tidak ditemukan atau kosong." >&2
   exit 1
 fi
 
@@ -33,24 +24,56 @@ else
   EMBB_RATE="${3:-25}"
 fi
 
-MONITOR_URL="http://10.102.0.67:9100/report"
-
 cleanup() {
   pkill -f "iperf3 -c $EXT_DN_IP" 2>/dev/null || true
   pkill -f "ping -I oaitun_ue1.*$EXT_DN_IP" 2>/dev/null || true
 }
 
-trap 'cleanup; echo -e "\n[!] Pengujian dihentikan."; exit 0' INT TERM
+trap 'cleanup; echo ""; exit 0' INT TERM
+
+parse_ping() {
+  local log_file="$1"
+  local prev_seq="$2"
+  tail -n 60 "$log_file" 2>/dev/null | awk -v prev_seq="$prev_seq" '
+  {
+    s = 0; r = -1;
+    for (i = 1; i <= NF; i++) {
+      if ($i ~ /^icmp_seq=/) { split($i, a, "="); s = a[2] + 0 }
+      if ($i ~ /^time=/)     { split($i, b, "="); r = b[2] + 0.0 }
+    }
+    if (s > 0) {
+      if (s > max_s) max_s = s;
+      if (r >= 0.0 && s > prev_seq) {
+        rx_count++;
+        last_rtt = r;
+      }
+    }
+  }
+  END {
+    if (max_s > prev_seq) {
+      sent = max_s - prev_seq;
+      loss = (sent - rx_count) * 100.0 / sent;
+      if (loss < 0.0) loss = 0.0;
+      if (rx_count > 0) {
+        printf "%d %.2f %.1f %d %d\n", max_s, last_rtt, loss, sent, rx_count;
+      } else {
+        printf "%d NaN 100.0 %d 0\n", max_s, sent;
+      }
+    } else {
+      printf "%d NaN 0.0 0 0\n", prev_seq;
+    }
+  }'
+}
 
 case "$ACTION" in
   ping)
-    printf "%-5s | %-8s | %-16s | %-16s | %-15s | %-12s\n" "UE#" "Netns" "IMSI" "Slice" "RTT Avg (ms)" "Packet Loss"
-    printf "%s\n" "----------------------------------------------------------------------------------------"
+    printf "%-5s  %-8s  %-16s  %-12s  %-12s  %s\n" "UE" "Netns" "IMSI" "Slice" "RTT Avg" "Loss"
+    echo "----------------------------------------------------------------------"
 
     while IFS=":" read -r ue_id ns imsi slice dnn port pid; do
       tun_ip=$(ip netns exec "$ns" ip -4 addr show oaitun_ue1 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "DOWN")
       if [[ "$tun_ip" == "DOWN" ]]; then
-        printf "%-5s | %-8s | %-16s | %-16s | %-15s | %-12s\n" "$ue_id" "$ns" "$imsi" "$slice" "N/A" "DOWN"
+        printf "%-5s  %-8s  %-16s  %-12s  %-12s  %s\n" "$ue_id" "$ns" "$imsi" "$slice" "-" "DOWN"
         continue
       fi
 
@@ -58,15 +81,12 @@ case "$ACTION" in
       loss=$(echo "$ping_out" | grep -oP '\d+(?=% packet loss)' || echo "100")
       rtt=$(echo "$ping_out" | grep -oP '(?<=rtt min/avg/max/mdev = )[^/]+/[^/]+' | cut -d/ -f2 || echo "0.0")
 
-      printf "%-5s | %-8s | %-16s | %-16s | %-15s | %-12s\n" "$ue_id" "$ns" "$imsi" "$slice" "${rtt} ms" "${loss}%"
+      printf "%-5s  %-8s  %-16s  %-12s  %-12s  %s\n" "$ue_id" "$ns" "$imsi" "$slice" "${rtt} ms" "${loss}%"
 
-      if [[ "$slice" == *"URLLC"* ]]; then
-        curl -s -m 1 -X POST -H "Content-Type: application/json" \
-          -d "{\"slice\": 2, \"rtt_ms\": ${rtt}, \"packet_loss_pct\": ${loss}}" "$MONITOR_URL" >/dev/null 2>&1 &
-      else
-        curl -s -m 1 -X POST -H "Content-Type: application/json" \
-          -d "{\"slice\": 1, \"rtt_ms\": ${rtt}, \"packet_loss_pct\": ${loss}}" "$MONITOR_URL" >/dev/null 2>&1 &
-      fi
+      slice_id=1
+      [[ "$slice" == *"URLLC"* ]] && slice_id=2
+      curl -s -m 1 -X POST -H "Content-Type: application/json" \
+        -d "{\"slice\": $slice_id, \"rtt_ms\": ${rtt}, \"packet_loss_pct\": ${loss}}" "$MONITOR_URL" >/dev/null 2>&1 &
     done < "$STATE_FILE"
     ;;
 
@@ -100,10 +120,10 @@ case "$ACTION" in
       fi
     done < "$STATE_FILE"
 
-    echo "[TrafGen] Durasi: ${DURATION}s | Target: eMBB ${EMBB_RATE}M, URLLC 100ms | TSDB: 10.102.0.67"
-    printf "%-5s | %-12s | %-11s | %-10s | %-12s | %-11s | %-7s | %s\n" \
-      "Sec" "eMBB Tput" "eMBB RTT" "eMBB Loss" "URLLC RTT" "URLLC Jitt" "Loss %" "SLA (<20ms)"
-    echo "------+--------------+-------------+------------+--------------+-------------+---------+-------------"
+    echo "TrafGen: ${DURATION}s | eMBB ${EMBB_RATE}M | URLLC 100ms"
+    printf "%4s  %-10s  %-9s  %-7s  %-9s  %-8s  %-6s  %s\n" \
+      "Sec" "eMBB-Mbps" "eMBB-RTT" "Loss" "URLLC-RTT" "Jitter" "Loss" "SLA"
+    echo "-----------------------------------------------------------------------"
 
     prev_rtt="0.0"
     prev_max_seq=0
@@ -130,35 +150,7 @@ case "$ACTION" in
 
       if [[ -n "$UE1_PING_LOG" && -f "$UE1_PING_LOG" ]]; then
         now_ts=$(date +%s)
-        read -r s_max u1_rtt u1_loss u1_sent u1_rx < <(tail -n 60 "$UE1_PING_LOG" 2>/dev/null | awk -v prev_seq="$prev_ue1_max_seq" '
-        {
-          s = 0; r = -1;
-          for(i=1; i<=NF; i++) {
-            if($i ~ /^icmp_seq=/) { split($i, a, "="); s = a[2] + 0 }
-            if($i ~ /^time=/)     { split($i, b, "="); r = b[2] + 0.0 }
-          }
-          if (s > 0) {
-            if (s > max_s) max_s = s;
-            if (r >= 0.0 && s > prev_seq) {
-              rx_count++;
-              last_rtt = r;
-            }
-          }
-        }
-        END {
-          if (max_s > prev_seq) {
-            sent = max_s - prev_seq;
-            loss = (sent - rx_count) * 100.0 / sent;
-            if (loss < 0.0) loss = 0.0;
-            if (rx_count > 0) {
-              printf "%d %.2f %.1f %d %d\n", max_s, last_rtt, loss, sent, rx_count;
-            } else {
-              printf "%d NaN 100.0 %d 0\n", max_s, sent;
-            }
-          } else {
-            printf "%d NaN 0.0 0 0\n", prev_seq;
-          }
-        }')
+        read -r s_max u1_rtt u1_loss u1_sent u1_rx < <(parse_ping "$UE1_PING_LOG" "$prev_ue1_max_seq")
 
         if [[ -n "$u1_sent" ]] && (( u1_sent > 0 )); then
           prev_ue1_max_seq=$s_max
@@ -191,35 +183,7 @@ case "$ACTION" in
 
       if [[ -n "$PING_LOG" && -f "$PING_LOG" ]]; then
         now_ts=$(date +%s)
-        read -r s_max u2_rtt u2_loss u2_sent u2_rx < <(tail -n 60 "$PING_LOG" 2>/dev/null | awk -v prev_seq="$prev_max_seq" '
-        {
-          s = 0; r = -1;
-          for(i=1; i<=NF; i++) {
-            if($i ~ /^icmp_seq=/) { split($i, a, "="); s = a[2] + 0 }
-            if($i ~ /^time=/)     { split($i, b, "="); r = b[2] + 0.0 }
-          }
-          if (s > 0) {
-            if (s > max_s) max_s = s;
-            if (r >= 0.0 && s > prev_seq) {
-              rx_count++;
-              last_rtt = r;
-            }
-          }
-        }
-        END {
-          if (max_s > prev_seq) {
-            sent = max_s - prev_seq;
-            loss = (sent - rx_count) * 100.0 / sent;
-            if (loss < 0.0) loss = 0.0;
-            if (rx_count > 0) {
-              printf "%d %.2f %.1f %d %d\n", max_s, last_rtt, loss, sent, rx_count;
-            } else {
-              printf "%d NaN 100.0 %d 0\n", max_s, sent;
-            }
-          } else {
-            printf "%d NaN 0.0 0 0\n", prev_seq;
-          }
-        }')
+        read -r s_max u2_rtt u2_loss u2_sent u2_rx < <(parse_ping "$PING_LOG" "$prev_max_seq")
 
         if [[ -n "$u2_sent" ]] && (( u2_sent > 0 )); then
           prev_max_seq=$s_max
@@ -269,7 +233,7 @@ case "$ACTION" in
       else
         curl -s -m 1 -X POST -H "Content-Type: application/json" \
           -d "{\"slice\": 1, \"throughput_mbps\": $tput, \"rtt_ms\": null, \"packet_loss_pct\": $ue1_loss_json, \"last_seq\": $last_ue1_rx_seq, \"reply_age_sec\": $ue1_measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
-        disp_ue1_rtt="NO_REPLY"
+        disp_ue1_rtt="-"
       fi
 
       if [[ "$rtt" != "NaN" ]]; then
@@ -279,20 +243,20 @@ case "$ACTION" in
       else
         curl -s -m 1 -X POST -H "Content-Type: application/json" \
           -d "{\"slice\": 2, \"rtt_ms\": null, \"packet_loss_pct\": $ue2_loss_json, \"last_seq\": $last_rx_seq, \"reply_age_sec\": $measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
-        disp_rtt="NO_NEW_REPLY"
+        disp_rtt="-"
       fi
 
-      disp_ue1_loss="N/A"
+      disp_ue1_loss="-"
       [[ "$ue1_loss_pct" != "NaN" ]] && disp_ue1_loss="${ue1_loss_pct}%"
 
-      disp_ue2_loss="N/A"
+      disp_ue2_loss="-"
       [[ "$loss_pct" != "NaN" ]] && disp_ue2_loss="${loss_pct}%"
 
-      printf "%4ds | %-12s | %-11s | %-10s | %-12s | %-11s | %-7s | %s\n" \
+      printf "%3ds  %-10s  %-9s  %-7s  %-9s  %-8s  %-6s  %s\n" \
         "$sec" "${tput} Mbps" "$disp_ue1_rtt" "$disp_ue1_loss" "$disp_rtt" "${jitter} ms" "$disp_ue2_loss" "$sla"
     done
 
-    echo "------+-------------------+-----------------+------------+--------+-------------"
+    echo "-----------------------------------------------------------------------"
 
     final_tput=""
     if [[ -n "$IPERF_LOG" && -f "$IPERF_LOG" ]]; then
@@ -307,21 +271,21 @@ case "$ACTION" in
     fi
     [[ -z "$ping_stat" ]] && ping_stat="N/A"
 
-    echo "Hasil : eMBB (Sender): ${final_tput} Mbps | URLLC RTT (min/avg/max/mdev): ${ping_stat} ms | Loss: ${loss_pct}%"
+    echo "Hasil: eMBB=${final_tput} Mbps | URLLC RTT=${ping_stat} ms | Loss=${loss_pct}%"
     cleanup
     ;;
 
   status)
-    ps aux | grep -E "iperf3 -c|ping -I oaitun_ue1" | grep -v grep || echo "Tidak ada proses trafik aktif."
+    ps aux | grep -E "iperf3 -c|ping -I oaitun_ue1" | grep -v grep || echo "Tidak ada proses aktif."
     ;;
 
   stop)
     cleanup
-    echo "Semua proses trafik dihentikan."
+    echo "Proses trafik dihentikan."
     ;;
 
   *)
-    echo "Penggunaan: $0 [durasi_detik] [rate_mbps]"
+    echo "Penggunaan: $0 [start|ping|status|stop] [durasi_detik] [rate_mbps]"
     exit 1
     ;;
 esac

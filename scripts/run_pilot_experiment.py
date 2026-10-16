@@ -276,10 +276,7 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
         return False, evidence, f"Recovery timeout ({timeout_sec}s): antrean, PRB radio, atau probe belum kembali normal"
 
     else:
-        print("\n" + "=" * 85)
-        print("[*] [VERIFIKASI PEMULIHAN OPERATOR INTERAKTIF]")
-        print("    Catat nilai pengamatan pemulihan dari Grafana / terminal:")
-        print("=" * 85)
+        print("\n[Verifikasi Pemulihan Operator]")
         try:
             obs_b = input(f"    -> Masukkan Backlog UPF-1 teramati (Bytes) [Target <={target_backlog}]: ").strip()
             obs_p = input(f"    -> Masukkan PRB Cell-1 teramati (%) [Target <={target_prb}%]: ").strip()
@@ -677,15 +674,8 @@ def main():
         "min_phase_rows": max(15, int(phase_dur * 0.5))
     }
 
-    print("=" * 90)
-    print("  5G O-RAN RIC-NWDAF EXPERIMENT TIMELINE SCHEDULER & QUALITY VERIFIER")
-    print(f"  Run ID          : {run_id}")
-    print(f"  Output Directory: {run_dir}")
-    print(f"  Phase Duration  : {phase_dur} s (aligned with NWDAF ~30s URR cadence)")
-    print(f"  Planned Faults  : {scenarios}")
-    print(f"  Recovery Protocol: 3-Step Empirical (Request -> Transition Drain -> Verified Baseline)")
-    print(f"  Mode            : {'UNATTENDED (Live Telemetric Proof)' if args.unattended else 'INTERACTIVE (Operator Guided & Empirical Proof)'}")
-    print("=" * 90)
+    print(f"\n[Pilot Experiment] Run ID: {run_id} | Durasi: {phase_dur}s | Skenario: {scenarios} | Mode: {'Unattended' if args.unattended else 'Interactive'}")
+    print(f"Direktori: {run_dir}")
 
     # 1. Pre-flight Check: Is Collector Exporter Alive?
     if not check_collector_alive():
@@ -726,11 +716,7 @@ def main():
         for idx, scen in enumerate(scenarios, 1):
             phase_id = f"phase_{idx}_{scen}"
             action_desc = SCENARIO_ACTIONS.get(scen, "Terapkan kondisi skenario.")
-            print(f"\n" + "-" * 90)
-            print(f"[*] [PHASE {idx}/{len(scenarios)}: {phase_id} ({scen})]")
-            print(f"    Instruksi Aksi : {action_desc}")
-            print(f"    Durasi Observasi: {phase_dur} detik")
-            print("-" * 90)
+            print(f"\n[Fase {idx}/{len(scenarios)}: {phase_id} ({scen})] {action_desc} ({phase_dur}s)")
 
             if not args.unattended:
                 notes_input = input(f"    -> Terapkan aksi fisik di VM terkait, masukkan catatan kondisi teramati (atau [Enter] untuk default): ").strip()
@@ -748,17 +734,13 @@ def main():
                 time.sleep(min(10, sec_left))
 
         # 5. Three-Step Recovery Protocol
-        print("\n" + "=" * 90)
-        print("[*] [FASE PEMULIHAN 1/3: PERMINTAAN PELEPASAN GANGGUAN]")
-        print("    1. Pada VM-3: Hapus limitasi antrean UPF (misal: sudo tc qdisc del dev eth0 root).")
-        print("    2. Pada VM-5: Turunkan offered traffic kembali ke baseline normal 10 Mbps.")
-        print("=" * 90)
+        print("\n[Pemulihan 1/3] Hapus antrean UPF (VM-3) & turunkan trafik ke 10 Mbps (VM-5)")
 
         if not args.unattended:
             input("    -> Eksekusi pelepasan gangguan di VM-3/VM-5, lalu tekan [Enter] untuk mencatat transisi...")
 
         # Step 2: Record RECOVERY_TRANSITION (NOT NORMAL!)
-        print("\n[*] [FASE PEMULIHAN 2/3: MEREKAM TRANSISI DRAIN (15s)]...")
+        print("\n[Pemulihan 2/3] Merekam transisi drain (15s)...")
         if not log_event("RECOVERY", "Transisi pemulihan: Gangguan dilepas, antrean buffer sedang drain ke Normal", phase_id="phase_recovery"):
             raise RuntimeError("Gagal mencatat event RECOVERY ke file event!")
         time.sleep(15.0)
@@ -852,15 +834,14 @@ def main():
         with open(manifest_path, "w", encoding="utf-8") as mf:
             json.dump(mf_data, mf, indent=2)
 
-        print("\n" + "=" * 90)
-        print("  LAPORAN HASIL EVALUASI KONTRAK RISET EXPERIMEN")
-        print(f"  Run ID              : {run_id}")
-        print(f"  execution_complete  : {execution_complete} {'(ABORTED: ' + abort_reason + ')' if not execution_complete else ''}")
-        print(f"  data_quality_pass   : {data_quality_pass} {'(Alasan: ' + '; '.join(dq_reasons) + ')' if not data_quality_pass else ''}")
-        print(f"  training_eligible   : {training_eligible} {'(Alasan: ' + '; '.join(tr_reasons) + ')' if not training_eligible else ''}")
-        print(f"  Keputusan Final     : {mf_data['final_decision']}")
-        print(f"  Arsip Manifest      : {manifest_path}")
-        print("=" * 90)
+        print("\n--- Evaluasi Kontrak Riset ---")
+        print(f"Run ID              : {run_id}")
+        print(f"execution_complete  : {execution_complete} {'(ABORTED: ' + abort_reason + ')' if not execution_complete else ''}")
+        print(f"data_quality_pass   : {data_quality_pass} {'(Alasan: ' + '; '.join(dq_reasons) + ')' if not data_quality_pass else ''}")
+        print(f"training_eligible   : {training_eligible} {'(Alasan: ' + '; '.join(tr_reasons) + ')' if not training_eligible else ''}")
+        print(f"Keputusan Final     : {mf_data['final_decision']}")
+        print(f"Arsip Manifest      : {manifest_path}")
+        print("-------------------------------")
 
         if not training_eligible:
             sys.exit(1)
