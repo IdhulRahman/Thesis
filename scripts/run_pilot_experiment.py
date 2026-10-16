@@ -398,7 +398,7 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                         except ValueError:
                             pass
 
-                    if row_scen == "UNINITIALIZED" and not (row_phase.startswith("phase_0_WARMUP") or row_phase == "phase_WARMUP"):
+                    if row_scen == "UNINITIALIZED" and row_phase in expected_phases:
                         uninitialized_test_rows += 1
 
             if has_inf:
@@ -662,7 +662,12 @@ def main():
     # Take initial baseline snapshot of collector metrics before run begins
     initial_collector_metrics = fetch_live_metrics()
 
-    # 2. Start Telemetry Logger as subprocess
+    # 2. Pre-set WARMUP event so logger immediately starts with valid phase
+    if warmup_dur > 0:
+        if not log_event("S1", "System Warm-up & Pipeline Sync", phase_id="phase_0_WARMUP"):
+            raise RuntimeError("Gagal mencatat event WARMUP S1 ke file event!")
+
+    # 3. Start Telemetry Logger as subprocess
     log_proc = subprocess.Popen([sys.executable, RECORD_SCRIPT, run_id])
     time.sleep(1.5)
 
@@ -677,11 +682,9 @@ def main():
     recovery_evidence = {}
 
     try:
-        # 3. Warm-up Phase
+        # 4. Warm-up Phase
         if warmup_dur > 0:
             print(f"\n[*] [PHASE 0: WARMUP] Menunggu warm-up telemetri ({warmup_dur}s)...")
-            if not log_event("S1", "System Warm-up & Pipeline Sync", phase_id="phase_0_WARMUP"):
-                raise RuntimeError("Gagal mencatat event WARMUP S1 ke file event!")
             time.sleep(warmup_dur)
 
         # 4. Step through planned fault scenarios

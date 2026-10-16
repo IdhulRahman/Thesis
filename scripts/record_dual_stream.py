@@ -226,11 +226,12 @@ def main():
     print("  Engine: Monotonic Clock (Zero Drift) | Raw Floats | Mode 'x' Exclusive")
     print("=" * 90)
 
-    # Initial atomic initialization
-    tmp_init = ACTIVE_EVENT_FILE + ".tmp"
-    with open(tmp_init, "w") as f:
-        json.dump({"phase_id": "UNINITIALIZED", "scenario": "UNINITIALIZED", "domain": "UNINITIALIZED", "component": "NONE"}, f)
-    os.replace(tmp_init, ACTIVE_EVENT_FILE)
+    # Initial atomic initialization (preserve if already pre-set by runner)
+    if not os.path.exists(ACTIVE_EVENT_FILE) or os.path.getsize(ACTIVE_EVENT_FILE) == 0:
+        tmp_init = ACTIVE_EVENT_FILE + ".tmp"
+        with open(tmp_init, "w") as f:
+            json.dump({"phase_id": "phase_0_WARMUP", "scenario": "S1_NORMAL_LIGHT", "domain": "BASELINE", "component": "NONE"}, f)
+        os.replace(tmp_init, ACTIVE_EVENT_FILE)
 
     # Initialize manifest.json in RUN_DIR
     manifest = {
