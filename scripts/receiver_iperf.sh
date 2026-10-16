@@ -69,6 +69,7 @@ case "$ACTION" in
 
     if [ $READY -eq 1 ]; then
       PID=$(sudo docker exec "$CONTAINER" pgrep -f "iperf3.*${PORT}" | head -n 1)
+      sudo docker exec "$CONTAINER" sh -c "echo $PID > /tmp/receiver_${RUN_ID}_${SESSION_ID}.pid" 2>/dev/null || true
       echo "[SUCCESS] Dedicated receiver iperf3 is actively LISTENING on port $PORT (Container PID: $PID, Session: $SESSION_ID, Mode: $STREAM_OPT)."
     else
       echo "[ERROR] Listener readiness check failed: port $PORT is not in LISTEN state inside $CONTAINER."
@@ -83,12 +84,22 @@ case "$ACTION" in
     SUMMARY_FILE="${HOST_EXPORT_DIR}/receiver_${SESSION_ID}_summary.json"
     mkdir -p "$HOST_EXPORT_DIR"
 
-    # If dedicated receiver is still running inside container, flush buffers by sending SIGINT
-    if sudo docker exec "$CONTAINER" pgrep -f "iperf3.*${PORT}" >/dev/null 2>&1; then
-      echo "[*] Flushing output buffers and terminating receiver on port $PORT..."
-      sudo docker exec "$CONTAINER" pkill -INT -f "iperf3.*${PORT}" 2>/dev/null || true
+    # Wait for receiver session to finish naturally instead of immediately sending SIGINT
+    WAIT_TIMEOUT=10
+    WAIT_COUNT=0
+    FORCE_ABORT=0
+    while sudo docker exec "$CONTAINER" pgrep -f "iperf3.*${PORT}" >/dev/null 2>&1; do
+      if [ "$WAIT_COUNT" -ge "$WAIT_TIMEOUT" ]; then
+        echo "[WARNING] Receiver on port $PORT still running after ${WAIT_TIMEOUT}s timeout. Sesi belum selesai secara normal; menghentikan paksa..." >&2
+        sudo docker exec "$CONTAINER" pkill -INT -f "iperf3.*${PORT}" 2>/dev/null || true
+        FORCE_ABORT=1
+        sleep 1
+        break
+      fi
+      echo "[*] Menunggu receiver pada port $PORT selesai secara normal (${WAIT_COUNT}/${WAIT_TIMEOUT}s)..."
       sleep 1
-    fi
+      WAIT_COUNT=$((WAIT_COUNT + 1))
+    done
 
     echo "[*] Checking and copying receiver JSON log from $CONTAINER:$LOG_FILE"
     if ! sudo docker exec "$CONTAINER" test -s "$LOG_FILE"; then
@@ -105,11 +116,24 @@ case "$ACTION" in
     fi
 
     # Parse output handling both ESnet --json-stream and standard --json with strict error enforcement
-    python3 - "$TARGET_FILE" "$SUMMARY_FILE" << 'EOF'
+    python3 - "$TARGET_FILE" "$SUMMARY_FILE" "$FORCE_ABORT" << 'EOF'
 import json, sys
 
 path = sys.argv[1]
 summary_path = sys.argv[2]
+force_abort = (len(sys.argv) > 3 and sys.argv[3] == "1")
+
+if force_abort:
+    summary = {
+        "format": "aborted",
+        "session_complete": False,
+        "aborted": True,
+        "error": "Sesi receiver dihentikan paksa karena timeout"
+    }
+    with open(summary_path, "w", encoding="utf-8") as sf:
+        json.dump(summary, sf, indent=2)
+    print("[ERROR] Receiver session aborted forcibly before normal completion (session_complete=False)", file=sys.stderr)
+    sys.exit(1)
 
 try:
     with open(path, "r", encoding="utf-8", errors="replace") as f:

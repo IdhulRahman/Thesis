@@ -2,6 +2,7 @@
 # Multi-slice traffic generator (VM-5)
 # Usage: ./trafgen.sh [start|ping|status|stop] [sec] [mbps]
 
+PID_FILE="/opt/oran/ue/trafgen.pid"
 STATE_FILE="/opt/oran/ue/active_ues.txt"
 LOG_DIR="/opt/oran/ue/logs"
 EXT_DN_IP="192.168.70.145"
@@ -25,8 +26,16 @@ else
 fi
 
 cleanup() {
-  pkill -f "iperf3 -c $EXT_DN_IP" 2>/dev/null || true
-  pkill -f "ping -I oaitun_ue1.*$EXT_DN_IP" 2>/dev/null || true
+  if [[ -f "$PID_FILE" ]]; then
+    while read -r p; do
+      if [[ -n "$p" ]] && kill -0 "$p" 2>/dev/null; then
+        kill "$p" 2>/dev/null || true
+      fi
+    done < "$PID_FILE"
+    rm -f "$PID_FILE"
+  fi
+  pkill -f "iperf3.*$EXT_DN_IP" 2>/dev/null || true
+  pkill -f "ping.*$EXT_DN_IP" 2>/dev/null || true
 }
 
 trap 'cleanup; echo ""; exit 0' INT TERM
@@ -36,28 +45,52 @@ parse_ping() {
   local prev_seq="$2"
   tail -n 60 "$log_file" 2>/dev/null | awk -v prev_seq="$prev_seq" '
   {
-    s = 0; r = -1;
+    s = 0; r = -1; is_no_ans = 0;
     for (i = 1; i <= NF; i++) {
       if ($i ~ /^icmp_seq=/) { split($i, a, "="); s = a[2] + 0 }
       if ($i ~ /^time=/)     { split($i, b, "="); r = b[2] + 0.0 }
     }
+    if ($0 ~ /no answer yet/) { is_no_ans = 1 }
+
     if (s > 0) {
-      if (s > max_s) max_s = s;
-      if (r >= 0.0 && s > prev_seq) {
-        rx_count++;
-        last_rtt = r;
+      if (s > max_seen) max_seen = s;
+      if (is_no_ans) {
+        has_no_ans[s] = 1;
+      }
+      if (r >= 0.0) {
+        if (s > prev_seq) {
+          if (!seen_rx[s]++) {
+            rx_count++;
+            last_rtt = r;
+          }
+        } else {
+          if (!seen_delayed[s]++) {
+            delayed_rx++;
+            if (last_rtt == "" || last_rtt < 0) last_rtt = r;
+          }
+        }
       }
     }
   }
   END {
-    if (max_s > prev_seq) {
-      sent = max_s - prev_seq;
-      loss = (sent - rx_count) * 100.0 / sent;
+    eval_max = max_seen;
+    if (eval_max > prev_seq && has_no_ans[eval_max] && !seen_rx[eval_max]) {
+      if (eval_max - 1 > prev_seq) {
+        eval_max = eval_max - 1;
+      }
+    }
+
+    if (eval_max > prev_seq) {
+      sent = eval_max - prev_seq;
+      effective_rx = rx_count + delayed_rx;
+      if (effective_rx > sent) effective_rx = sent;
+      loss = (sent - effective_rx) * 100.0 / sent;
       if (loss < 0.0) loss = 0.0;
-      if (rx_count > 0) {
-        printf "%d %.2f %.1f %d %d\n", max_s, last_rtt, loss, sent, rx_count;
+
+      if (effective_rx > 0 && last_rtt >= 0.0) {
+        printf "%d %.2f %.1f %d %d\n", eval_max, last_rtt, loss, sent, effective_rx;
       } else {
-        printf "%d NaN 100.0 %d 0\n", max_s, sent;
+        printf "%d NaN 100.0 %d 0\n", eval_max, sent;
       }
     } else {
       printf "%d NaN 0.0 0 0\n", prev_seq;
@@ -111,12 +144,15 @@ case "$ACTION" in
         > "$IPERF_LOG"
         > "$UE1_PING_LOG"
         nohup ip netns exec "$ns" iperf3 -c "$EXT_DN_IP" -u -b "${EMBB_RATE}M" -t "$DURATION" -i 1 --logfile "$IPERF_LOG" </dev/null >/dev/null 2>&1 &
+        echo $! >> "$PID_FILE"
         nohup ip netns exec "$ns" ping -D -O -I oaitun_ue1 -i 0.2 -c $(( DURATION * 5 )) "$EXT_DN_IP" </dev/null > "$UE1_PING_LOG" 2>&1 &
+        echo $! >> "$PID_FILE"
       else
         UE2_NS="$ns"
         PING_LOG="$LOG_DIR/ping_${ns}_${TIMESTAMP}.log"
         > "$PING_LOG"
         nohup ip netns exec "$ns" ping -D -O -I oaitun_ue1 -i 0.1 -c $(( DURATION * 10 )) "$EXT_DN_IP" </dev/null > "$PING_LOG" 2>&1 &
+        echo $! >> "$PID_FILE"
       fi
     done < "$STATE_FILE"
 
@@ -276,7 +312,11 @@ case "$ACTION" in
     ;;
 
   status)
-    ps aux | grep -E "iperf3 -c|ping -I oaitun_ue1" | grep -v grep || echo "Tidak ada proses aktif."
+    if [[ -f "$PID_FILE" ]]; then
+      echo "PID terdaftar ($PID_FILE):"
+      cat "$PID_FILE"
+    fi
+    ps aux | grep -E "iperf3.*$EXT_DN_IP|ping.*$EXT_DN_IP" | grep -v grep || echo "Tidak ada proses aktif."
     ;;
 
   stop)

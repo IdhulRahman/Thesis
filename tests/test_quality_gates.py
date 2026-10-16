@@ -267,7 +267,7 @@ class TestResearchContractQualityGates(unittest.TestCase):
         receiver_script = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts", "receiver_iperf.sh"))
         with open(receiver_script, "r", encoding="utf-8") as f:
             sh_content = f.read()
-        py_parser_code = sh_content.split("python3 - \"$TARGET_FILE\" \"$SUMMARY_FILE\" << 'EOF'")[1].split("EOF")[0]
+        py_parser_code = sh_content.split("<< 'EOF'")[1].split("EOF")[0]
 
         cases = [
             # 1. Standard single JSON
@@ -855,6 +855,372 @@ class TestResearchContractQualityGates(unittest.TestCase):
         self.assertFalse(dq_pass, "Collector failure counter > 0 must fail data_quality_pass")
         self.assertTrue(any("kegagalan penulisan arsip" in r for r in dq_reasons))
 
+    def test_pos_fault_signatures_verified_pass(self):
+        """POS-FAULTS: S1, S3, S6 with physical fault signatures pass training_eligible."""
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        rows = []
+        for i in range(45):
+            if i < 15:
+                phase, scen, prb, back, drops = "phase_1_S1", "S1", 35.0, 0.0, 0.0
+            elif i < 30:
+                phase, scen, prb, back, drops = "phase_2_S3", "S3", 85.0, 0.0, 0.0
+            else:
+                phase, scen, prb, back, drops = "phase_3_S6", "S6", 40.0, 250000.0, 15.0
+            rows.append({
+                "timestamp_utc": f"2026-10-16T10:00:{i:02d}Z",
+                "elapsed_sec": f"{i}.000",
+                "run_id": self.run_id,
+                "event_phase_id": phase,
+                "event_scenario": scen,
+                "ran_prb_cell1": prb,
+                "upf_queue_backlog_bytes": back,
+                "upf_drops_embb": drops,
+                "nwdaf_comm_ul_bytes": 100000.0 + i*1000
+            })
+        create_fixture_telemetry(csv_path, self.run_id, rows)
+
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [
+            {"timestamp_utc": "2026-10-16T10:00:00Z", "phase_id": "phase_1_S1", "scenario_id": "S1"},
+            {"timestamp_utc": "2026-10-16T10:00:15Z", "phase_id": "phase_2_S3", "scenario_id": "S3"},
+            {"timestamp_utc": "2026-10-16T10:00:30Z", "phase_id": "phase_3_S6", "scenario_id": "S6"},
+            {"timestamp_utc": "2026-10-16T10:00:45Z", "phase_id": "phase_clear", "scenario_id": "CLEAR"}
+        ])
+
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [
+            {"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}
+        ])
+
+        # Also provide valid receiver summary so receiver check passes
+        rec_summary_path = os.path.join(self.run_dir, "receiver_s1_embb_summary.json")
+        with open(rec_summary_path, "w", encoding="utf-8") as rf:
+            json.dump({"session_complete": True, "bytes_received": 15000000, "goodput_mbps": 20.0}, rf)
+
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+        config["require_receiver"] = True
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1", "S3", "S6"],
+            recovery_verified=True,
+            config_params=config
+        )
+
+        self.assertTrue(dq_pass, f"Data quality must pass: {dq_reasons}")
+        self.assertTrue(tr_elig, f"Training eligibility must pass when physical fault signatures exist: {tr_reasons}")
+
+    def test_neg_s3_without_ran_overload_signature_fails(self):
+        """NEG-FAULTS-S3: S3 phase with PRB 6% fails training_eligible due to lack of RAN overload signature."""
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        rows = []
+        for i in range(45):
+            if i < 15:
+                phase, scen, prb, back = "phase_1_S1", "S1", 35.0, 0.0
+            elif i < 30:
+                # S3 with only 6% PRB (simulating unapplied fault)
+                phase, scen, prb, back = "phase_2_S3", "S3", 6.0, 0.0
+            else:
+                phase, scen, prb, back = "phase_3_S6", "S6", 40.0, 250000.0
+            rows.append({
+                "timestamp_utc": f"2026-10-16T10:00:{i:02d}Z",
+                "elapsed_sec": f"{i}.000",
+                "run_id": self.run_id,
+                "event_phase_id": phase,
+                "event_scenario": scen,
+                "ran_prb_cell1": prb,
+                "upf_queue_backlog_bytes": back,
+                "nwdaf_comm_ul_bytes": 100000.0 + i*1000
+            })
+        create_fixture_telemetry(csv_path, self.run_id, rows)
+
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [
+            {"timestamp_utc": "2026-10-16T10:00:00Z", "phase_id": "phase_1_S1", "scenario_id": "S1"},
+            {"timestamp_utc": "2026-10-16T10:00:15Z", "phase_id": "phase_2_S3", "scenario_id": "S3"},
+            {"timestamp_utc": "2026-10-16T10:00:30Z", "phase_id": "phase_3_S6", "scenario_id": "S6"},
+            {"timestamp_utc": "2026-10-16T10:00:45Z", "phase_id": "phase_clear", "scenario_id": "CLEAR"}
+        ])
+
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [
+            {"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}
+        ])
+
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1", "S3", "S6"],
+            recovery_verified=True,
+            config_params=config
+        )
+
+        self.assertTrue(dq_pass)
+        self.assertFalse(tr_elig, "S3 without PRB >= 65% must fail training_eligible")
+        self.assertTrue(any("tidak membuktikan signature saturasi radio" in r for r in tr_reasons))
+
+    def test_neg_s6_without_core_bottleneck_signature_fails(self):
+        """NEG-FAULTS-S6: S6 phase with backlog 0 and drops 0 fails training_eligible."""
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        rows = []
+        for i in range(45):
+            if i < 15:
+                phase, scen, prb, back, drops = "phase_1_S1", "S1", 35.0, 0.0, 0.0
+            elif i < 30:
+                phase, scen, prb, back, drops = "phase_2_S3", "S3", 85.0, 0.0, 0.0
+            else:
+                # S6 with 0 backlog and 0 drops
+                phase, scen, prb, back, drops = "phase_3_S6", "S6", 40.0, 0.0, 0.0
+            rows.append({
+                "timestamp_utc": f"2026-10-16T10:00:{i:02d}Z",
+                "elapsed_sec": f"{i}.000",
+                "run_id": self.run_id,
+                "event_phase_id": phase,
+                "event_scenario": scen,
+                "ran_prb_cell1": prb,
+                "upf_queue_backlog_bytes": back,
+                "upf_drops_embb": drops,
+                "nwdaf_comm_ul_bytes": 100000.0 + i*1000
+            })
+        create_fixture_telemetry(csv_path, self.run_id, rows)
+
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [
+            {"timestamp_utc": "2026-10-16T10:00:00Z", "phase_id": "phase_1_S1", "scenario_id": "S1"},
+            {"timestamp_utc": "2026-10-16T10:00:15Z", "phase_id": "phase_2_S3", "scenario_id": "S3"},
+            {"timestamp_utc": "2026-10-16T10:00:30Z", "phase_id": "phase_3_S6", "scenario_id": "S6"},
+            {"timestamp_utc": "2026-10-16T10:00:45Z", "phase_id": "phase_clear", "scenario_id": "CLEAR"}
+        ])
+
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [
+            {"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}
+        ])
+
+        config = dict(self.config_params)
+        config["verify_fault_signatures"] = True
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1", "S3", "S6"],
+            recovery_verified=True,
+            config_params=config
+        )
+
+        self.assertTrue(dq_pass)
+        self.assertFalse(tr_elig, "S6 without backlog or drops must fail training_eligible")
+        self.assertTrue(any("tidak membuktikan antrean atau paket drop UPF" in r for r in tr_reasons))
+
+    def test_pos_receiver_validation_standard_json(self):
+        """POS-RCV-01: Standard iperf3 JSON with valid end block passes training_eligible."""
+        rec_path = os.path.join(self.run_dir, "receiver_s1_embb.json")
+        with open(rec_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "start": {"test_start": {}},
+                "end": {"sum_received": {"bytes": 12500000, "bits_per_second": 20000000}}
+            }, f)
+
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        create_fixture_telemetry(csv_path, self.run_id, [{
+            "elapsed_sec": str(i), "ran_prb_cell1": 35.0, "nwdaf_comm_ul_bytes": 1000.0,
+            "event_phase_id": "phase_1_S1", "event_scenario": "S1"
+        } for i in range(35)])
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [{"phase_id": "phase_1_S1", "scenario_id": "S1"}])
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [{"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}])
+
+        config = dict(self.config_params)
+        config["require_receiver"] = True
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1"],
+            recovery_verified=True,
+            config_params=config
+        )
+
+        self.assertTrue(dq_pass)
+        self.assertTrue(tr_elig, f"Valid standard iperf3 receiver log must pass training_eligible: {tr_reasons}")
+
+    def test_pos_receiver_validation_json_stream(self):
+        """POS-RCV-02: ESnet json-stream format with final end event passes training_eligible."""
+        rec_path = os.path.join(self.run_dir, "receiver_s1_embb.json")
+        with open(rec_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"event": "interval", "data": {"sum": {"bytes": 1000000}}}) + "\n")
+            f.write(json.dumps({"event": "interval", "data": {"sum": {"bytes": 1000000}}}) + "\n")
+            f.write(json.dumps({"event": "end", "data": {"sum_received": {"bytes": 20000000, "bits_per_second": 20000000}}}) + "\n")
+
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        create_fixture_telemetry(csv_path, self.run_id, [{
+            "elapsed_sec": str(i), "ran_prb_cell1": 35.0, "nwdaf_comm_ul_bytes": 1000.0,
+            "event_phase_id": "phase_1_S1", "event_scenario": "S1"
+        } for i in range(35)])
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [{"phase_id": "phase_1_S1", "scenario_id": "S1"}])
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [{"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}])
+
+        config = dict(self.config_params)
+        config["require_receiver"] = True
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1"],
+            recovery_verified=True,
+            config_params=config
+        )
+
+        self.assertTrue(dq_pass)
+        self.assertTrue(tr_elig, f"Valid JSON-stream receiver log must pass training_eligible: {tr_reasons}")
+
+    def test_neg_receiver_missing_when_required_fails(self):
+        """NEG-RCV-01: Missing receiver export on VM-6 when required must fail training_eligible."""
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        create_fixture_telemetry(csv_path, self.run_id, [{
+            "elapsed_sec": str(i), "ran_prb_cell1": 35.0, "nwdaf_comm_ul_bytes": 1000.0,
+            "event_phase_id": "phase_1_S1", "event_scenario": "S1"
+        } for i in range(35)])
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [{"phase_id": "phase_1_S1", "scenario_id": "S1"}])
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [{"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}])
+
+        config = dict(self.config_params)
+        config["require_receiver"] = True
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1"],
+            recovery_verified=True,
+            config_params=config
+        )
+
+        self.assertTrue(dq_pass)
+        self.assertFalse(tr_elig, "Missing receiver file must fail training_eligible when require_receiver=True")
+        self.assertTrue(any("Arsip receiver wajib" in r for r in tr_reasons))
+
+    def test_neg_receiver_end_null_fails(self):
+        """NEG-RCV-02: Receiver log with end: null must fail training_eligible (user reproduction case)."""
+        rec_path = os.path.join(self.run_dir, "receiver_s1_embb.json")
+        with open(rec_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"start": {}, "end": None}))
+
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        create_fixture_telemetry(csv_path, self.run_id, [{
+            "elapsed_sec": str(i), "ran_prb_cell1": 35.0, "nwdaf_comm_ul_bytes": 1000.0,
+            "event_phase_id": "phase_1_S1", "event_scenario": "S1"
+        } for i in range(35)])
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        create_fixture_events(events_path, self.run_id, [{"phase_id": "phase_1_S1", "scenario_id": "S1"}])
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [{"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}])
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1"],
+            recovery_verified=True,
+            config_params=self.config_params
+        )
+
+        self.assertTrue(dq_pass)
+        self.assertFalse(tr_elig, "{'end': null} in receiver file must fail training_eligible")
+        self.assertTrue(any("tidak valid" in r for r in tr_reasons))
+
+    def test_neg_recovery_fails_with_stale_or_nan_probe(self):
+        """NEG-RECOV-01: Recovery verification fails if probe is stale (freshness=0) or loss is NaN."""
+        from unittest.mock import patch
+        stale_metrics = {
+            "available": True,
+            "upf_backlog_embb": 0.0,
+            "ran_prb_cell1": 35.0,
+            "ue1_rtt_ms": float("nan"),
+            "ue1_loss_pct": float("nan"),
+            "e2e_probe_freshness": 0
+        }
+        with patch("run_pilot_experiment.fetch_live_metrics", return_value=stale_metrics):
+            verified, evidence, reason = run_pilot_experiment.verify_recovery(
+                unattended=True,
+                timeout_sec=2,
+                stability_sec=1,
+                require_probe=True
+            )
+            self.assertFalse(verified, "Stale probe with freshness=0 must NOT pass recovery verification")
+
+    def test_pos_recovery_passes_with_fresh_healthy_probe(self):
+        """POS-RECOV-01: Recovery verification passes when both resources and UE-1 probe are healthy."""
+        from unittest.mock import patch
+        healthy_metrics = {
+            "available": True,
+            "upf_backlog_embb": 0.0,
+            "ran_prb_cell1": 35.0,
+            "ue1_rtt_ms": 15.0,
+            "ue1_loss_pct": 0.0,
+            "e2e_probe_freshness": 1
+        }
+        with patch("run_pilot_experiment.fetch_live_metrics", return_value=healthy_metrics):
+            verified, evidence, reason = run_pilot_experiment.verify_recovery(
+                unattended=True,
+                timeout_sec=3,
+                stability_sec=1,
+                require_probe=True
+            )
+    def test_pos_trafgen_ping_parser_dedup_and_delayed_reply(self):
+        """POS-PING-01: Awk ping parser in trafgen.sh must deduplicate sequences and handle delayed replies."""
+        import subprocess
+        awk_bin = shutil.which("awk")
+        if not awk_bin:
+            git_awk = r"C:\Program Files\Git\usr\bin\awk.exe"
+            if os.path.exists(git_awk):
+                awk_bin = git_awk
+
+        if not awk_bin:
+            self.skipTest("awk binary not found in system PATH")
+
+        trafgen_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts", "trafgen.sh"))
+        with open(trafgen_path, "r", encoding="utf-8") as f:
+            sh_code = f.read()
+
+        awk_code = sh_code.split("awk -v prev_seq=\"$prev_seq\" '")[1].split("}'")[0] + "}"
+
+        # Case 1: Duplicate seq 1, lost seq 2, reply seq 3 -> must yield 33.3% loss
+        fixture_dup = (
+            "[100.1] 64 bytes from 192.168.70.145: icmp_seq=1 ttl=64 time=10.2 ms\n"
+            "[100.2] 64 bytes from 192.168.70.145: icmp_seq=1 ttl=64 time=10.2 ms (DUP!)\n"
+            "[100.3] no answer yet for icmp_seq=2\n"
+            "[100.4] 64 bytes from 192.168.70.145: icmp_seq=3 ttl=64 time=12.0 ms\n"
+        )
+        p = subprocess.run([awk_bin, "-v", "prev_seq=0", awk_code], input=fixture_dup, text=True, capture_output=True)
+        self.assertEqual(p.returncode, 0, f"Awk exited with error: {p.stderr}")
+        tokens = p.stdout.strip().split()
+        self.assertEqual(tokens[0], "3", "Max seq should be 3")
+        self.assertEqual(tokens[2], "33.3", "Packet loss must be 33.3% (not 0.0%) for 1 dup, 1 lost, 1 reply")
+        self.assertEqual(tokens[3], "3", "Sent count should be 3")
+        self.assertEqual(tokens[4], "2", "Received unique count should be 2")
+
+        # Case 2: Out of order (seq 3 before seq 2) -> must yield 0.0% loss
+        fixture_ooo = (
+            "[100.1] 64 bytes from 192.168.70.145: icmp_seq=1 ttl=64 time=10.0 ms\n"
+            "[100.2] 64 bytes from 192.168.70.145: icmp_seq=3 ttl=64 time=12.0 ms\n"
+            "[100.3] 64 bytes from 192.168.70.145: icmp_seq=2 ttl=64 time=25.0 ms\n"
+        )
+        p = subprocess.run([awk_bin, "-v", "prev_seq=0", awk_code], input=fixture_ooo, text=True, capture_output=True)
+        self.assertEqual(p.returncode, 0)
+        tokens = p.stdout.strip().split()
+        self.assertEqual(tokens[2], "0.0", "Out of order packets must not cause packet loss")
+        self.assertEqual(tokens[4], "3", "All 3 packets received")
+
 
 if __name__ == "__main__":
     unittest.main()
+

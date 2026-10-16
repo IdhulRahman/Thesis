@@ -130,15 +130,19 @@ def fetch_live_metrics(url=COLLECTOR_URL):
     res = {
         "upf_backlog_embb": float("nan"),
         "ran_prb_cell1": float("nan"),
-        "nwdaf_comm_freshness": 0,
+        "ue1_rtt_ms": float("nan"),
+        "ue1_loss_pct": float("nan"),
+        "ue2_rtt_ms": float("nan"),
+        "ue2_loss_pct": float("nan"),
+        "e2e_rtt_ms": float("nan"),
+        "e2e_loss_pct": float("nan"),
         "e2e_probe_freshness": 0,
+        "nwdaf_comm_freshness": 0,
         "nwdaf_raw_polls_total": 0,
         "nwdaf_raw_polls_written": 0,
         "nwdaf_raw_polls_failed": 0,
         "nwdaf_run_raw_polls_written": 0,
         "nwdaf_run_raw_polls_failed": 0,
-        "e2e_rtt_ms": float("nan"),
-        "e2e_loss_pct": float("nan"),
         "available": False
     }
     try:
@@ -166,9 +170,15 @@ def fetch_live_metrics(url=COLLECTOR_URL):
                         res["upf_backlog_embb"] = val_float
                     elif name == "ran_cell_prb_utilization" and labels.get("cell_id") == "1":
                         res["ran_prb_cell1"] = val_float
+                    elif name == "e2e_slice1_latency_rtt_ms":
+                        res["ue1_rtt_ms"] = val_float
+                    elif name == "e2e_slice1_packet_loss_pct":
+                        res["ue1_loss_pct"] = val_float
                     elif name == "e2e_slice2_latency_rtt_ms":
+                        res["ue2_rtt_ms"] = val_float
                         res["e2e_rtt_ms"] = val_float
                     elif name == "e2e_slice2_packet_loss_pct":
+                        res["ue2_loss_pct"] = val_float
                         res["e2e_loss_pct"] = val_float
                     elif name == "nwdaf_comm_freshness":
                         res["nwdaf_comm_freshness"] = int(val_float) if not math.isnan(val_float) else 0
@@ -197,9 +207,10 @@ def check_collector_alive():
         return False
 
 
-def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=0.0, target_prb=40.0):
+def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=0.0, target_prb=40.0, target_rtt_ms=30.0, target_loss_pct=5.0, require_probe=False):
     """
     Verifies network recovery with empirical observation proof.
+    Ensures both resource conditions (backlog, PRB) and service probe conditions (UE-1 RTT, Loss) recover.
     Returns: (verified: bool, evidence: dict, reason: str)
     """
     evidence = {
@@ -209,6 +220,9 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
         "duration_sec": 0,
         "target_backlog_bytes": target_backlog,
         "target_prb_pct": target_prb,
+        "target_rtt_ms": target_rtt_ms,
+        "target_loss_pct": target_loss_pct,
+        "require_probe": require_probe,
         "evidence_source": "",
         "samples": []
     }
@@ -218,6 +232,8 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
         print(f"\n[*] [VERIFIKASI PEMULIHAN OTOMATIS] Menunggu kondisi baseline stabil:")
         print(f"    - Target Backlog UPF-1: <= {target_backlog} Bytes")
         print(f"    - Target PRB Cell-1   : <= {target_prb}%")
+        if require_probe:
+            print(f"    - Target Probe UE-1   : RTT <= {target_rtt_ms}ms, Loss <= {target_loss_pct}%, Freshness > 0")
         print(f"    - Jendela Stabil      : {stability_sec}s berturut-turut (Timeout: {timeout_sec}s)")
 
         consecutive_stable = 0
@@ -226,27 +242,39 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
             now_m = fetch_live_metrics()
             b_log = now_m["upf_backlog_embb"]
             prb = now_m["ran_prb_cell1"]
-            rtt = now_m.get("e2e_rtt_ms", float("nan"))
-            loss = now_m.get("e2e_loss_pct", float("nan"))
+            u1_rtt = now_m.get("ue1_rtt_ms", float("nan"))
+            u1_loss = now_m.get("ue1_loss_pct", float("nan"))
+            probe_fresh = now_m.get("e2e_probe_freshness", 0)
+
             is_avail = bool(now_m.get("available"))
             is_finite = math.isfinite(b_log) and math.isfinite(prb)
             is_in_range = is_finite and (b_log >= 0.0) and (0.0 <= prb <= 100.0)
-            
-            # Check probe status if probe freshness indicates active reporting
-            probe_ok = True
-            if now_m.get("e2e_probe_freshness", 0) > 0 and math.isfinite(loss):
-                probe_ok = (loss <= 10.0)
+            resource_ok = is_avail and is_in_range and (b_log <= target_backlog) and (prb <= target_prb)
 
-            is_healthy = is_avail and is_in_range and (b_log <= target_backlog) and (prb <= target_prb) and probe_ok
+            # Target service probe (UE-1 Slice 1 eMBB is the fault subject)
+            if require_probe:
+                probe_fresh_ok = (probe_fresh > 0)
+                u1_rtt_ok = math.isfinite(u1_rtt) and (0.0 < u1_rtt <= target_rtt_ms)
+                u1_loss_ok = math.isfinite(u1_loss) and (0.0 <= u1_loss <= target_loss_pct)
+                service_ok = probe_fresh_ok and u1_rtt_ok and u1_loss_ok
+            else:
+                service_ok = True
+                if probe_fresh > 0 and math.isfinite(u1_loss):
+                    service_ok = (u1_loss <= target_loss_pct)
+
+            is_healthy = resource_ok and service_ok
 
             now_mono = time.monotonic()
             evidence["samples"].append({
                 "elapsed_sec": round(now_mono - t_start, 1),
                 "backlog": b_log,
                 "prb": prb,
-                "rtt_ms": rtt,
-                "loss_pct": loss,
+                "ue1_rtt_ms": u1_rtt,
+                "ue1_loss_pct": u1_loss,
+                "probe_freshness": probe_fresh,
                 "available": is_avail,
+                "resource_ok": resource_ok,
+                "service_ok": service_ok,
                 "healthy": is_healthy
             })
 
@@ -254,7 +282,7 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
                 if stable_start is None:
                     stable_start = now_mono
                 stable_duration = now_mono - stable_start
-                print(f"    -> Kondisi normal teramati: Backlog={b_log:.0f}B, PRB={prb:.1f}%, ProbeLoss={loss:.1f}% (stabil: {stable_duration:.1f}/{stability_sec}s)...")
+                print(f"    -> Kondisi normal teramati: Backlog={b_log:.0f}B, PRB={prb:.1f}%, UE1_Loss={u1_loss:.1f}% (stabil: {stable_duration:.1f}/{stability_sec}s)...")
                 if stable_duration >= stability_sec:
                     evidence["verified_time_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
                     evidence["duration_sec"] = round(now_mono - t_start, 1)
@@ -262,18 +290,19 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
                     evidence["evidence_source"] = f"Collector :9100 live metric polling ({round(stable_duration, 1)}s continuous monotonic stability)"
                     evidence["final_backlog"] = b_log
                     evidence["final_prb"] = prb
-                    evidence["final_rtt_ms"] = rtt
-                    evidence["final_loss_pct"] = loss
+                    evidence["final_ue1_rtt_ms"] = u1_rtt
+                    evidence["final_ue1_loss_pct"] = u1_loss
+                    evidence["final_probe_freshness"] = probe_fresh
                     print(f"[+] Pemulihan terverifikasi secara objektif dalam {evidence['duration_sec']} detik!")
                     return True, evidence, "Verified stable baseline"
             else:
                 stable_start = None
-                print(f"    -> Menunggu drain/tersedia: Backlog={b_log}B, PRB={prb}%, ProbeLoss={loss}%, Avail={is_avail} (elapsed: {round(now_mono - t_start)}s)...")
+                print(f"    -> Menunggu drain/tersedia: Backlog={b_log}B, PRB={prb}%, UE1_Loss={u1_loss}%, ProbeFresh={probe_fresh}, Avail={is_avail} (elapsed: {round(now_mono - t_start)}s)...")
 
             time.sleep(1.0)
 
         evidence["duration_sec"] = round(time.monotonic() - t_start, 1)
-        return False, evidence, f"Recovery timeout ({timeout_sec}s): antrean, PRB radio, atau probe belum kembali normal"
+        return False, evidence, f"Recovery timeout ({timeout_sec}s): antrean, PRB radio, atau probe UE-1 belum kembali normal"
 
     else:
         print("\n[Verifikasi Pemulihan Operator]")
@@ -308,6 +337,93 @@ def verify_recovery(unattended, timeout_sec=30, stability_sec=3, target_backlog=
             return False, evidence, f"Gagal membaca input verifikasi operator: {e}"
 
 
+def validate_receiver_archive(file_path):
+    """
+    Validates receiver export archive supporting:
+    1. Standard formatted JSON (iperf3 --json)
+    2. JSON-stream (iperf3 --json-stream)
+    3. Summary JSON (receiver_*_summary.json with session_complete)
+    
+    Returns: (is_valid: bool, reason: str, metadata: dict)
+    """
+    if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+        return False, "Berkas tidak ditemukan atau 0 Byte", {}
+
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read().strip()
+    except Exception as e:
+        return False, f"Gagal membaca berkas: {e}", {}
+
+    if not content:
+        return False, "Berkas kosong", {}
+
+    # Attempt 1: Single standard JSON or Summary JSON
+    try:
+        data = json.loads(content)
+        if isinstance(data, dict):
+            # Case 1A: Exported Summary JSON (from receiver_iperf.sh export)
+            if "session_complete" in data or "goodput_mbps" in data:
+                if not data.get("session_complete"):
+                    return False, "Sesi receiver tidak lengkap (session_complete == False)", data
+                bytes_rx = data.get("bytes_received", 0)
+                if not (isinstance(bytes_rx, (int, float)) and bytes_rx > 0):
+                    return False, f"Jumlah bytes_received ({bytes_rx}) tidak valid", data
+                return True, "Valid summary JSON", data
+
+            # Case 1B: Standard iperf3 full JSON
+            if "end" in data:
+                end_val = data["end"]
+                if end_val is None or not isinstance(end_val, dict):
+                    return False, "Blok 'end' bernilai null atau bukan dict", {}
+                sum_rx = (end_val.get("sum_received") or 
+                          end_val.get("sum") or 
+                          (end_val.get("streams", [{}])[0].get("receiver") if end_val.get("streams") else None) or
+                          (end_val.get("streams", [{}])[0].get("udp") if end_val.get("streams") else None) or
+                          end_val)
+                if not isinstance(sum_rx, dict) or sum_rx.get("bytes", 0) <= 0:
+                    return False, "Blok 'end' tidak memuat ringkasan bytes yang valid (>0)", {}
+                return True, "Valid standard iperf3 JSON", {"bytes_received": sum_rx.get("bytes")}
+            else:
+                return False, "JSON standar tidak memuat blok 'end' atau 'session_complete'", {}
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt 2: JSON-Stream (one JSON object per line)
+    lines = [l.strip() for l in content.splitlines() if l.strip()]
+    if not lines:
+        return False, "Tidak ada baris JSON ditemukan", {}
+
+    parsed_lines = []
+    for idx, l in enumerate(lines, 1):
+        try:
+            parsed_lines.append(json.loads(l))
+        except Exception as ex:
+            return False, f"Baris #{idx} pada JSON-stream korup: {ex}", {}
+
+    end_data = None
+    for rec in reversed(parsed_lines):
+        if isinstance(rec, dict):
+            if rec.get("event") == "end" and isinstance(rec.get("data"), dict):
+                end_data = rec["data"]
+                break
+            elif "end" in rec and isinstance(rec.get("end"), dict):
+                end_data = rec["end"]
+                break
+
+    if end_data is None:
+        return False, "JSON-stream tidak memuat event 'end' summary yang lengkap", {}
+
+    sum_rx = (end_data.get("sum_received") or 
+              end_data.get("sum") or 
+              (end_data.get("streams", [{}])[0].get("receiver") if end_data.get("streams") else None) or
+              end_data)
+    if not isinstance(sum_rx, dict) or sum_rx.get("bytes", 0) <= 0:
+        return False, "Event 'end' pada JSON-stream tidak memuat bytes received valid", {}
+
+    return True, "Valid JSON-stream", {"bytes_received": sum_rx.get("bytes")}
+
+
 def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=True, recovery_evidence=None, config_params=None, collector_metrics=None, initial_collector_metrics=None):
     """
     Strict multi-dimensional dataset evaluator enforcing the 3 research contract statuses:
@@ -337,6 +453,9 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
     phase_rows = {}
     phase_ran_valid = {}
     phase_nwdaf_valid = {}
+    phase_max_prb = {}
+    phase_max_backlog = {}
+    phase_max_drops = {}
     csv_phase_scenarios = {}
     total_nwdaf_valid_rows = 0
     has_inf = False
@@ -400,8 +519,31 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
 
                     if prb_str not in ("", "NaN", "nan", "None", None):
                         try:
-                            if math.isfinite(float(prb_str)):
+                            p_val = float(prb_str)
+                            if math.isfinite(p_val):
                                 phase_ran_valid[row_phase] += 1
+                                if row_phase not in phase_max_prb or p_val > phase_max_prb[row_phase]:
+                                    phase_max_prb[row_phase] = p_val
+                        except ValueError:
+                            pass
+
+                    b_str = r.get("upf_backlog_bytes_embb", "")
+                    if b_str not in ("", "NaN", "nan", "None", None):
+                        try:
+                            b_val = float(b_str)
+                            if math.isfinite(b_val):
+                                if row_phase not in phase_max_backlog or b_val > phase_max_backlog[row_phase]:
+                                    phase_max_backlog[row_phase] = b_val
+                        except ValueError:
+                            pass
+
+                    d_str = r.get("upf_drops_embb", "")
+                    if d_str not in ("", "NaN", "nan", "None", None):
+                        try:
+                            d_val = float(d_str)
+                            if math.isfinite(d_val):
+                                if row_phase not in phase_max_drops or d_val > phase_max_drops[row_phase]:
+                                    phase_max_drops[row_phase] = d_val
                         except ValueError:
                             pass
 
@@ -513,7 +655,7 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                     if rec.get("http_status") == 200:
                         raw_polls_with_200 += 1
 
-                        # Strict AnLF feature payload check (TS 29.520 §5.1.6.2.37)
+                        # Strict AnLF feature payload check (3GPP TS 29.520 V17.8.0 §5.1.6.2.13 Type UeCommunication)
                         # Empty body {} or HTTP 200 without substantive analytic metrics is NOT valid training evidence
                         body = rec.get("response_body")
                         has_payload = False
@@ -593,7 +735,31 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                 if cov < min_ran_coverage:
                     training_reasons.append(f"Fase terencana '{ep}' cakupan telemetri RAN di bawah ambang batas ({cov*100:.1f}% < {min_ran_coverage*100:.1f}%)")
 
-        # Strict NWDAF eligibility (TS 29.520 §5.1.6.2.37)
+        # Strict physical fault realization verification per planned phase
+        verify_fault_signatures = config_params.get("verify_fault_signatures", False)
+        if verify_fault_signatures:
+            for ep in expected_phases:
+                exp_scen = expected_phase_scenarios.get(ep, "")
+                p_max_prb = phase_max_prb.get(ep, 0.0)
+                p_max_backlog = phase_max_backlog.get(ep, 0.0)
+                p_max_drops = phase_max_drops.get(ep, 0.0)
+
+                if "S3" in exp_scen:
+                    # S3 is RAN Overload: peak PRB must show radio saturation (>= 65.0%)
+                    if p_max_prb < 65.0:
+                        training_reasons.append(f"Fase '{ep}' (S3 RAN Overload) tidak membuktikan signature saturasi radio (peak PRB {p_max_prb:.1f}% < 65.0%)")
+                elif "S6" in exp_scen:
+                    # S6 is Core Bottleneck (TBF queue limit): backlog or drops must be non-zero
+                    if p_max_backlog <= 0.0 and p_max_drops <= 0.0:
+                        training_reasons.append(f"Fase '{ep}' (S6 Core Bottleneck) tidak membuktikan antrean atau paket drop UPF (peak backlog={p_max_backlog:.0f}B, drops={p_max_drops})")
+                elif "S1" in exp_scen:
+                    # S1 is Baseline Normal: PRB must be nominal (<= 55.0%) and backlog == 0
+                    if p_max_backlog > 0.0:
+                        training_reasons.append(f"Fase '{ep}' (S1 Baseline) terdeteksi memiliki backlog antrean UPF ({p_max_backlog:.0f}B > 0B)")
+                    if p_max_prb > 60.0:
+                        training_reasons.append(f"Fase '{ep}' (S1 Baseline) terdeteksi kelebihan beban radio (peak PRB {p_max_prb:.1f}% > 60.0%)")
+
+        # Strict NWDAF eligibility (3GPP TS 29.520 V17.8.0 §5.1.6.2.13 Type UeCommunication)
         if raw_polls_with_200 == 0:
             training_reasons.append("Tidak ada observasi sumber NWDAF yang berhasil terekam (HTTP 200 tidak ditemukan di arsip raw poll)")
         if raw_polls_with_valid_payload == 0:
@@ -601,17 +767,28 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
         if total_nwdaf_valid_rows == 0:
             training_reasons.append("Seluruh data observasi volume/durasi NWDAF bernilai NaN pada CSV telemetri (kelayakan NWDAF tidak terpenuhi)")
 
-        # Strict Receiver verification: if any receiver export exists in run_dir, verify completeness
+        # Strict Receiver verification (standard JSON, JSON-stream, or summary JSON)
+        require_receiver = config_params.get("require_receiver", False)
+        required_receivers = config_params.get("required_receivers", [])
+        if require_receiver and not required_receivers:
+            if any(s in planned_scenarios for s in ["S1", "S3", "S6"]):
+                required_receivers = ["s1_embb"]
+
+        found_receiver_sessions = set()
         receiver_files = [f for f in os.listdir(run_dir) if f.startswith("receiver_") and f.endswith(".json")]
         for rf in receiver_files:
             rf_path = os.path.join(run_dir, rf)
-            try:
-                with open(rf_path, "r", encoding="utf-8") as f:
-                    rc_json = json.load(f)
-                    if "end" not in rc_json:
-                        training_reasons.append(f"Berkas arsip receiver '{rf}' tidak lengkap (tidak memuat blok 'end' summary)")
-            except Exception as e:
-                training_reasons.append(f"Berkas arsip receiver '{rf}' korup atau gagal diparse: {e}")
+            is_val, val_msg, meta = validate_receiver_archive(rf_path)
+            if not is_val:
+                training_reasons.append(f"Berkas arsip receiver '{rf}' tidak valid: {val_msg}")
+            else:
+                sess = rf.replace("receiver_", "").replace("_summary.json", "").replace(".json", "")
+                found_receiver_sessions.add(sess)
+
+        if require_receiver:
+            for req_sess in required_receivers:
+                if req_sess not in found_receiver_sessions:
+                    training_reasons.append(f"Arsip receiver wajib untuk session '{req_sess}' (receiver_{req_sess}.json / summary) tidak ditemukan di VM-6")
 
     training_eligible = (data_quality_pass and len(training_reasons) == 0)
 
@@ -643,7 +820,10 @@ def main():
     parser.add_argument("--unattended", action="store_true", help="Run automatically on timers and live telemetric verification")
     parser.add_argument("--recovery-timeout", type=int, default=30, help="Timeout in seconds for recovery stabilization (default: 30s)")
     parser.add_argument("--recovery-stability-sec", type=int, default=3, help="Required continuous healthy samples for recovery (default: 3s)")
-    parser.add_argument("--min-ran-coverage", type=float, default=0.70, help="Minimum valid RAN coverage per phase (default: 0.70)")
+    parser.add_argument("--require-receiver", dest="require_receiver", action="store_true", default=True, help="Require valid receiver archive for training eligibility (default: True)")
+    parser.add_argument("--no-require-receiver", dest="require_receiver", action="store_false", help="Bypass receiver archive requirement")
+    parser.add_argument("--verify-fault-signatures", dest="verify_fault_signatures", action="store_true", default=True, help="Verify that PRB and UPF queue reflect actual fault conditions (default: True)")
+    parser.add_argument("--no-verify-fault-signatures", dest="verify_fault_signatures", action="store_false", help="Bypass physical fault signature verification")
     args = parser.parse_args()
 
     run_ts = time.strftime('%Y%m%d_%H%M%S')
@@ -671,7 +851,9 @@ def main():
         "recovery_target_prb_pct": 40.0,
         "min_ran_coverage": args.min_ran_coverage,
         "min_total_rows": 30,
-        "min_phase_rows": max(15, int(phase_dur * 0.5))
+        "min_phase_rows": max(15, int(phase_dur * 0.5)),
+        "require_receiver": args.require_receiver,
+        "verify_fault_signatures": args.verify_fault_signatures
     }
 
     print(f"\n[Pilot Experiment] Run ID: {run_id} | Durasi: {phase_dur}s | Skenario: {scenarios} | Mode: {'Unattended' if args.unattended else 'Interactive'}")
@@ -751,7 +933,8 @@ def main():
             timeout_sec=args.recovery_timeout,
             stability_sec=args.recovery_stability_sec,
             target_backlog=config_params["recovery_target_backlog_bytes"],
-            target_prb=config_params["recovery_target_prb_pct"]
+            target_prb=config_params["recovery_target_prb_pct"],
+            require_probe=True
         )
 
         if recovery_verified:
