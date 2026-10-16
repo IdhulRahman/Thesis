@@ -820,6 +820,7 @@ def main():
     parser.add_argument("--unattended", action="store_true", help="Run automatically on timers and live telemetric verification")
     parser.add_argument("--recovery-timeout", type=int, default=30, help="Timeout in seconds for recovery stabilization (default: 30s)")
     parser.add_argument("--recovery-stability-sec", type=int, default=3, help="Required continuous healthy samples for recovery (default: 3s)")
+    parser.add_argument("--min-ran-coverage", type=float, default=0.70, help="Minimum valid RAN coverage per phase (default: 0.70)")
     parser.add_argument("--require-receiver", dest="require_receiver", action="store_true", default=True, help="Require valid receiver archive for training eligibility (default: True)")
     parser.add_argument("--no-require-receiver", dest="require_receiver", action="store_false", help="Bypass receiver archive requirement")
     parser.add_argument("--verify-fault-signatures", dest="verify_fault_signatures", action="store_true", default=True, help="Verify that PRB and UPF queue reflect actual fault conditions (default: True)")
