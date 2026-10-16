@@ -2,6 +2,9 @@
 # Multi-slice traffic generator (VM-5)
 # Usage: ./trafgen.sh [start|ping|status|stop] [sec] [mbps]
 
+export LC_ALL=C
+export LC_NUMERIC=C
+
 PID_FILE="/opt/oran/ue/trafgen.pid"
 STATE_FILE="/opt/oran/ue/active_ues.txt"
 LOG_DIR="/opt/oran/ue/logs"
@@ -133,6 +136,8 @@ case "$ACTION" in
       ping_out=$(ip netns exec "$ns" ping -I oaitun_ue1 -c 4 -W 2 "$EXT_DN_IP" 2>&1 || true)
       loss=$(echo "$ping_out" | grep -oP '\d+(?=% packet loss)' || echo "100")
       rtt=$(echo "$ping_out" | grep -oP '(?<=rtt min/avg/max/mdev = )[^/]+/[^/]+' | cut -d/ -f2 || echo "0.0")
+      rtt="${rtt//,/.}"
+      loss="${loss//,/.}"
 
       printf "%-5s  %-8s  %-16s  %-12s  %-12s  %s\n" "$ue_id" "$ns" "$imsi" "$slice" "${rtt} ms" "${loss}%"
 
@@ -164,16 +169,16 @@ case "$ACTION" in
         > "$IPERF_LOG"
         > "$UE1_PING_LOG"
         > "${UE1_PING_LOG}.state"
-        nohup ip netns exec "$ns" iperf3 -c "$EXT_DN_IP" -u -b "${EMBB_RATE}M" -t "$DURATION" -i 1 --logfile "$IPERF_LOG" </dev/null >/dev/null 2>&1 &
+        nohup ip netns exec "$ns" iperf3 -c "$EXT_DN_IP" -u -b "${EMBB_RATE}M" -t "$(( DURATION + 10 ))" -i 1 --logfile "$IPERF_LOG" </dev/null >/dev/null 2>&1 &
         echo $! >> "$PID_FILE"
-        nohup ip netns exec "$ns" ping -D -O -I oaitun_ue1 -i 0.2 -c $(( DURATION * 5 )) "$EXT_DN_IP" </dev/null > "$UE1_PING_LOG" 2>&1 &
+        nohup ip netns exec "$ns" ping -D -O -I oaitun_ue1 -i 0.2 -c $(( (DURATION + 30) * 5 )) "$EXT_DN_IP" </dev/null > "$UE1_PING_LOG" 2>&1 &
         echo $! >> "$PID_FILE"
       else
         UE2_NS="$ns"
         PING_LOG="$LOG_DIR/ping_${ns}_${TIMESTAMP}.log"
         > "$PING_LOG"
         > "${PING_LOG}.state"
-        nohup ip netns exec "$ns" ping -D -O -I oaitun_ue1 -i 0.1 -c $(( DURATION * 10 )) "$EXT_DN_IP" </dev/null > "$PING_LOG" 2>&1 &
+        nohup ip netns exec "$ns" ping -D -O -I oaitun_ue1 -i 0.1 -c $(( (DURATION + 30) * 10 )) "$EXT_DN_IP" </dev/null > "$PING_LOG" 2>&1 &
         echo $! >> "$PID_FILE"
       fi
     done < "$STATE_FILE"
@@ -252,10 +257,12 @@ case "$ACTION" in
             last_rx_ts=$now_ts
             measurement_age=0
 
-            if (( $(echo "$prev_rtt > 0 && $rtt > 0" | bc -l 2>/dev/null || echo 0) )); then
-              jitter=$(echo "scale=2; sqrt(($rtt - $prev_rtt)^2)" | bc -l 2>/dev/null || echo "0.00")
+            rtt_clean="${rtt//,/.}"
+            prev_rtt_clean="${prev_rtt//,/.}"
+            if (( $(echo "$prev_rtt_clean > 0 && $rtt_clean > 0" | bc -l 2>/dev/null || echo 0) )); then
+              jitter=$(echo "scale=2; sqrt(($rtt_clean - $prev_rtt_clean)^2)" | bc -l 2>/dev/null || echo "0.00")
             fi
-            prev_rtt="$rtt"
+            prev_rtt="$rtt_clean"
           else
             rtt="NaN"
             loss_pct="100.0"
@@ -272,32 +279,37 @@ case "$ACTION" in
       fi
 
       sla="OK"
-      if [[ "$rtt" == "NaN" ]]; then
+      rtt_clean="${rtt//,/.}"
+      if [[ "$rtt_clean" == "NaN" ]]; then
         sla="NO_REPLY"
-      elif (( $(echo "$rtt > 20.0" | bc -l 2>/dev/null || echo 0) )); then
+      elif (( $(echo "$rtt_clean > 20.0" | bc -l 2>/dev/null || echo 0) )); then
         sla="VIOLATED"
       fi
 
+      ue1_rtt_json="${ue1_rtt//,/.}"
       ue1_loss_json="null"
-      [[ "$ue1_loss_pct" != "NaN" ]] && ue1_loss_json="$ue1_loss_pct"
+      [[ "$ue1_loss_pct" != "NaN" ]] && ue1_loss_json="${ue1_loss_pct//,/.}"
 
+      rtt_json="${rtt//,/.}"
       ue2_loss_json="null"
-      [[ "$loss_pct" != "NaN" ]] && ue2_loss_json="$loss_pct"
+      [[ "$loss_pct" != "NaN" ]] && ue2_loss_json="${loss_pct//,/.}"
+
+      tput_json="${tput//,/.}"
 
       if [[ "$ue1_rtt" != "NaN" && -n "$ue1_rtt" ]]; then
         curl -s -m 1 -X POST -H "Content-Type: application/json" \
-          -d "{\"slice\": 1, \"throughput_mbps\": $tput, \"rtt_ms\": $ue1_rtt, \"packet_loss_pct\": $ue1_loss_json, \"last_seq\": $last_ue1_rx_seq, \"reply_age_sec\": $ue1_measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
-        disp_ue1_rtt="${ue1_rtt} ms"
+          -d "{\"slice\": 1, \"throughput_mbps\": $tput_json, \"rtt_ms\": $ue1_rtt_json, \"packet_loss_pct\": $ue1_loss_json, \"last_seq\": $last_ue1_rx_seq, \"reply_age_sec\": $ue1_measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
+        disp_ue1_rtt="${ue1_rtt_json} ms"
       else
         curl -s -m 1 -X POST -H "Content-Type: application/json" \
-          -d "{\"slice\": 1, \"throughput_mbps\": $tput, \"rtt_ms\": null, \"packet_loss_pct\": $ue1_loss_json, \"last_seq\": $last_ue1_rx_seq, \"reply_age_sec\": $ue1_measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
+          -d "{\"slice\": 1, \"throughput_mbps\": $tput_json, \"rtt_ms\": null, \"packet_loss_pct\": $ue1_loss_json, \"last_seq\": $last_ue1_rx_seq, \"reply_age_sec\": $ue1_measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
         disp_ue1_rtt="-"
       fi
 
       if [[ "$rtt" != "NaN" ]]; then
         curl -s -m 1 -X POST -H "Content-Type: application/json" \
-          -d "{\"slice\": 2, \"rtt_ms\": $rtt, \"packet_loss_pct\": $ue2_loss_json, \"last_seq\": $last_rx_seq, \"reply_age_sec\": $measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
-        disp_rtt="${rtt} ms"
+          -d "{\"slice\": 2, \"rtt_ms\": $rtt_json, \"packet_loss_pct\": $ue2_loss_json, \"last_seq\": $last_rx_seq, \"reply_age_sec\": $measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
+        disp_rtt="${rtt_json} ms"
       else
         curl -s -m 1 -X POST -H "Content-Type: application/json" \
           -d "{\"slice\": 2, \"rtt_ms\": null, \"packet_loss_pct\": $ue2_loss_json, \"last_seq\": $last_rx_seq, \"reply_age_sec\": $measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
@@ -305,13 +317,13 @@ case "$ACTION" in
       fi
 
       disp_ue1_loss="-"
-      [[ "$ue1_loss_pct" != "NaN" ]] && disp_ue1_loss="${ue1_loss_pct}%"
+      [[ "$ue1_loss_pct" != "NaN" ]] && disp_ue1_loss="${ue1_loss_pct//,/.}%"
 
       disp_ue2_loss="-"
-      [[ "$loss_pct" != "NaN" ]] && disp_ue2_loss="${loss_pct}%"
+      [[ "$loss_pct" != "NaN" ]] && disp_ue2_loss="${loss_pct//,/.}%"
 
       printf "%3ds  %-10s  %-9s  %-7s  %-9s  %-8s  %-6s  %s\n" \
-        "$sec" "${tput} Mbps" "$disp_ue1_rtt" "$disp_ue1_loss" "$disp_rtt" "${jitter} ms" "$disp_ue2_loss" "$sla"
+        "$sec" "${tput_json} Mbps" "$disp_ue1_rtt" "$disp_ue1_loss" "$disp_rtt" "${jitter} ms" "$disp_ue2_loss" "$sla"
     done
 
     echo "-----------------------------------------------------------------------"
@@ -324,12 +336,15 @@ case "$ACTION" in
     [[ -z "$final_tput" ]] && final_tput="$EMBB_RATE"
 
     ping_stat=""
+    ping_loss=""
     if [[ -n "$PING_LOG" && -f "$PING_LOG" ]]; then
       ping_stat=$(tail -n 2 "$PING_LOG" 2>/dev/null | grep -oP '(?<=rtt min/avg/max/mdev = )[^ ]+' || echo "N/A")
+      ping_loss=$(tail -n 3 "$PING_LOG" 2>/dev/null | grep -oP '\d+(\.\d+)?(?=%\s+(packet\s+)?loss)' || echo "$loss_pct")
     fi
     [[ -z "$ping_stat" ]] && ping_stat="N/A"
+    [[ -z "$ping_loss" ]] && ping_loss="$loss_pct"
 
-    echo "Hasil: eMBB=${final_tput} Mbps | URLLC RTT=${ping_stat} ms | Loss=${loss_pct}%"
+    echo "Hasil: eMBB=${final_tput} Mbps | URLLC RTT=${ping_stat} ms | Loss=${ping_loss}%"
     cleanup
     ;;
 
