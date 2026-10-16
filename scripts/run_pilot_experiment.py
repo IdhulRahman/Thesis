@@ -845,16 +845,16 @@ def main():
         "phase_duration_sec": phase_dur,
         "warmup_duration_sec": warmup_dur,
         "planned_scenarios": scenarios,
-        "unattended_mode": args.unattended,
-        "recovery_timeout_sec": args.recovery_timeout,
-        "recovery_stability_sec": args.recovery_stability_sec,
+        "unattended_mode": getattr(args, "unattended", False),
+        "recovery_timeout_sec": getattr(args, "recovery_timeout", 30),
+        "recovery_stability_sec": getattr(args, "recovery_stability_sec", 3),
         "recovery_target_backlog_bytes": 0.0,
         "recovery_target_prb_pct": 40.0,
-        "min_ran_coverage": args.min_ran_coverage,
+        "min_ran_coverage": getattr(args, "min_ran_coverage", 0.70),
         "min_total_rows": 30,
         "min_phase_rows": max(15, int(phase_dur * 0.5)),
-        "require_receiver": args.require_receiver,
-        "verify_fault_signatures": args.verify_fault_signatures
+        "require_receiver": getattr(args, "require_receiver", True),
+        "verify_fault_signatures": getattr(args, "verify_fault_signatures", True)
     }
 
     print(f"\n[Pilot Experiment] Run ID: {run_id} | Durasi: {phase_dur}s | Skenario: {scenarios} | Mode: {'Unattended' if args.unattended else 'Interactive'}")
