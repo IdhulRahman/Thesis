@@ -62,6 +62,54 @@ SCENARIO_ACTIONS = {
     "S10_B": "Pelepasan Gangguan Core (VM-3: hapus rate-limit TBF, amati buffer UPF drain ke 0 B)."
 }
 
+# Canonical Scenario Identifier Mappings (shared with log_event.py)
+SCENARIO_CANONICAL_MAP = {
+    "S1": "S1_NORMAL_LIGHT",
+    "S2": "S2_NORMAL_HIGH",
+    "S3": "S3_RAN_OVERLOAD",
+    "S6": "S6_CORE_QUEUE_TBF",
+    "S9": "S9_JOINT_OVERLOAD",
+    "S10_A": "S10_A_RELEASE_RAN",
+    "S10_B": "S10_B_RELEASE_CORE",
+    "RECOVERY": "RECOVERY_TRANSITION",
+    "RECOVERY_TIMEOUT": "RECOVERY_FAILED",
+    "CLEAR": "S1_NORMAL_LIGHT",
+    "ABORT": "RUN_ABORTED"
+}
+
+REVERSE_CANONICAL_MAP = {v: k for k, v in SCENARIO_CANONICAL_MAP.items()}
+
+
+def is_scenario_matching(actual_scen, planned_scen):
+    """
+    Checks if an observed scenario identifier matches the planned scenario.
+    Accepts both short keys ('S1') and canonical long IDs ('S1_NORMAL_LIGHT') bidirectionally.
+    """
+    if not actual_scen or not planned_scen:
+        return False
+    act = str(actual_scen).strip()
+    pln = str(planned_scen).strip()
+    if act == pln:
+        return True
+
+    # 1. Canonical expansion comparison
+    pln_canonical = SCENARIO_CANONICAL_MAP.get(pln, pln)
+    act_canonical = SCENARIO_CANONICAL_MAP.get(act, act)
+    if act == pln_canonical or act_canonical == pln or act_canonical == pln_canonical:
+        return True
+
+    # 2. Short key comparison
+    pln_short = REVERSE_CANONICAL_MAP.get(pln, pln)
+    act_short = REVERSE_CANONICAL_MAP.get(act, act)
+    if act == pln_short or act_short == pln or act_short == pln_short:
+        return True
+
+    # 3. Prefix matching
+    if act.startswith(f"{pln}_") or pln.startswith(f"{act}_"):
+        return True
+
+    return False
+
 PROM_LINE_RE = re.compile(r'^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+([^\s]+)(?:\s+\d+)?$')
 LABEL_RE = re.compile(r'([a-zA-Z_:][a-zA-Z0-9_:]*)\s*=\s*"([^"]*)"')
 
@@ -361,7 +409,7 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                 if ep in csv_phase_scenarios:
                     exp_scen = expected_phase_scenarios[ep]
                     for actual_scen in csv_phase_scenarios[ep]:
-                        if actual_scen != "UNINITIALIZED" and not actual_scen.startswith(exp_scen):
+                        if actual_scen != "UNINITIALIZED" and not is_scenario_matching(actual_scen, exp_scen):
                             data_quality_reasons.append(f"Inkonsistensi skenario pada CSV untuk fase '{ep}': tercatat '{actual_scen}' yang tidak cocok dengan skenario terencana '{exp_scen}'")
 
         except Exception as e:
@@ -402,7 +450,7 @@ def evaluate_run_dataset(run_dir, run_id, planned_scenarios, recovery_verified=T
                         event_phases[ev_phase] = ev_scen
                     if ev_phase in expected_phase_scenarios:
                         exp_scen = expected_phase_scenarios[ev_phase]
-                        if ev_scen != exp_scen:
+                        if not is_scenario_matching(ev_scen, exp_scen):
                             data_quality_reasons.append(f"Event fase '{ev_phase}' memiliki scenario_id '{ev_scen}' yang tidak cocok dengan skenario terencana '{exp_scen}'")
 
                 if events_count == 0:

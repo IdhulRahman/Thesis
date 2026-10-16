@@ -189,6 +189,147 @@ class TestResearchContractQualityGates(unittest.TestCase):
         self.assertTrue(dq_pass)
         self.assertTrue(tr_elig, f"Constant NWDAF with source reports should be training eligible: {tr_reasons}")
 
+    def test_pos_03_real_log_event_writer_canonical_scenario(self):
+        """POS-03: Real log_event.py writer producing canonical IDs (e.g. S1_NORMAL_LIGHT) must be accepted by validator."""
+        from run_pilot_experiment import is_scenario_matching
+
+        # Unit verification of scenario matcher
+        self.assertTrue(is_scenario_matching("S1_NORMAL_LIGHT", "S1"))
+        self.assertTrue(is_scenario_matching("S1", "S1_NORMAL_LIGHT"))
+        self.assertTrue(is_scenario_matching("S3_RAN_OVERLOAD", "S3"))
+        self.assertTrue(is_scenario_matching("S6_CORE_QUEUE_TBF", "S6"))
+        self.assertFalse(is_scenario_matching("S1_NORMAL_LIGHT", "S3"))
+        self.assertFalse(is_scenario_matching("S6_CORE_QUEUE_TBF", "S1"))
+
+        # Integration test using authentic scripts/log_event.py
+        log_event_script = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts", "log_event.py"))
+        env = os.environ.copy()
+        env["MONITORING_DATA_DIR"] = self.run_dir
+
+        active_run_file = os.path.join(self.run_dir, "active_run_id.txt")
+        with open(active_run_file, "w") as f:
+            f.write(self.run_id + "\n")
+
+        import subprocess
+        # Run real log_event.py writer for phase 1 and phase 2
+        res1 = subprocess.run([sys.executable, log_event_script, "S1", "Normal baseline", "--phase-id", "phase_1_S1"], env=env, capture_output=True, text=True)
+        self.assertEqual(res1.returncode, 0, f"log_event failed: {res1.stderr}")
+
+        res2 = subprocess.run([sys.executable, log_event_script, "S3", "RAN overload fault", "--phase-id", "phase_2_S3"], env=env, capture_output=True, text=True)
+        self.assertEqual(res2.returncode, 0, f"log_event failed: {res2.stderr}")
+
+        # Verify real log_event.py wrote canonical scenario IDs
+        events_path = os.path.join(self.run_dir, f"experiment_events_{self.run_id}.csv")
+        self.assertTrue(os.path.exists(events_path))
+        with open(events_path, "r", encoding="utf-8") as ef:
+            rows = list(csv.DictReader(ef))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["scenario_id"], "S1_NORMAL_LIGHT")
+        self.assertEqual(rows[1]["scenario_id"], "S3_RAN_OVERLOAD")
+
+        # Create matching telemetry and JSONL
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        telemetry_rows = []
+        for i in range(35):
+            phase, scen = ("phase_1_S1", "S1_NORMAL_LIGHT") if i < 18 else ("phase_2_S3", "S3_RAN_OVERLOAD")
+            telemetry_rows.append({
+                "timestamp_utc": f"2026-10-16T10:00:{i:02d}Z",
+                "elapsed_sec": f"{i}.000",
+                "run_id": self.run_id,
+                "event_phase_id": phase,
+                "event_scenario": scen,
+                "ran_prb_cell1": 35.0,
+                "nwdaf_comm_ul_bytes": 100000.0 + i * 500,
+                "upf_backlog_bytes_embb": 0.0
+            })
+        create_fixture_telemetry(csv_path, self.run_id, telemetry_rows)
+
+        jsonl_path = os.path.join(self.run_dir, "nwdaf_raw_poll_responses.jsonl")
+        create_fixture_jsonl(jsonl_path, self.run_id, [
+            {"poll_timestamp_utc": "2026-10-16T10:00:05Z", "http_status": 200, "response_body": {"ueComms": [{"commDur": 10}]}}
+        ])
+
+        dq_pass, tr_elig, summary, dq_reasons, tr_reasons = evaluate_run_dataset(
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            planned_scenarios=["S1", "S3"],
+            recovery_verified=True,
+            config_params=self.config_params
+        )
+
+        self.assertTrue(dq_pass, f"Authentic log_event canonical IDs must pass data_quality_pass: {dq_reasons}")
+        self.assertTrue(tr_elig, f"Authentic log_event canonical IDs must pass training_eligible: {tr_reasons}")
+        self.assertEqual(len(dq_reasons), 0)
+
+    def test_pos_04_receiver_parser_json_stream_and_strict_validation(self):
+        """POS-04: Receiver parser must correctly extract goodput/loss from ESnet json-stream and exit nonzero on errors."""
+        import subprocess
+        receiver_script = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts", "receiver_iperf.sh"))
+        with open(receiver_script, "r", encoding="utf-8") as f:
+            sh_content = f.read()
+        py_parser_code = sh_content.split("python3 - \"$TARGET_FILE\" \"$SUMMARY_FILE\" << 'EOF'")[1].split("EOF")[0]
+
+        cases = [
+            # 1. Standard single JSON
+            ("standard", json.dumps({"end": {"sum_received": {"bytes": 12500000, "bits_per_second": 10000000.0, "lost_packets": 10, "packets": 100, "lost_percent": 10.0, "jitter_ms": 1.2}}}), 0, 10.0, 10.0),
+            # 2. ESnet JSON-stream
+            ("stream", '{"event": "start", "data": {}}\n{"event": "end", "data": {"sum_received": {"bytes": 12500000, "bits_per_second": 10000000.0, "lost_packets": 10, "packets": 100, "lost_percent": 10.0, "jitter_ms": 1.2}}}', 0, 10.0, 10.0),
+            # 3. Corrupt JSON stream (must fail, not silent 0)
+            ("corrupt", '{"event": "start"}\n{"event": "broken json line', 1, None, None),
+            # 4. Incomplete JSON without mandatory bytes (must fail)
+            ("incomplete", json.dumps({"end": {"sum_received": {"jitter_ms": 1.2}}}), 1, None, None),
+            # 5. Empty JSON (must fail)
+            ("empty", "   ", 1, None, None)
+        ]
+
+        for label, raw_input, exp_exit, exp_mbps, exp_loss in cases:
+            tf = os.path.join(self.test_dir, f"test_{label}_input.json")
+            sf = os.path.join(self.test_dir, f"test_{label}_summary.json")
+            with open(tf, "w", encoding="utf-8") as f:
+                f.write(raw_input)
+
+            proc = subprocess.run([sys.executable, "-c", py_parser_code, tf, sf], capture_output=True, text=True)
+            self.assertEqual(proc.returncode, exp_exit, f"Case {label} unexpected exit code {proc.returncode} (stderr: {proc.stderr})")
+
+            if exp_exit == 0:
+                with open(sf, "r", encoding="utf-8") as f:
+                    res = json.load(f)
+                self.assertEqual(res["goodput_mbps"], exp_mbps)
+                self.assertEqual(res["packet_loss_pct"], exp_loss)
+
+    def test_pos_05_analyze_dataset_both_slices_output(self):
+        """POS-05: analyze_dataset.py must report both Slice 1 (eMBB) and Slice 2 (URLLC) explicitly."""
+        import subprocess
+        analyze_script = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts", "analyze_dataset.py"))
+
+        csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")
+        rows = []
+        for i in range(20):
+            rows.append({
+                "timestamp_utc": f"2026-10-16T10:00:{i:02d}Z",
+                "elapsed_sec": f"{i}.000",
+                "run_id": self.run_id,
+                "event_phase_id": "phase_1_S1",
+                "event_scenario": "S1_NORMAL_LIGHT",
+                "e2e_slice1_tput_mbps": 10.5,
+                "e2e_slice1_rtt_ms": 12.4,
+                "e2e_slice1_loss_pct": 0.0,
+                "e2e_slice2_rtt_ms": 8.5,
+                "e2e_slice2_loss_pct": 0.0,
+                "ran_prb_cell1": 35.0,
+                "upf_backlog_bytes_embb": 0.0
+            })
+        create_fixture_telemetry(csv_path, self.run_id, rows)
+
+        res = subprocess.run([sys.executable, analyze_script, csv_path], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"analyze_dataset failed: {res.stderr}")
+        self.assertIn("SLICE 1: eMBB", res.stdout)
+        self.assertIn("SLICE 2: URLLC", res.stdout)
+        self.assertIn("TELEMETRI INFRASTRUKTUR", res.stdout)
+        self.assertIn("10.50 M", res.stdout)
+        self.assertIn("12.40 ms", res.stdout)
+        self.assertIn("8.50 ms", res.stdout)
+
     def test_neg_01_single_valid_row_coverage_failure(self):
         """NEG-01: 30 rows but only 1 row valid float -> passes data_quality_pass (syntax ok), fails training_eligible."""
         csv_path = os.path.join(self.run_dir, f"telemetry_{self.run_id}.csv")

@@ -101,14 +101,19 @@ case "$ACTION" in
     done < "$STATE_FILE"
 
     echo "[TrafGen] Durasi: ${DURATION}s | Target: eMBB ${EMBB_RATE}M, URLLC 100ms | TSDB: 10.102.0.67"
-    printf "%-5s | %-13s | %-11s | %-12s | %-11s | %-7s | %s\n" "Sec" "eMBB Tput" "eMBB RTT" "URLLC RTT" "URLLC Jitter" "Loss %" "SLA (<20ms)"
-    echo "------+---------------+-------------+--------------+-------------+---------+-------------"
+    printf "%-5s | %-12s | %-11s | %-10s | %-12s | %-11s | %-7s | %s\n" \
+      "Sec" "eMBB Tput" "eMBB RTT" "eMBB Loss" "URLLC RTT" "URLLC Jitt" "Loss %" "SLA (<20ms)"
+    echo "------+--------------+-------------+------------+--------------+-------------+---------+-------------"
 
     prev_rtt="0.0"
     prev_eval_seq=0
     last_rx_seq=0
+    prev_ue1_rtt="0.0"
+    prev_ue1_eval_seq=0
+    last_ue1_rx_seq=0
     T_START=$(date +%s)
     last_rx_ts=$T_START
+    last_ue1_rx_ts=$T_START
 
     for ((sec=1; sec<=DURATION; sec++)); do
       sleep 1
@@ -120,17 +125,69 @@ case "$ACTION" in
       fi
 
       ue1_rtt="NaN"
-      ue1_loss_pct="0.0"
+      ue1_loss_pct="NaN"
+      ue1_measurement_age=0
+
       if [[ -n "$UE1_PING_LOG" && -f "$UE1_PING_LOG" ]]; then
-        ue1_last_reply=$(tail -n 10 "$UE1_PING_LOG" 2>/dev/null | grep -oP '(?<=time=)[0-9.]+' | tail -n 1 || true)
-        if [[ -n "$ue1_last_reply" ]]; then
-          ue1_rtt="$ue1_last_reply"
+        now_ts=$(date +%s)
+        ue1_elapsed=$(( now_ts - T_START ))
+        (( ue1_elapsed < 1 )) && ue1_elapsed=sec
+        # Since UE-1 runs ping with -i 0.2 (5 probes/sec), target seq = elapsed * 5 - 1
+        target_ue1_seq=$(( ue1_elapsed * 5 - 1 ))
+        (( target_ue1_seq < 1 )) && target_ue1_seq=1
+        expected_ue1_probes=$(( target_ue1_seq - prev_ue1_eval_seq ))
+
+        rx_ue1_probes=0
+        window_ue1_rtt=""
+        window_ue1_max_seq=0
+
+        while read -r seq rtt_val; do
+          if [[ -n "$seq" && "$seq" =~ ^[0-9]+$ ]]; then
+            if (( seq > prev_ue1_eval_seq && seq <= target_ue1_seq )); then
+              rx_ue1_probes=$(( rx_ue1_probes + 1 ))
+              if (( seq > window_ue1_max_seq )); then
+                window_ue1_max_seq=$seq
+                window_ue1_rtt="$rtt_val"
+              fi
+            fi
+          fi
+        done < <(tail -n 60 "$UE1_PING_LOG" 2>/dev/null | awk '/bytes from.*time=/ {
+          s=0; r=0;
+          for(i=1;i<=NF;i++) {
+            if($i ~ /^icmp_seq=/) { split($i, a, "="); s=a[2]+0 }
+            if($i ~ /^time=/) { split($i, b, "="); r=b[2] }
+          }
+          if(s > 0) print s, r
+        }' | sort -k1,1n -u)
+
+        if (( rx_ue1_probes > 0 )); then
+          ue1_rtt="$window_ue1_rtt"
+          last_ue1_rx_seq=$window_ue1_max_seq
+          last_ue1_rx_ts=$now_ts
+          ue1_measurement_age=0
+
+          if (( expected_ue1_probes > 0 )); then
+            ue1_loss_pct=$(echo "scale=1; ($expected_ue1_probes - $rx_ue1_probes) * 100.0 / $expected_ue1_probes" | bc -l 2>/dev/null || echo "0.0")
+            if (( $(echo "$ue1_loss_pct < 0" | bc -l 2>/dev/null || echo 0) )); then
+              ue1_loss_pct="0.0"
+            fi
+          else
+            ue1_loss_pct="0.0"
+          fi
+          prev_ue1_rtt="$ue1_rtt"
+        else
+          # No new reply in this window: mark RTT as NaN and record elapsed age
+          ue1_rtt="NaN"
+          ue1_measurement_age=$(( now_ts - last_ue1_rx_ts ))
+          ue1_loss_pct="100.0"
+          prev_ue1_rtt="0.0"
         fi
+        prev_ue1_eval_seq=$target_ue1_seq
       fi
 
       rtt="NaN"
       jitter="0.00"
-      loss_pct="100.0"
+      loss_pct="NaN"
       measurement_age=0
 
       if [[ -n "$PING_LOG" && -f "$PING_LOG" ]]; then
@@ -204,29 +261,40 @@ case "$ACTION" in
         sla="VIOLATED"
       fi
 
+      ue1_loss_json="null"
+      [[ "$ue1_loss_pct" != "NaN" ]] && ue1_loss_json="$ue1_loss_pct"
+
+      ue2_loss_json="null"
+      [[ "$loss_pct" != "NaN" ]] && ue2_loss_json="$loss_pct"
+
       if [[ "$ue1_rtt" != "NaN" && -n "$ue1_rtt" ]]; then
         curl -s -m 1 -X POST -H "Content-Type: application/json" \
-          -d "{\"slice\": 1, \"throughput_mbps\": $tput, \"rtt_ms\": $ue1_rtt, \"packet_loss_pct\": $ue1_loss_pct}" "$MONITOR_URL" >/dev/null 2>&1 &
+          -d "{\"slice\": 1, \"throughput_mbps\": $tput, \"rtt_ms\": $ue1_rtt, \"packet_loss_pct\": $ue1_loss_json, \"last_seq\": $last_ue1_rx_seq, \"reply_age_sec\": $ue1_measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
+        disp_ue1_rtt="${ue1_rtt} ms"
       else
         curl -s -m 1 -X POST -H "Content-Type: application/json" \
-          -d "{\"slice\": 1, \"throughput_mbps\": $tput, \"rtt_ms\": null, \"packet_loss_pct\": null}" "$MONITOR_URL" >/dev/null 2>&1 &
+          -d "{\"slice\": 1, \"throughput_mbps\": $tput, \"rtt_ms\": null, \"packet_loss_pct\": $ue1_loss_json, \"last_seq\": $last_ue1_rx_seq, \"reply_age_sec\": $ue1_measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
+        disp_ue1_rtt="NO_REPLY"
       fi
 
       if [[ "$rtt" != "NaN" ]]; then
         curl -s -m 1 -X POST -H "Content-Type: application/json" \
-          -d "{\"slice\": 2, \"rtt_ms\": $rtt, \"packet_loss_pct\": $loss_pct, \"last_seq\": $last_rx_seq, \"reply_age_sec\": $measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
+          -d "{\"slice\": 2, \"rtt_ms\": $rtt, \"packet_loss_pct\": $ue2_loss_json, \"last_seq\": $last_rx_seq, \"reply_age_sec\": $measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
         disp_rtt="${rtt} ms"
       else
         curl -s -m 1 -X POST -H "Content-Type: application/json" \
-          -d "{\"slice\": 2, \"rtt_ms\": null, \"packet_loss_pct\": $loss_pct, \"last_seq\": $last_rx_seq, \"reply_age_sec\": $measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
+          -d "{\"slice\": 2, \"rtt_ms\": null, \"packet_loss_pct\": $ue2_loss_json, \"last_seq\": $last_rx_seq, \"reply_age_sec\": $measurement_age}" "$MONITOR_URL" >/dev/null 2>&1 &
         disp_rtt="NO_NEW_REPLY"
       fi
 
-      disp_ue1_rtt="${ue1_rtt} ms"
-      [[ "$ue1_rtt" == "NaN" ]] && disp_ue1_rtt="N/A"
+      disp_ue1_loss="N/A"
+      [[ "$ue1_loss_pct" != "NaN" ]] && disp_ue1_loss="${ue1_loss_pct}%"
 
-      printf "%4ds | %-13s | %-11s | %-12s | %-11s | %-7s | %s\n" \
-        "$sec" "${tput} Mbps" "$disp_ue1_rtt" "$disp_rtt" "${jitter} ms" "${loss_pct}%" "$sla"
+      disp_ue2_loss="N/A"
+      [[ "$loss_pct" != "NaN" ]] && disp_ue2_loss="${loss_pct}%"
+
+      printf "%4ds | %-12s | %-11s | %-10s | %-12s | %-11s | %-7s | %s\n" \
+        "$sec" "${tput} Mbps" "$disp_ue1_rtt" "$disp_ue1_loss" "$disp_rtt" "${jitter} ms" "$disp_ue2_loss" "$sla"
     done
 
     echo "------+-------------------+-----------------+------------+--------+-------------"

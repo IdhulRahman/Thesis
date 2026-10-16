@@ -84,13 +84,21 @@ case "$ACTION" in
     mkdir -p "$HOST_EXPORT_DIR"
 
     echo "[*] Checking and copying receiver JSON log from $CONTAINER:$LOG_FILE"
-    if sudo docker exec "$CONTAINER" test -s "$LOG_FILE"; then
-      sudo docker cp "${CONTAINER}:${LOG_FILE}" "$TARGET_FILE"
-      cp "$TARGET_FILE" "${HOST_EXPORT_DIR}/receiver_goodput.json" 2>/dev/null || true
+    if ! sudo docker exec "$CONTAINER" test -s "$LOG_FILE"; then
+      echo "[ERROR] Log file $LOG_FILE inside $CONTAINER is missing or empty. Ensure client traffic has completed." >&2
+      exit 1
+    fi
 
-      if [[ -s "$TARGET_FILE" ]]; then
-        # Parse output handling both --json-stream and standard --json
-        python3 - "$TARGET_FILE" "$SUMMARY_FILE" << 'EOF'
+    sudo docker cp "${CONTAINER}:${LOG_FILE}" "$TARGET_FILE"
+    cp "$TARGET_FILE" "${HOST_EXPORT_DIR}/receiver_goodput.json" 2>/dev/null || true
+
+    if [[ ! -s "$TARGET_FILE" ]]; then
+      echo "[ERROR] Target export file $TARGET_FILE is empty on host." >&2
+      exit 1
+    fi
+
+    # Parse output handling both ESnet --json-stream and standard --json with strict error enforcement
+    python3 - "$TARGET_FILE" "$SUMMARY_FILE" << 'EOF'
 import json, sys
 
 path = sys.argv[1]
@@ -100,41 +108,79 @@ try:
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         content = f.read().strip()
     if not content:
-        print("[ERROR] Receiver file is empty", file=sys.stderr)
+        print("[ERROR] Receiver export file is empty", file=sys.stderr)
         sys.exit(1)
 
     is_stream = False
-    end_data = {}
+    end_data = None
+
+    # 1. Try parsing as single standard JSON
     try:
         data = json.loads(content)
-        end_data = data.get("end", {})
+        if isinstance(data, dict):
+            if "end" in data:
+                end_data = data["end"]
+            elif data.get("event") == "end" and "data" in data:
+                end_data = data["data"]
     except json.JSONDecodeError:
+        pass
+
+    # 2. If not single standard JSON, parse as JSON-Stream (one JSON object per line)
+    if end_data is None:
         lines = [l.strip() for l in content.splitlines() if l.strip()]
+        if not lines:
+            print("[ERROR] No JSON lines found in receiver log", file=sys.stderr)
+            sys.exit(1)
         parsed_lines = []
-        for l in lines:
+        for idx, l in enumerate(lines, 1):
             try:
                 parsed_lines.append(json.loads(l))
-            except Exception:
-                pass
+            except Exception as ex:
+                print(f"[ERROR] Corrupt JSON line #{idx} in stream: {ex}", file=sys.stderr)
+                sys.exit(1)
         is_stream = True
-        for rec in reversed(parsed_lines):
-            if "end" in rec:
-                end_data = rec["end"]
-                break
-            elif "sum" in rec:
-                end_data = {"sum": rec["sum"]}
-                break
-        if not end_data and parsed_lines:
-            end_data = parsed_lines[-1]
 
-    sum_rx = end_data.get("sum_received") or end_data.get("sum") or {}
-    bytes_rx = sum_rx.get("bytes", 0)
-    bps_rx = sum_rx.get("bits_per_second", 0.0)
-    mbps_rx = round(bps_rx / 1e6, 3)
-    lost_pkts = sum_rx.get("lost_packets", 0)
-    total_pkts = sum_rx.get("packets", 0)
-    loss_pct = round(sum_rx.get("lost_percent", 0.0), 2)
-    jitter_ms = round(sum_rx.get("jitter_ms", 0.0), 3)
+        for rec in reversed(parsed_lines):
+            if isinstance(rec, dict):
+                if rec.get("event") == "end" and "data" in rec:
+                    end_data = rec["data"]
+                    break
+                elif "end" in rec:
+                    end_data = rec["end"]
+                    break
+
+        if end_data is None:
+            for rec in reversed(parsed_lines):
+                if isinstance(rec, dict) and rec.get("event") == "interval" and "data" in rec:
+                    end_data = rec["data"]
+                    break
+
+    if not isinstance(end_data, dict) or not end_data:
+        print("[ERROR] No valid end or summary event found in receiver log", file=sys.stderr)
+        sys.exit(1)
+
+    sum_rx = end_data.get("sum_received") or end_data.get("sum")
+    if not sum_rx and "streams" in end_data and isinstance(end_data["streams"], list) and end_data["streams"]:
+        s0 = end_data["streams"][0]
+        sum_rx = s0.get("udp") or s0.get("receiver") or s0
+    if not sum_rx and "bytes" in end_data:
+        sum_rx = end_data
+
+    if not isinstance(sum_rx, dict) or "bytes" not in sum_rx:
+        print("[ERROR] Mandatory throughput/byte fields missing from receiver summary", file=sys.stderr)
+        sys.exit(1)
+
+    bytes_rx = sum_rx["bytes"]
+    bps_rx = sum_rx.get("bits_per_second")
+    if bps_rx is None:
+        secs = sum_rx.get("seconds", 1.0)
+        bps_rx = (bytes_rx * 8.0) / (secs if secs > 0 else 1.0)
+
+    mbps_rx = round(float(bps_rx) / 1e6, 3)
+    lost_pkts = sum_rx.get("lost_packets")
+    total_pkts = sum_rx.get("packets")
+    loss_pct = sum_rx.get("lost_percent")
+    jitter_ms = sum_rx.get("jitter_ms")
 
     summary = {
         "format": "json_stream" if is_stream else "standard_json",
@@ -147,16 +193,20 @@ try:
     }
     with open(summary_path, "w", encoding="utf-8") as sf:
         json.dump(summary, sf, indent=2)
-    print(f"[SUCCESS] Receiver Goodput: {mbps_rx} Mbps | Loss: {loss_pct}% ({lost_pkts}/{total_pkts} pkts) | Jitter: {jitter_ms} ms | Format: {'Stream' if is_stream else 'Single'}")
+
+    loss_disp = f"{loss_pct}% ({lost_pkts}/{total_pkts} pkts)" if loss_pct is not None else "N/A"
+    jitter_disp = f"{jitter_ms} ms" if jitter_ms is not None else "N/A"
+    print(f"[SUCCESS] Receiver Goodput: {mbps_rx} Mbps | Loss: {loss_disp} | Jitter: {jitter_disp} | Format: {'Stream' if is_stream else 'Single'}")
+    sys.exit(0)
+
 except Exception as ex:
-    print(f"[WARNING] Parsing receiver JSON log: {ex}", file=sys.stderr)
+    print(f"[ERROR] Failed to parse receiver JSON log: {ex}", file=sys.stderr)
+    sys.exit(1)
 EOF
-      else
-        echo "[ERROR] Target export file is empty on host."
-        exit 1
-      fi
-    else
-      echo "[ERROR] Log file $LOG_FILE inside $CONTAINER is missing or empty. Ensure client traffic has completed."
+
+    PARSE_RC=$?
+    if [ $PARSE_RC -ne 0 ]; then
+      echo "[ERROR] Receiver log export failed with error code $PARSE_RC" >&2
       exit 1
     fi
     ;;
