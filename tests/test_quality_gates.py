@@ -661,6 +661,82 @@ nwdaf_poll_in_flight 0
         self.assertIn('nwdaf_run_raw_polls_failed{run_id="RUN_NEW"} 0', output)
         self.assertIn('nwdaf_comm_duration_sec NaN', output)
 
+    def test_18_interleaved_run_transition_prevents_mixed_query_window_and_run_id(self):
+        """POS-17: Verifies that atomic context snapshotting and session generation prevent
+        a request from having mixed window (RUN_A start time) and target identity (RUN_B).
+        """
+        orig_data_dir = os.environ.get("MONITORING_DATA_DIR")
+        os.environ["MONITORING_DATA_DIR"] = self.test_dir
+        try:
+            run_a_dir = os.path.join(self.test_dir, "raw", "RUN_CONC_A")
+            run_b_dir = os.path.join(self.test_dir, "raw", "RUN_CONC_B")
+            os.makedirs(run_a_dir, exist_ok=True)
+            os.makedirs(run_b_dir, exist_ok=True)
+
+            active_file = os.path.join(self.test_dir, "active_run_id_conc.txt")
+            telemetry_collector.RUN_STATE_FILE = active_file
+
+            # 1. Start RUN_CONC_A
+            with open(active_file, "w", encoding="utf-8") as f:
+                f.write("RUN_CONC_A\n")
+
+            # Atomic poll context captured for RUN_CONC_A
+            ctx_a = telemetry_collector.get_nwdaf_poll_context()
+            self.assertEqual(ctx_a["run_id"], "RUN_CONC_A")
+            gen_a = ctx_a["generation"]
+            start_ts_a = ctx_a["start_ts"]
+
+            # 2. Interleaved transition: /metrics or another event transitions to RUN_CONC_B
+            with open(active_file, "w", encoding="utf-8") as f:
+                f.write("RUN_CONC_B\n")
+
+            # Atomic poll context captured for RUN_CONC_B
+            ctx_b = telemetry_collector.get_nwdaf_poll_context()
+            self.assertEqual(ctx_b["run_id"], "RUN_CONC_B")
+            gen_b = ctx_b["generation"]
+            start_ts_b = ctx_b["start_ts"]
+            self.assertGreater(gen_b, gen_a)
+
+            # 3. An in-flight request started under RUN_CONC_A attempts to log with stale generation
+            poll_record_a = {
+                "poll_timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "query_start_ts": start_ts_a,
+                "query_url": "http://mock/analytics",
+                "http_status": 200,
+                "response_body": {"ueComms": [{"commDur": 123.0}]}
+            }
+            # Attempting to log with target_run_id=RUN_CONC_A and target_generation=gen_a
+            ok, reason = telemetry_collector.log_raw_nwdaf_poll(
+                poll_record_a,
+                target_run_id="RUN_CONC_A",
+                target_generation=gen_a
+            )
+            self.assertFalse(ok)
+            self.assertIn("LATE_RESPONSE", reason)
+            self.assertFalse(os.path.exists(os.path.join(run_a_dir, "nwdaf_raw_poll_responses.jsonl")))
+            self.assertFalse(os.path.exists(os.path.join(run_b_dir, "nwdaf_raw_poll_responses.jsonl")))
+
+            # 4. Even if a race attempted to attribute the response to RUN_CONC_B with stale gen_a
+            ok2, reason2 = telemetry_collector.log_raw_nwdaf_poll(
+                poll_record_a,
+                target_run_id="RUN_CONC_B",
+                target_generation=gen_a
+            )
+            self.assertFalse(ok2)
+            self.assertIn("LATE_RESPONSE", reason2)
+            self.assertFalse(os.path.exists(os.path.join(run_b_dir, "nwdaf_raw_poll_responses.jsonl")))
+
+            # RUN_CONC_B metrics must remain clean/uncontaminated
+            with telemetry_collector.METRICS_LOCK:
+                self.assertTrue(math.isnan(telemetry_collector.metrics_store["nwdaf_comm_duration_sec"]))
+                self.assertEqual(telemetry_collector.run_poll_stats["written"], 0)
+
+        finally:
+            if orig_data_dir:
+                os.environ["MONITORING_DATA_DIR"] = orig_data_dir
+            else:
+                os.environ.pop("MONITORING_DATA_DIR", None)
+
 
 if __name__ == "__main__":
     unittest.main()
