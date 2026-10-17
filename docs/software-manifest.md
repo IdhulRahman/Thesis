@@ -82,8 +82,7 @@ All virtual machines operate within the dedicated inter-VM subnet `10.102.0.0/24
 | **Telemetry Collector** | In-house Python HTTP server | v2.1.0 | Host process (`scripts/telemetry_collector.py`) | Ingestion endpoint `POST :9100/report`, Prometheus `GET :9100/metrics` |
 | **Prometheus TSDB** | Prometheus | `v2.45.0` (LTS) | Systemd / Host binary | TSDB scraper polling `:9100/metrics` at 1.0 Hz |
 | **Grafana** | Grafana Community | `v10.0.3` | Host service | Visualization dashboards on port `3000` |
-| **Monotonic CSV Recorder** | In-house Python script | v2.0.0 | Script (`scripts/record_dual_stream.py`) | Generates atomic 37-column CSV dataset |
-| **Ground-Truth Annotator** | In-house Python script | v1.0.0 | Script (`scripts/log_event.py`) | Emits event start/stop markers with UTC timestamps |
+| **Telemetry Recorder** | In-house Python script | v2.2.0 | Script (`scripts/record_experiment.py`) | Single-scenario 1.000 Hz 40-column monotonic recorder with manifest metadata |
 
 ---
 

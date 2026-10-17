@@ -138,7 +138,7 @@ To guarantee scientific rigor, all telemetry recorded during experiments is stri
 
 ### Tier 3: Metadata, Annotations, and Quality Indicators
 * `timestamp_utc`, `elapsed_sec`, `run_id`
-* `event_scenario`, `event_domain`, `event_component` (Ground-truth disturbance labels from `log_event.py`)
+* `event_scenario`, `event_domain`, `event_component` (Ground-truth disturbance labels from `record_experiment.py`)
 * `nwdaf_api_status` (HTTP connectivity status to Kong Gateway)
 * `nwdaf_comm_freshness` (Heuristic indicator: 1 if source URR volume changed within 45s, else 0)
 * `e2e_probe_freshness` (Heuristic indicator: 1 if active canary ping received within 3.5s, else 0)

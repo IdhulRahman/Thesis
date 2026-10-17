@@ -88,9 +88,9 @@ The table below catalogs every column in the generated `telemetry_raw_<RUN_ID>_<
 | **32**| `ran_snr_cell2` | `ran_cell_snr_db{cell_id="2"}` | VM-4 DU-2 (:4044) | `ran_adapter.py` | Float (dB) | Latest Uplink Signal-to-Noise Ratio for active UE in Cell-2 | Emits `NaN` if unallocated | Feature |
 | **33**| `rapp_diagnosed_bottleneck` | `rapp_diagnosed_bottleneck` | VM-1 rApp | Inference Engine | Integer Enum | Diagnostic classification: `0`=NORMAL, `1`=RAN, `2`=CORE, `3`=JOINT | Emits `0` during training | Prediction Target |
 | **34**| `rapp_confidence` | `rapp_confidence` | VM-1 rApp | Inference Engine | Float (0.0–1.0) | Classifier confidence probability score for predicted class | Emits `1.0` if deterministic | Prediction Target |
-| **35**| `event_scenario` | `event_scenario` | VM-6 `log_event.py` | Annotator | String Enum | Ground-truth disturbance scenario ID: `CLEAR`, `S1`, `S2`, `S3`, `S6`, `S9`, `S10_A`, `S10_B` | Emits `CLEAR` if idle | Ground Truth |
-| **36**| `event_domain` | `event_domain` | VM-6 `log_event.py` | Annotator | String Enum | Ground-truth bottleneck domain label: `NORMAL`, `RAN`, `CORE`, `JOINT` | Emits `NORMAL` if idle | Ground Truth |
-| **37**| `event_component` | `event_component` | VM-6 `log_event.py` | Annotator | String Enum | Physical component under impairment (e.g., `OAI_DU_MAC`, `UPF_EGRESS_QDISC`, `NONE`)| Emits `NONE` if idle | Ground Truth |
+| **35**| `event_scenario` | `event_scenario` | VM-6 `record_experiment.py` | Recorder Metadata | String Enum | Ground-truth disturbance scenario ID: `CLEAR`, `S1`, `S2`, `S3`, `S6`, `S9`, `S10_A`, `S10_B` | Emits `CLEAR` if idle | Ground Truth |
+| **36**| `event_domain` | `event_domain` | VM-6 `record_experiment.py` | Recorder Metadata | String Enum | Ground-truth bottleneck domain label: `NORMAL`, `BASELINE`, `RAN`, `CORE`, `JOINT` | Emits `BASELINE` if idle | Ground Truth |
+| **37**| `event_component` | `event_component` | VM-6 `record_experiment.py` | Recorder Metadata | String Enum | Physical component under impairment (e.g., `OAI_DU_MAC`, `UPF_EGRESS_QDISC`, `NONE`)| Emits `NONE` if idle | Ground Truth |
 
 ---
 

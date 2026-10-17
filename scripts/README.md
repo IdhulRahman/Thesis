@@ -12,7 +12,7 @@ This directory contains the operational daemons, automation scripts, fault injec
 | Host Node | Host IP | Script File | Architectural Role | Execution Mode & Output |
 |---|---|---|---|---|
 | **VM-3** | `10.102.0.164` | [`core_adapter.py`](core_adapter.py) | Reads Linux kernel `tc qdisc` backlog and packet drops from UPF containers via Netlink. | Continuous daemon (1.0 Hz); pushes JSON to VM-6 `:9100/report` and archives local JSONL. |
-| **VM-3** | `10.102.0.164` | [`receiver_iperf.sh`](receiver_iperf.sh) | Dedicated one-off receiver manager for `oai-ext-dn` container to capture ground-truth delivered goodput and UDP loss JSON. | Bash utility; exports to `data/raw/<RUN_ID>/receiver_goodput.json`. |
+| **VM-3** | `10.102.0.164` | [`receiver_iperf.sh`](receiver_iperf.sh) | Dedicated one-off receiver manager for `oai-ext-dn` container to capture ground-truth delivered goodput and UDP loss JSON. | Bash utility; exports to `data/raw/<RUN_ID>/receiver_<SESSION_ID>.json`. |
 | **VM-4** | `10.102.0.167` | [`start_ran.sh`](start_ran.sh) | Orchestrates background startup of OAI gNB CU (N2/E2), DU-1 (Cell-1 `:4043`), and DU-2 (Cell-2 `:4044`). | Bash launcher; writes `cu.log`, `du1.log`, `du2.log`. |
 | **VM-4** | `10.102.0.167` | [`stop_ran.sh`](stop_ran.sh) | Gracefully terminates all running OAI softmodem processes on VM-4. | Bash teardown utility; kills CU and DUs. |
 | **VM-4** | `10.102.0.167` | [`ran_adapter.py`](ran_adapter.py) | Tails `du1.log` & `du2.log`, extracts live MAC PRB allocation (`NPRB / 106`), UL-SCH SNR, MCS, and BLER with file progression and staleness tracking. Formally designated as *OAI DU scheduler-log-derived telemetry (~1 Hz)*. | Continuous daemon (1.0 Hz); pushes JSON to VM-6 `:9100/report`. |
@@ -21,45 +21,43 @@ This directory contains the operational daemons, automation scripts, fault injec
 | **VM-5** | `10.102.0.165` | [`enter_ue.sh`](enter_ue.sh) | Interactive helper to enter a designated UE namespace (`sudo ip netns exec ue<N> bash`). | Diagnostic CLI utility. |
 | **VM-5** | `10.102.0.165` | [`trafgen.sh`](trafgen.sh) | Generates UDP offered load on Slice 1 (`iperf3`) and canary probes on Slice 2 (`ping 100ms`). | Background loop (1.0 Hz); pushes throughput and RTT/loss to `:9100/report`. |
 | **VM-6** | `10.102.0.67` | [`telemetry_collector.py`](telemetry_collector.py) | Ingests `/report` payloads from adapters, polls NWDAF NBI (`:8080`) with isolated run window, and exports Prometheus gauges on `:9100/metrics`. | HTTP server listening on `:9100`. |
-| **VM-6** | `10.102.0.67` | [`record_dual_stream.py`](record_dual_stream.py) | Scrapes `:9100/metrics` at 1.000 Hz using monotonic time, exporting the 37-column CSV dataset directly to `data/raw/<RUN_ID>/` with `manifest.json`. | Monotonic recorder; outputs `data/raw/<RUN_ID>/telemetry_<RUN_ID>.csv`. |
-| **VM-6** | `10.102.0.67` | [`log_event.py`](log_event.py) | Injects ground-truth event markers (S1, S2, S3, S6, S9, S10_A, S10_B, CLEAR) with atomic sync to `active_event.json` and writes `experiment_events_<RUN_ID>.csv`. | CLI utility; appends to per-run and root event archives. |
-| **VM-6** | `10.102.0.67` | [`run_pilot_experiment.py`](run_pilot_experiment.py) | Automated orchestrator managing multi-phase pilot runs (>=60s phase duration) aligned with NWDAF URR ~30s cadence, API snapshotting, and quality audit. | Experiment runner utility. |
-| **VM-6** | `10.102.0.67` | [`analyze_dataset.py`](analyze_dataset.py) | Post-experiment data auditor verifying PRB, backlog, drops, throughput, measurement coverage, and SLA violation ratios across raw run archives. | Statistical CLI auditor. |
+| **VM-6** | `10.102.0.67` | [`record_experiment.py`](record_experiment.py) | Single-scenario telemetry recorder scraping `:9100/metrics` at 1.000 Hz monotonic cadence, exporting the 40-column CSV dataset directly to `data/raw/<RUN_ID>/` with `manifest.json`. | Monotonic recorder; outputs `data/raw/<RUN_ID>/telemetry_<RUN_ID>.csv`. |
+| **VM-6** | `10.102.0.67` | [`analyze_dataset.py`](analyze_dataset.py) | Post-experiment data auditor calculating statistical distributions (PRB, backlog, drops, goodput, SLA violation ratios) from recorded CSV archives. | Statistical CLI auditor. |
 
 ---
 
-## 2. Core Telemetry Adapter Reference (`core_adapter.py`)
+## 2. Telemetry Recording Operational Guide (`record_experiment.py`)
 
-### Role & Standards Compliance
-Operates under **3GPP TS 23.288 §6.2.3** ("Data Collection from OAM services") and 3GPP PM TS 32.401 / TS 28.552 principles. It is strictly a **read-only telemetry reader**, not an actuator and not a 3GPP DCCF.
+### Usage Modes
 
-### CLI Arguments
-```text
-python3 core_adapter.py [OPTIONS]
-  --run-id <STR>       [Required] Alphanumeric run identifier
-  --interval <FLOAT>   Sampling cadence in seconds (Default: 1.0)
-  --url <URL>          Target collector endpoint (Default: http://10.102.0.67:9100/report)
-  --inspect-qdiscs     Inspect UPF container kernel qdiscs and exit
-  --once               Capture a single sample and exit
-  --local-only         Disable HTTP push, archiving only to local disk
-```
+1. **Interactive Prompt:**
+   ```bash
+   python3 /opt/oran/monitoring/scripts/record_experiment.py
+   ```
+   *Asks for scenario name (default `S1`), duration in seconds (default `60`), and optional notes.*
 
----
+2. **Direct CLI Execution:**
+   ```bash
+   # Record S1 Baseline (60s)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 60 --notes "Baseline normal 10M"
 
-## 3. Deployment Commands Across Nodes
+   # Record S3 RAN Overload (60s)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S3 --duration 60 --notes "Kandidat overload 80M"
 
-Deploy scripts to their respective paths using `scp`:
+   # Record S6 Core Bottleneck (60s)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S6 --duration 60 --notes "Kandidat TBF Core 12M"
+   ```
+
+3. **Manual Stop Mode (`Ctrl+C`):**
+   ```bash
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 0
+   ```
+   *Runs continuously until operator presses `Ctrl+C`. Safely flushes and closes CSV and writes manifest.*
+
+### Post-Recording Statistical Analysis
+To inspect statistical distributions of the recorded run:
 ```bash
-# VM-3 (5G Core Host)
-scp scripts/core_adapter.py five-g@10.102.0.164:/opt/oran/5gc/scripts/
-
-# VM-4 (Split RAN Host)
-scp scripts/start_ran.sh scripts/stop_ran.sh scripts/ran_adapter.py five-g@10.102.0.167:/opt/oran/ran/scripts/
-
-# VM-5 (nrUE Host)
-scp scripts/spawn_multi_ue.sh scripts/stop_multi_ue.sh scripts/trafgen.sh scripts/enter_ue.sh five-g@10.102.0.165:/opt/oran/ue/scripts/
-
-# VM-6 (Monitoring Host)
-scp scripts/telemetry_collector.py five-g@10.102.0.67:/opt/oran/monitoring/collector/
-scp scripts/record_dual_stream.py scripts/log_event.py scripts/analyze_dataset.py five-g@10.102.0.67:/opt/oran/monitoring/scripts/
+python3 /opt/oran/monitoring/scripts/analyze_dataset.py /opt/oran/monitoring/data/raw/<RUN_ID>/telemetry_<RUN_ID>.csv
 ```
+
+

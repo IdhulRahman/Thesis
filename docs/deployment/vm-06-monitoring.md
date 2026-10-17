@@ -389,28 +389,20 @@ All telemetry and experimental suite scripts on VM-6 are centrally managed in re
    nohup python3 /opt/oran/monitoring/collector/telemetry_collector.py > /opt/oran/monitoring/collector/collector.log 2>&1 &
    ```
 
-2. **Continuous Monotonic Telemetry Logger:** [`scripts/record_dual_stream.py`](../../scripts/record_dual_stream.py)
-   * *Path on VM-6:* `/opt/oran/monitoring/scripts/record_dual_stream.py`
-   * *Function:* Continuous 1 Hz telemetry time-series logger using a drift-free monotonic clock to generate raw experimental datasets (`telemetry_raw_<RUN_ID>_<PID>.csv`).
+2. **Single-Scenario Telemetry Recorder:** [`scripts/record_experiment.py`](../../scripts/record_experiment.py)
+   * *Path on VM-6:* `/opt/oran/monitoring/scripts/record_experiment.py`
+   * *Function:* Unified 1.000 Hz monotonic telemetry recorder that records a single scenario per session directly into `/opt/oran/monitoring/data/raw/<RUN_ID>/` with `manifest.json`.
    ```bash
-   # Run telemetry dataset recorder for an experiment RUN:
-   python3 /opt/oran/monitoring/scripts/record_dual_stream.py RUN_01_TRAIN
+   # Run telemetry dataset recorder for an experiment scenario:
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 60 --notes "Baseline normal 10M"
    ```
 
-3. **Scenario Fault Event Annotator:** [`scripts/log_event.py`](../../scripts/log_event.py)
-   * *Path on VM-6:* `/opt/oran/monitoring/scripts/log_event.py`
-   * *Function:* Records discrete ground-truth fault events (S1–S10) to `experiment_events_<RUN_ID>.csv` and synchronizes state atomically with `active_event.json`.
-   ```bash
-   # Annotate scenario fault injection (e.g., S1, S2, S3, S6, S9, CLEAR):
-   python3 /opt/oran/monitoring/scripts/log_event.py S1
-   ```
-
-4. **Statistical Dataset Audit & SLA Validator:** [`scripts/analyze_dataset.py`](../../scripts/analyze_dataset.py)
+3. **Statistical Dataset Audit & SLA Validator:** [`scripts/analyze_dataset.py`](../../scripts/analyze_dataset.py)
    * *Path on VM-6:* `/opt/oran/monitoring/scripts/analyze_dataset.py`
    * *Function:* Audits dataset integrity post-run (PRB%, maximum buffer backlog, total packet drops, throughput, and URLLC latency SLA violation rates).
    ```bash
    # Audit and analyze recorded experiment dataset:
-   python3 /opt/oran/monitoring/scripts/analyze_dataset.py
+   python3 /opt/oran/monitoring/scripts/analyze_dataset.py /opt/oran/monitoring/data/raw/<RUN_ID>/telemetry_<RUN_ID>.csv
    ```
 
 ---
