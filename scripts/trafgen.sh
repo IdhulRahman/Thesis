@@ -163,6 +163,8 @@ case "$ACTION" in
       tun_ip=$(ip netns exec "$ns" ip -4 addr show oaitun_ue1 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "DOWN")
       [[ "$tun_ip" == "DOWN" ]] && continue
 
+      ip netns exec "$ns" ip route replace 192.168.70.0/24 dev oaitun_ue1 2>/dev/null || true
+
       if [[ "$slice" == *"eMBB"* ]]; then
         UE1_NS="$ns"
         IPERF_LOG="$LOG_DIR/iperf_${ns}_${TIMESTAMP}.log"

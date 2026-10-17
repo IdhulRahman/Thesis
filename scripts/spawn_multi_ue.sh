@@ -190,6 +190,7 @@ while IFS=":" read -r ue_id ns imsi slice dnn port pid; do
   tun_ip=$(sudo ip netns exec "$ns" ip -4 addr show oaitun_ue1 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "DOWN")
   ping_res="FAIL"
   if [[ "$tun_ip" != "DOWN" ]]; then
+    sudo ip netns exec "$ns" ip route replace 192.168.70.0/24 dev oaitun_ue1 2>/dev/null || true
     if sudo ip netns exec "$ns" ping -I oaitun_ue1 -c 2 -W 2 "$EXT_DN_IP" >/dev/null 2>&1; then
       ping_res="OK (0% loss)"
     fi
