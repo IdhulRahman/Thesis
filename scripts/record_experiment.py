@@ -81,7 +81,7 @@ def parse_prometheus_text(text):
     return parsed
 
 
-def extract_telemetry(metrics_url=METRICS_URL_DEFAULT, timeout=0.8):
+def extract_telemetry(metrics_url=METRICS_URL_DEFAULT, timeout=0.8, expected_run_id=None):
     raw_data = {
         "e2e_slice1_tput_mbps": NAN_STR, "e2e_slice1_jitter_ms": NAN_STR,
         "e2e_slice1_rtt_ms": NAN_STR, "e2e_slice1_loss_pct": NAN_STR,
@@ -105,7 +105,8 @@ def extract_telemetry(metrics_url=METRICS_URL_DEFAULT, timeout=0.8):
         "nwdaf_run_polls_failed": 0,
         "nwdaf_raw_polls_total": 0,
         "nwdaf_raw_polls_failed": 0,
-        "nwdaf_poll_in_flight": 0
+        "nwdaf_poll_in_flight": 0,
+        "snapshot_run_id": None
     }
     scrape_ok = 0
     t_start = time.monotonic()
@@ -116,7 +117,13 @@ def extract_telemetry(metrics_url=METRICS_URL_DEFAULT, timeout=0.8):
             latency_ms = (time.monotonic() - t_start) * 1000.0
             scrape_ok = 1
             for name, labels, val_str in parse_prometheus_text(text):
-                if name == "e2e_slice1_throughput_mbps":
+                if name == "collector_active_run_id":
+                    rid = labels.get("run_id")
+                    if rid and rid.lower() not in ("none", "null", ""):
+                        storage_stats["snapshot_run_id"] = rid
+                    else:
+                        storage_stats["snapshot_run_id"] = "none"
+                elif name == "e2e_slice1_throughput_mbps":
                     raw_data["e2e_slice1_tput_mbps"] = val_str
                 elif name == "e2e_slice1_jitter_ms":
                     raw_data["e2e_slice1_jitter_ms"] = val_str
@@ -199,11 +206,17 @@ def extract_telemetry(metrics_url=METRICS_URL_DEFAULT, timeout=0.8):
                         storage_stats["nwdaf_run_polls_written"] = int(float(val_str))
                     except ValueError:
                         pass
+                    rid = labels.get("run_id")
+                    if rid and not storage_stats.get("snapshot_run_id"):
+                        storage_stats["snapshot_run_id"] = rid if rid.lower() not in ("none", "null", "") else "none"
                 elif name == "nwdaf_run_raw_polls_failed":
                     try:
                         storage_stats["nwdaf_run_polls_failed"] = int(float(val_str))
                     except ValueError:
                         pass
+                    rid = labels.get("run_id")
+                    if rid and not storage_stats.get("snapshot_run_id"):
+                        storage_stats["snapshot_run_id"] = rid if rid.lower() not in ("none", "null", "") else "none"
                 elif name == "nwdaf_raw_polls_total":
                     try:
                         storage_stats["nwdaf_raw_polls_total"] = int(float(val_str))
@@ -219,6 +232,18 @@ def extract_telemetry(metrics_url=METRICS_URL_DEFAULT, timeout=0.8):
                         storage_stats["nwdaf_poll_in_flight"] = int(float(val_str))
                     except ValueError:
                         pass
+
+            # Context verification: if expected_run_id is specified and snapshot belongs to another run,
+            # isolate per-run telemetry cache and storage counters so old run state cannot contaminate this run.
+            snap_rid = storage_stats.get("snapshot_run_id")
+            if expected_run_id and snap_rid and snap_rid != expected_run_id:
+                raw_data["nwdaf_comm_ul_bytes"] = NAN_STR
+                raw_data["nwdaf_comm_dl_bytes"] = NAN_STR
+                raw_data["nwdaf_comm_duration_sec"] = NAN_STR
+                raw_data["nwdaf_comm_vol_std_bytes"] = NAN_STR
+                raw_data["nwdaf_comm_freshness"] = "0"
+                storage_stats["nwdaf_run_polls_written"] = 0
+                storage_stats["nwdaf_run_polls_failed"] = 0
     except Exception:
         latency_ms = (time.monotonic() - t_start) * 1000.0
         scrape_ok = 0
@@ -343,8 +368,12 @@ Contoh Penggunaan:
     try:
         with open(os.path.join(data_dir, "active_run_id.txt"), "w", encoding="utf-8") as f:
             f.write(run_id + "\n")
+            f.flush()
+            os.fsync(f.fileno())
         with open(os.path.join(data_dir, "active_event.json"), "w", encoding="utf-8") as f:
             json.dump({"phase_id": phase_id, "scenario": canonical_scenario, "domain": domain, "component": component}, f)
+            f.flush()
+            os.fsync(f.fileno())
     except Exception as e:
         print(f"[!] Warning: Gagal sinkronisasi active_run_id/active_event: {e}", file=sys.stderr)
 
@@ -441,14 +470,19 @@ Contoh Penggunaan:
                     stop_reason = "DURATION_REACHED"
                     break
 
-                telemetry, scrape_ok, scrape_lat, storage_stats = extract_telemetry(metrics_url=args.metrics_url)
+                telemetry, scrape_ok, scrape_lat, storage_stats = extract_telemetry(
+                    metrics_url=args.metrics_url,
+                    expected_run_id=run_id
+                )
                 if scrape_ok:
                     scrape_ok_count += 1
-                    # Preserve latest successfully read storage counters; never overwrite with zero on scrape failure
-                    for k in ("nwdaf_run_polls_written", "nwdaf_run_polls_failed", "nwdaf_raw_polls_total", "nwdaf_raw_polls_failed"):
-                        val = storage_stats.get(k, 0)
-                        if val > last_storage_stats.get(k, 0):
-                            last_storage_stats[k] = val
+                    # Preserve latest successfully read storage counters; ignore if snapshot belongs to another run
+                    snap_id = storage_stats.get("snapshot_run_id")
+                    if not (snap_id and snap_id != run_id):
+                        for k in ("nwdaf_run_polls_written", "nwdaf_run_polls_failed", "nwdaf_raw_polls_total", "nwdaf_raw_polls_failed"):
+                            val = storage_stats.get(k, 0)
+                            if val > last_storage_stats.get(k, 0):
+                                last_storage_stats[k] = val
                 else:
                     scrape_fail_count += 1
 
@@ -504,17 +538,32 @@ Contoh Penggunaan:
     # wait for it to complete (up to 2.5s) so its results are captured before closing the run.
     t_coord_start = time.monotonic()
     while time.monotonic() - t_coord_start < 2.5:
-        _, coord_ok, _, coord_storage = extract_telemetry(metrics_url=args.metrics_url, timeout=0.4)
+        _, coord_ok, _, coord_storage = extract_telemetry(metrics_url=args.metrics_url, timeout=0.4, expected_run_id=run_id)
         if coord_ok:
-            for k in ("nwdaf_run_polls_written", "nwdaf_run_polls_failed", "nwdaf_raw_polls_total", "nwdaf_raw_polls_failed"):
-                val = coord_storage.get(k, 0)
-                if val > last_storage_stats.get(k, 0):
-                    last_storage_stats[k] = val
+            snap_id = coord_storage.get("snapshot_run_id")
+            if not (snap_id and snap_id != run_id):
+                for k in ("nwdaf_run_polls_written", "nwdaf_run_polls_failed", "nwdaf_raw_polls_total", "nwdaf_raw_polls_failed"):
+                    val = coord_storage.get(k, 0)
+                    if val > last_storage_stats.get(k, 0):
+                        last_storage_stats[k] = val
             if coord_storage.get("nwdaf_poll_in_flight", 0) == 0:
                 break
         else:
             break
         time.sleep(0.1)
+
+    # Scrape terminal collector storage counters for this run before closing active_run_id
+    try:
+        _, final_ok, _, final_storage = extract_telemetry(metrics_url=args.metrics_url, timeout=0.5, expected_run_id=run_id)
+        if final_ok:
+            snap_id = final_storage.get("snapshot_run_id")
+            if not (snap_id and snap_id != run_id):
+                for k in ("nwdaf_run_polls_written", "nwdaf_run_polls_failed", "nwdaf_raw_polls_total", "nwdaf_raw_polls_failed"):
+                    val = final_storage.get(k, 0)
+                    if val > last_storage_stats.get(k, 0):
+                        last_storage_stats[k] = val
+    except Exception:
+        pass
 
     # 2. Close session in active_run_id.txt so collector stops adding polls to this finished run
     try:
@@ -533,17 +582,6 @@ Contoh Penggunaan:
 
     end_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
     actual_duration = round(time.monotonic() - start_mono, 3)
-
-    # Final scrape to capture any terminal collector storage counters
-    try:
-        _, final_ok, _, final_storage = extract_telemetry(metrics_url=args.metrics_url, timeout=0.5)
-        if final_ok:
-            for k in ("nwdaf_run_polls_written", "nwdaf_run_polls_failed", "nwdaf_raw_polls_total", "nwdaf_raw_polls_failed"):
-                val = final_storage.get(k, 0)
-                if val > last_storage_stats.get(k, 0):
-                    last_storage_stats[k] = val
-    except Exception:
-        pass
 
     # Audit storage files on disk
     csv_bytes = os.path.getsize(csv_file) if os.path.exists(csv_file) else 0

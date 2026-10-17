@@ -151,6 +151,7 @@ def fmt_val(v, fmt=".2f"):
 
 def format_prometheus_metrics():
     global last_report_ue1, last_reply_ue1, last_report_ue2, last_reply_ue2, last_report_core, last_report_ran
+    check_run_state_change()
     lines = []
     now = time.time()
     with METRICS_LOCK:
@@ -312,13 +313,18 @@ def format_prometheus_metrics():
         lines.append("# TYPE nwdaf_raw_polls_failed counter")
         lines.append(f"nwdaf_raw_polls_failed {int(metrics_store['nwdaf_raw_polls_failed'])}")
 
+        cur_run = active_run_id or "none"
+        lines.append("# HELP collector_active_run_id Active run identifier currently bound to the telemetry collector")
+        lines.append("# TYPE collector_active_run_id gauge")
+        lines.append(f'collector_active_run_id{{run_id="{cur_run}"}} {1 if active_run_id else 0}')
+
         lines.append("# HELP nwdaf_run_raw_polls_written Raw NWDAF poll responses successfully written for current active run")
         lines.append("# TYPE nwdaf_run_raw_polls_written gauge")
-        lines.append(f"nwdaf_run_raw_polls_written {int(metrics_store['nwdaf_run_raw_polls_written'])}")
+        lines.append(f'nwdaf_run_raw_polls_written{{run_id="{cur_run}"}} {int(metrics_store["nwdaf_run_raw_polls_written"])}')
 
         lines.append("# HELP nwdaf_run_raw_polls_failed Raw NWDAF poll responses that failed to write for current active run")
         lines.append("# TYPE nwdaf_run_raw_polls_failed gauge")
-        lines.append(f"nwdaf_run_raw_polls_failed {int(metrics_store['nwdaf_run_raw_polls_failed'])}")
+        lines.append(f'nwdaf_run_raw_polls_failed{{run_id="{cur_run}"}} {int(metrics_store["nwdaf_run_raw_polls_failed"])}')
 
         lines.append("# HELP nwdaf_poll_in_flight Indicates whether an NWDAF NBI HTTP poll is currently in-flight")
         lines.append("# TYPE nwdaf_poll_in_flight gauge")
@@ -633,24 +639,24 @@ def check_run_state_change():
             pass
 
     # Check if run transition occurred
-    if current_id != active_run_id or abs(current_mtime - active_run_mtime) > 1.0:
-        active_run_id = current_id
-        active_run_mtime = current_mtime
-        if current_mtime > 0.0:
-            active_run_start_dt = datetime.fromtimestamp(current_mtime, timezone.utc)
-        else:
-            active_run_start_dt = COLLECTOR_START_TIME
+    with METRICS_LOCK:
+        if current_id != active_run_id:
+            active_run_id = current_id
+            active_run_mtime = current_mtime
+            if current_mtime > 0.0:
+                active_run_start_dt = datetime.fromtimestamp(current_mtime, timezone.utc)
+            else:
+                active_run_start_dt = COLLECTOR_START_TIME
 
-        # Reset per-run archive counters and error history for the new active run
-        run_poll_stats["total"] = 0
-        run_poll_stats["written"] = 0
-        run_poll_stats["failed"] = 0
-        run_poll_stats["last_error"] = ""
+            # Reset per-run archive counters and error history for the new active run
+            run_poll_stats["total"] = 0
+            run_poll_stats["written"] = 0
+            run_poll_stats["failed"] = 0
+            run_poll_stats["last_error"] = ""
 
-        # Explicitly reset NWDAF state and freshness upon run transition
-        last_nwdaf_signature = None
-        last_nwdaf_data_change_time = 0.0
-        with METRICS_LOCK:
+            # Explicitly reset NWDAF state and freshness upon run transition
+            last_nwdaf_signature = None
+            last_nwdaf_data_change_time = 0.0
             metrics_store["nwdaf_comm_freshness"] = 0
             metrics_store["nwdaf_comm_duration_sec"] = float("nan")
             metrics_store["nwdaf_comm_ul_bytes"] = float("nan")
@@ -791,8 +797,8 @@ def poll_external_nfs():
                             now = time.time()
                             last_nwdaf_poll_time = now
                             metrics_store["nwdaf_api_status"] = 1
-                            # STRICT BINDING: Only update communication metrics if the response matches the active run
-                            if target_run_id == active_run_id:
+                            # STRICT BINDING: Only update communication metrics if the response matches an active run
+                            if target_run_id and target_run_id == active_run_id:
                                 ue_comms = data.get("ueComms", [])
                                 if ue_comms:
                                     comm = ue_comms[0]

@@ -554,6 +554,113 @@ nwdaf_poll_in_flight 0
             flaky_server.shutdown()
             flaky_server.server_close()
 
+    def test_16_run_transition_isolation_when_first_scrape_precedes_collector_detection(self):
+        """POS-15: Verifies that when first scrape of RUN_B occurs before collector poller detects transition,
+        RUN_A's stale cache (e.g. 999999) and failure history (e.g. 3) are isolated and rejected.
+        """
+        request_count = 0
+        class TwoRunTransitionHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                nonlocal request_count
+                request_count += 1
+                if request_count == 1:
+                    # First scrape of RUN_B arrives when exporter still holds RUN_A state
+                    payload = b"""# HELP collector_active_run_id Active run
+collector_active_run_id{run_id="RUN_A"} 1
+# HELP nwdaf_comm_duration_sec Duration
+nwdaf_comm_duration_sec 999999
+# HELP nwdaf_run_raw_polls_written Polls written
+nwdaf_run_raw_polls_written{run_id="RUN_A"} 1
+# HELP nwdaf_run_raw_polls_failed Polls failed
+nwdaf_run_raw_polls_failed{run_id="RUN_A"} 3
+# HELP nwdaf_poll_in_flight In flight
+nwdaf_poll_in_flight 0
+"""
+                else:
+                    # Subsequent scrapes reflect RUN_B
+                    payload = b"""# HELP collector_active_run_id Active run
+collector_active_run_id{run_id="RUN_B"} 1
+# HELP nwdaf_comm_duration_sec Duration
+nwdaf_comm_duration_sec NaN
+# HELP nwdaf_run_raw_polls_written Polls written
+nwdaf_run_raw_polls_written{run_id="RUN_B"} 0
+# HELP nwdaf_run_raw_polls_failed Polls failed
+nwdaf_run_raw_polls_failed{run_id="RUN_B"} 0
+# HELP nwdaf_poll_in_flight In flight
+nwdaf_poll_in_flight 0
+"""
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, format, *args):
+                pass
+
+        server = socketserver.TCPServer(("127.0.0.1", 0), TwoRunTransitionHandler)
+        port = server.server_address[1]
+        metrics_url = f"http://127.0.0.1:{port}/metrics"
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+
+        run_id = "RUN_B"
+        try:
+            args = [
+                sys.executable,
+                os.path.join(os.path.dirname(__file__), "..", "scripts", "record_experiment.py"),
+                "S1",
+                "--duration", "2",
+                "--run-id", run_id,
+                "--metrics-url", metrics_url,
+                "--data-dir", self.test_dir
+            ]
+            res = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            csv_path = os.path.join(self.test_dir, "raw", run_id, f"telemetry_{run_id}.csv")
+            manifest_path = os.path.join(self.test_dir, "raw", run_id, "manifest.json")
+            self.assertTrue(os.path.isfile(csv_path))
+            self.assertTrue(os.path.isfile(manifest_path))
+
+            # Verify row 1 of CSV did NOT absorb RUN_A's 999999 cache
+            with open(csv_path, "r", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                headers = next(reader)
+                row1 = next(reader)
+                dur_idx = headers.index("nwdaf_comm_duration_sec")
+                self.assertEqual(row1[dur_idx], "NaN")
+
+            # Verify manifest did NOT absorb RUN_A's 3 failures
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                m = json.load(f)
+                self.assertEqual(m["recording_status"], "SUCCESS")
+                self.assertEqual(m["storage_audit"]["nwdaf_raw_jsonl"]["polls_failed_reported"], 0)
+                self.assertEqual(len(m["storage_warnings"]), 0)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_17_collector_format_metrics_synchronizes_run_state_and_resets_cache(self):
+        """POS-16: Verifies that collector format_prometheus_metrics directly synchronizes run state from active_run_id.txt."""
+        active_file = os.path.join(self.test_dir, "active_run_id_sync_test.txt")
+        telemetry_collector.RUN_STATE_FILE = active_file
+
+        with open(active_file, "w", encoding="utf-8") as f:
+            f.write("RUN_OLD\n")
+        telemetry_collector.check_run_state_change()
+
+        with telemetry_collector.METRICS_LOCK:
+            telemetry_collector.metrics_store["nwdaf_comm_duration_sec"] = 999999.0
+            telemetry_collector.metrics_store["nwdaf_run_raw_polls_failed"] = 3
+
+        # Switch to RUN_NEW on disk without calling check_run_state_change manually
+        with open(active_file, "w", encoding="utf-8") as f:
+            f.write("RUN_NEW\n")
+
+        # format_prometheus_metrics should auto-detect and reset
+        output = telemetry_collector.format_prometheus_metrics()
+        self.assertIn('collector_active_run_id{run_id="RUN_NEW"} 1', output)
+        self.assertIn('nwdaf_run_raw_polls_failed{run_id="RUN_NEW"} 0', output)
+        self.assertIn('nwdaf_comm_duration_sec NaN', output)
+
 
 if __name__ == "__main__":
     unittest.main()
