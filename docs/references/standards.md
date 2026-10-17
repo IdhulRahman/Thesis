@@ -42,6 +42,6 @@ To prevent false claims of standardization, every experimental threshold, buffer
 | **NWDAF Engine Stubbing** | `relativeRatio = 0` | **Implementation** | Uncompleted `//TODO` in `components/oai-nwdaf-engine/internal/engine/network_performance.go`. |
 | **Radio UL Saturation Limit**| $\approx 28.4\text{ Mbps}$ | **Calibrated** | Maximum attainable uplink throughput in OAI RFsimulator with 106 PRBs and 64-QAM. |
 | **Estimated Load Capacity** | $25\text{ Mbps}$ (eMBB) / $5\text{ Mbps}$ (URLLC) | **Calibrated** | Empirical maximum goodput baseline before queue accumulation begins. |
-| **Logging & Polling Cadence**| `1.000 Hz (1.0 s)` | **Research-Choice** | Configured in `record_dual_stream.py` to capture second-by-second dynamic transients for rApp training. |
+| **Logging & Polling Cadence**| `1.000 Hz (1.0 s)` | **Research-Choice** | Configured in `record_experiment.py` to capture second-by-second dynamic transients for analysis. |
 | **Staleness Auto-Reset Window**| `3.5 seconds` | **Research-Choice** | Configured in `telemetry_collector.py` to prevent stale telemetry from misrepresenting inactive sources. |
 | **TBF Emulation Shaper** | `12 Mbps, latency 200ms` | **Research-Choice** | Configured on UPF-1 container `eth0` in Scenario S6 to emulate core transport link throttling. |

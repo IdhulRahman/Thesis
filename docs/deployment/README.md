@@ -41,7 +41,7 @@ Step 6: VM-6 (Monitor) ◄── Step 5: VM-5 (nrUE)      ◄── Step 4: VM-2
 5. **Step 5 — VM-5 (nrUE Bring-Up & Canary Validation):**  
    Execute `spawn_multi_ue.sh -s1 1 -s2 1`. Verify `oaitun_ue1` inside `ue1` (`12.1.1.2`) and `ue2` (`12.1.2.2`). Run ping canary to `192.168.70.145` confirming 0% packet loss. Start `trafgen.sh`.
 6. **Step 6 — VM-6 (Monitoring & Telemetry Pipeline):**  
-   Start `telemetry_collector.py` on port `9100`. Verify Prometheus scrapes `:9100/metrics`. Execute `record_dual_stream.py` to record experimental runs.
+   Start `telemetry_collector.py` on port `9100`. Verify Prometheus scrapes `:9100/metrics`. Execute `record_experiment.py` to record single-scenario experimental runs.
 
 ---
 

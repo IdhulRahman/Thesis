@@ -1,8 +1,8 @@
 # Telemetry Metric Catalog & CSV Dataset Specification
 
-**Authoritative Specification:** Single Source of Truth for the 37-Column Dataset  
+**Authoritative Specification:** Single Source of Truth for the 40-Column Dataset  
 **Standard Mappings:** 3GPP TS 23.288, TS 29.520, TS 28.552, TS 38.314, IETF RFC 3550  
-**Target Environment:** VM-6 Monitoring Host (`telemetry_collector.py` & `record_dual_stream.py`)  
+**Target Environment:** VM-6 Monitoring Host (`telemetry_collector.py` & `record_experiment.py`)  
 **Data Logging Cadence:** Nominal 1.000 Hz (1 sample per second) synchronized via Monotonic Clock
 
 ---
@@ -26,10 +26,10 @@ Telemetry is ingested across five architectural domains into the centralized col
                                  │
                                  ├──► Prometheus TSDB (:9100/metrics)
                                  │
-                                 └──► record_dual_stream.py (1.000 Hz)
+                                 └──► record_experiment.py (1.000 Hz)
                                         │
                                         ▼
-                                 telemetry_raw_<RUN_ID>_<PID>.csv (37 Columns)
+                                 telemetry_<RUN_ID>.csv (40 Columns)
 ```
 
 ---
@@ -45,52 +45,56 @@ Telemetry is ingested across five architectural domains into the centralized col
 > 4. **Standard 3GPP NWDAF Ingestion:** `nwdaf_comm_*` metrics represent standard 3GPP user-plane communication telemetry exposed over NBI `Nnwdaf_AnalyticsInfo` (`UE_COMMUNICATION`).
 > 5. **Duration Semantics:** `nwdaf_comm_duration_sec` represents upstream OAI cumulative report window aggregation, functioning as an event accumulation counter rather than an exact physical session elapsed time.
 > 6. **Missing Value Integrity:** Unsupported or unmeasured metrics (such as `nwdaf_load_embb` or unmeasured UDP transit jitter) emit strict **`NaN`** values, avoiding artificial synthetic defaults.
+> 7. **Operator Label vs Automated Claims:** Scenario, domain, and component annotations (`event_*`) represent operator-designated experimental labels for the active recording session, not automated system assertions.
 
 ---
 
-## 3. Complete 37-Column Metric Inventory
+## 3. Complete 40-Column Metric Inventory
 
-The table below catalogs every column in the generated `telemetry_raw_<RUN_ID>_<PID>.csv` file in exact header sequence, mapping CSV headers to Prometheus metric identifiers:
+The table below catalogs every column in the generated `telemetry_<RUN_ID>.csv` file in exact header sequence, mapping CSV headers to Prometheus metric identifiers:
 
 | Col | CSV Column Name | Prometheus Identifier | Source & Host | Ingestion Channel | Unit & Type | Extraction Logic & Mathematical Formulation | Missing / Stale Rule | Metric Role |
 |:---:|---|---|---|---|---|---|---|---|
 | **1** | `timestamp_utc` | *(Row Metadata)* | VM-6 Host Clock | Internal | ISO-8601 String | `datetime.datetime.now(timezone.utc).isoformat()` | Microsecond precision | Metadata |
 | **2** | `elapsed_sec` | *(Row Metadata)* | VM-6 Kernel Clock| Internal | Float (s) | `time.monotonic() - start_monotonic` | Zero wall-clock drift | Metadata |
-| **3** | `run_id` | *(Row Metadata)* | Script Argument | CLI Input | String | Session identifier (e.g., `PILOT_RUN_01`, `RUN_02_TRAIN`) | Emits `PILOT_<TS>` if unset | Metadata |
+| **3** | `run_id` | *(Row Metadata)* | Script Argument | CLI Input | String | Session identifier (e.g., `EXP_S1_20261017_153000`) | Auto-generated if unset | Metadata |
 | **4** | `scrape_ok` | *(Internal Monitor)* | VM-6 HTTP Client | Internal | Boolean (0/1) | Evaluates whether HTTP GET `:9100/metrics` returned HTTP 200 | Set to `0` on scrape error | Metadata |
 | **5** | `scrape_latency_ms` | *(Internal Monitor)* | VM-6 HTTP Client | Internal | Float (ms) | Wall-clock elapsed duration of the HTTP scrape request | Set to `-1.0` on failure | Metadata |
 | **6** | `e2e_slice1_tput_mbps` | `e2e_slice1_throughput_mbps` | VM-5 `ue1` netns | `trafgen.sh` | Float (Mbps) | Sender-side offered throughput reported by `iperf3 -u -b 20M` | Decays to `NaN` after 3.5s | Feature |
 | **7** | `e2e_slice1_jitter_ms` | `e2e_slice1_jitter_ms` | VM-5 `ue1` netns | `trafgen.sh` | Float (ms) | RFC 3550 transit jitter (unmeasured in UDP client mode) | Strictly emits `NaN` | Feature |
-| **8** | `e2e_slice2_rtt_ms` | `e2e_slice2_latency_rtt_ms` | VM-5 `ue2` netns | `trafgen.sh` | Float (ms) | Latest ICMP round-trip time to EXT-DN (`192.168.70.145`) | Decays to `NaN` after 3.5s | Feature / SLA |
-| **9** | `e2e_slice2_loss_pct` | `e2e_slice2_packet_loss_pct`| VM-5 `ue2` netns | `trafgen.sh` | Float (%) | Sequence-matched canary packet loss: $100 \times (1 - \frac{N_{rx}}{N_{tx}})$ | Decays to `NaN` after 3.5s | Feature / SLA |
-| **10**| `e2e_probe_freshness` | `e2e_probe_freshness` | VM-5 `trafgen.sh` | VM-6 Collector | Boolean (0/1) | Freshness indicator: `1` if report received $\le 3.5\text{ s}$, else `0` | Automatically drops to `0` | Metadata |
-| **11**| `nwdaf_load_embb` | `nwdaf_slice_load_level{snssai="01000001"}` | VM-3 NWDAF :8080 | 3GPP NBI | Float (%) | Standard 3GPP TS 23.288 Slice Load Level for eMBB | Emits `NaN` (unsupported) | Feature |
-| **12**| `nwdaf_load_urllc` | `nwdaf_slice_load_level{snssai="de00007b"}` | VM-3 NWDAF :8080 | 3GPP NBI | Float (%) | Standard 3GPP TS 23.288 Slice Load Level for URLLC | Emits `NaN` (unsupported) | Feature |
-| **13**| `nwdaf_comm_ul_bytes`| `nwdaf_comm_ul_bytes` | VM-3 NWDAF :8080 | 3GPP NBI | Integer (Bytes) | Standard 3GPP TS 23.288 §6.7 cumulative uplink user-plane volume | Retains last value | Feature |
-| **14**| `nwdaf_comm_dl_bytes`| `nwdaf_comm_dl_bytes` | VM-3 NWDAF :8080 | 3GPP NBI | Integer (Bytes) | Standard 3GPP TS 23.288 §6.7 cumulative downlink user-plane volume | Retains last value | Feature |
-| **15**| `nwdaf_comm_duration_sec`| `nwdaf_comm_duration_sec` | VM-3 NWDAF :8080 | 3GPP NBI | Float (s) | Cumulative sum of ingested URR report window durations | Retains last value | Feature |
-| **16**| `nwdaf_comm_vol_std_bytes`| `nwdaf_comm_vol_std_bytes` | VM-3 NWDAF :8080 | 3GPP NBI | Float (Bytes) | Standard deviation of volume across ingested URR reports | Retains last value | Feature |
-| **17**| `nwdaf_comm_freshness` | `nwdaf_comm_freshness` | VM-3 NWDAF :8080 | VM-6 Collector | Boolean (0/1) | Freshness indicator: `1` if source URR volume changed $\le 45\text{ s}$, else `0` | Drops to `0` when idle | Metadata |
-| **18**| `nwdaf_api_status` | `nwdaf_api_status` | VM-3 NWDAF :8080 | VM-6 Collector | Boolean (0/1) | HTTP 200 connectivity to Kong Gateway (`:8080/nnwdaf-analyticsinfo/...`)| `1` = OK, `0` = Unreachable | Metadata |
-| **19**| `estimated_load_embb` | `estimated_slice_load_level{snssai="01000001"}` | VM-3 UPF-1 | `core_adapter.py` | Float (%) | $\min\left(100.0, \max\left(0.0, \frac{\text{Tx}_{\text{mbps}}}{25.0} \times 100.0\right)\right)$ | Decays to `NaN` after 3.5s | Feature |
-| **20**| `estimated_load_urllc`| `estimated_slice_load_level{snssai="de00007b"}` | VM-3 UPF-2 | `core_adapter.py` | Float (%) | $\min\left(100.0, \max\left(0.0, \frac{\text{Tx}_{\text{mbps}}}{5.0} \times 100.0\right)\right)$ | Decays to `NaN` after 3.5s | Feature |
-| **21**| `upf_backlog_bytes_embb`| `upf_queue_backlog_bytes{snssai="01000001"}`| VM-3 UPF-1 | `core_adapter.py` | Integer (Bytes) | Linux `tc -s qdisc show dev eth0` backlog bytes on UPF-1 container | Decays to `NaN` after 3.5s | Feature / Bottleneck |
-| **22**| `upf_backlog_bytes_urllc`| `upf_queue_backlog_bytes{snssai="de00007b"}`| VM-3 UPF-2 | `core_adapter.py` | Integer (Bytes) | Linux `tc -s qdisc show dev eth0` backlog bytes on UPF-2 container | Decays to `NaN` after 3.5s | Feature / Bottleneck |
-| **23**| `upf_drops_embb` | `upf_packet_drops{snssai="01000001"}` | VM-3 UPF-1 | `core_adapter.py` | Float (drops/s) | Derivative packet drop rate: $\Delta \text{drops} / \Delta t$ over interval | Decays to `NaN` after 3.5s | Feature / Bottleneck |
-| **24**| `upf_drops_urllc` | `upf_packet_drops{snssai="de00007b"}` | VM-3 UPF-2 | `core_adapter.py` | Float (drops/s) | Derivative packet drop rate: $\Delta \text{drops} / \Delta t$ over interval | Decays to `NaN` after 3.5s | Feature / Bottleneck |
-| **25**| `ran_prb_cell1` | `ran_cell_prb_utilization{cell_id="1"}` | VM-4 DU-1 (:4043) | `ran_adapter.py` | Float (%) | Instantaneous MAC slot allocation: $\frac{NPRB}{106} \times 100.0$ | Decays to `NaN` after 3.5s | Feature / Bottleneck |
-| **26**| `ran_prb_cell2` | `ran_cell_prb_utilization{cell_id="2"}` | VM-4 DU-2 (:4044) | `ran_adapter.py` | Float (%) | Instantaneous MAC slot allocation: $\frac{NPRB}{106} \times 100.0$ | Decays to `NaN` after 3.5s | Feature / Bottleneck |
-| **27**| `ran_mcs_cell1` | `ran_cell_mcs{cell_id="1"}` | VM-4 DU-1 (:4043) | `ran_adapter.py` | Integer (0–28) | Latest UL-SCH Modulation & Coding Scheme index allocated in Cell-1 | Emits `NaN` if unallocated | Feature |
-| **28**| `ran_mcs_cell2` | `ran_cell_mcs{cell_id="2"}` | VM-4 DU-2 (:4044) | `ran_adapter.py` | Integer (0–28) | Latest UL-SCH Modulation & Coding Scheme index allocated in Cell-2 | Emits `NaN` if unallocated | Feature |
-| **29**| `ran_bler_cell1` | `ran_cell_bler{cell_id="1"}` | VM-4 DU-1 (:4043) | `ran_adapter.py` | Float (0.0–1.0) | Latest Block Error Rate on UL-SCH transport blocks in Cell-1 | Emits `NaN` if unallocated | Feature |
-| **30**| `ran_bler_cell2` | `ran_cell_bler{cell_id="2"}` | VM-4 DU-2 (:4044) | `ran_adapter.py` | Float (0.0–1.0) | Latest Block Error Rate on UL-SCH transport blocks in Cell-2 | Emits `NaN` if unallocated | Feature |
-| **31**| `ran_snr_cell1` | `ran_cell_snr_db{cell_id="1"}` | VM-4 DU-1 (:4043) | `ran_adapter.py` | Float (dB) | Latest Uplink Signal-to-Noise Ratio for active UE in Cell-1 | Emits `NaN` if unallocated | Feature |
-| **32**| `ran_snr_cell2` | `ran_cell_snr_db{cell_id="2"}` | VM-4 DU-2 (:4044) | `ran_adapter.py` | Float (dB) | Latest Uplink Signal-to-Noise Ratio for active UE in Cell-2 | Emits `NaN` if unallocated | Feature |
-| **33**| `rapp_diagnosed_bottleneck` | `rapp_diagnosed_bottleneck` | VM-1 rApp | Inference Engine | Integer Enum | Diagnostic classification: `0`=NORMAL, `1`=RAN, `2`=CORE, `3`=JOINT | Emits `0` during training | Prediction Target |
-| **34**| `rapp_confidence` | `rapp_confidence` | VM-1 rApp | Inference Engine | Float (0.0–1.0) | Classifier confidence probability score for predicted class | Emits `1.0` if deterministic | Prediction Target |
-| **35**| `event_scenario` | `event_scenario` | VM-6 `record_experiment.py` | Recorder Metadata | String Enum | Ground-truth disturbance scenario ID: `CLEAR`, `S1`, `S2`, `S3`, `S6`, `S9`, `S10_A`, `S10_B` | Emits `CLEAR` if idle | Ground Truth |
-| **36**| `event_domain` | `event_domain` | VM-6 `record_experiment.py` | Recorder Metadata | String Enum | Ground-truth bottleneck domain label: `NORMAL`, `BASELINE`, `RAN`, `CORE`, `JOINT` | Emits `BASELINE` if idle | Ground Truth |
-| **37**| `event_component` | `event_component` | VM-6 `record_experiment.py` | Recorder Metadata | String Enum | Physical component under impairment (e.g., `OAI_DU_MAC`, `UPF_EGRESS_QDISC`, `NONE`)| Emits `NONE` if idle | Ground Truth |
+| **8** | `e2e_slice1_rtt_ms` | `e2e_slice1_latency_rtt_ms` | VM-5 `ue1` netns | `trafgen.sh` | Float (ms) | ICMP round-trip time to EXT-DN (`192.168.70.145`) on Slice 1 | Decays to `NaN` after 3.5s | Feature |
+| **9** | `e2e_slice1_loss_pct` | `e2e_slice1_packet_loss_pct` | VM-5 `ue1` netns | `trafgen.sh` | Float (%) | Canary packet loss on Slice 1 | Decays to `NaN` after 3.5s | Feature |
+| **10**| `e2e_slice2_rtt_ms` | `e2e_slice2_latency_rtt_ms` | VM-5 `ue2` netns | `trafgen.sh` | Float (ms) | Latest ICMP round-trip time to EXT-DN (`192.168.70.145`) on Slice 2 | Decays to `NaN` after 3.5s | Feature / SLA |
+| **11**| `e2e_slice2_loss_pct` | `e2e_slice2_packet_loss_pct`| VM-5 `ue2` netns | `trafgen.sh` | Float (%) | Sequence-matched canary packet loss: $100 \times (1 - \frac{N_{rx}}{N_{tx}})$ | Decays to `NaN` after 3.5s | Feature / SLA |
+| **12**| `e2e_probe_freshness` | `e2e_probe_freshness` | VM-5 `trafgen.sh` | VM-6 Collector | Boolean (0/1) | Freshness indicator: `1` if report received $\le 3.5\text{ s}$, else `0` | Automatically drops to `0` | Metadata |
+| **13**| `nwdaf_load_embb` | `nwdaf_slice_load_level{snssai="01000001"}` | VM-3 NWDAF :8080 | 3GPP NBI | Float (%) | Standard 3GPP TS 23.288 Slice Load Level for eMBB | Emits `NaN` (unsupported) | Feature |
+| **14**| `nwdaf_load_urllc` | `nwdaf_slice_load_level{snssai="de00007b"}` | VM-3 NWDAF :8080 | 3GPP NBI | Float (%) | Standard 3GPP TS 23.288 Slice Load Level for URLLC | Emits `NaN` (unsupported) | Feature |
+| **15**| `nwdaf_comm_ul_bytes`| `nwdaf_comm_ul_bytes` | VM-3 NWDAF :8080 | 3GPP NBI | Integer (Bytes) | Standard 3GPP TS 23.288 §6.7 cumulative uplink user-plane volume | Retains last value | Feature |
+| **16**| `nwdaf_comm_dl_bytes`| `nwdaf_comm_dl_bytes` | VM-3 NWDAF :8080 | 3GPP NBI | Integer (Bytes) | Standard 3GPP TS 23.288 §6.7 cumulative downlink user-plane volume | Retains last value | Feature |
+| **17**| `nwdaf_comm_duration_sec`| `nwdaf_comm_duration_sec` | VM-3 NWDAF :8080 | 3GPP NBI | Float (s) | Cumulative sum of ingested URR report window durations | Retains last value | Feature |
+| **18**| `nwdaf_comm_vol_std_bytes`| `nwdaf_comm_vol_std_bytes` | VM-3 NWDAF :8080 | 3GPP NBI | Float (Bytes) | Standard deviation of volume across ingested URR reports | Retains last value | Feature |
+| **19**| `nwdaf_comm_freshness` | `nwdaf_comm_freshness` | VM-3 NWDAF :8080 | VM-6 Collector | Boolean (0/1) | Freshness indicator: `1` if source URR volume changed $\le 45\text{ s}$, else `0` | Drops to `0` when idle | Metadata |
+| **20**| `nwdaf_api_status` | `nwdaf_api_status` | VM-3 NWDAF :8080 | VM-6 Collector | Boolean (0/1) | HTTP 200 connectivity to Kong Gateway (`:8080/nnwdaf-analyticsinfo/...`)| `1` = OK, `0` = Unreachable | Metadata |
+| **21**| `estimated_load_embb` | `estimated_slice_load_level{snssai="01000001"}` | VM-3 UPF-1 | `core_adapter.py` | Float (%) | $\min\left(100.0, \max\left(0.0, \frac{\text{Tx}_{\text{mbps}}}{25.0} \times 100.0\right)\right)$ | Decays to `NaN` after 3.5s | Feature |
+| **22**| `estimated_load_urllc`| `estimated_slice_load_level{snssai="de00007b"}` | VM-3 UPF-2 | `core_adapter.py` | Float (%) | $\min\left(100.0, \max\left(0.0, \frac{\text{Tx}_{\text{mbps}}}{5.0} \times 100.0\right)\right)$ | Decays to `NaN` after 3.5s | Feature |
+| **23**| `upf_backlog_bytes_embb`| `upf_queue_backlog_bytes{snssai="01000001"}`| VM-3 UPF-1 | `core_adapter.py` | Integer (Bytes) | Linux `tc -s qdisc show dev eth0` backlog bytes on UPF-1 container | Decays to `NaN` after 3.5s | Feature / Bottleneck |
+| **24**| `upf_backlog_bytes_urllc`| `upf_queue_backlog_bytes{snssai="de00007b"}`| VM-3 UPF-2 | `core_adapter.py` | Integer (Bytes) | Linux `tc -s qdisc show dev eth0` backlog bytes on UPF-2 container | Decays to `NaN` after 3.5s | Feature / Bottleneck |
+| **25**| `upf_drops_embb` | `upf_packet_drops{snssai="01000001"}` | VM-3 UPF-1 | `core_adapter.py` | Float (drops/s) | Derivative packet drop rate: $\Delta \text{drops} / \Delta t$ over interval | Decays to `NaN` after 3.5s | Feature / Bottleneck |
+| **26**| `upf_drops_urllc` | `upf_packet_drops{snssai="de00007b"}` | VM-3 UPF-2 | `core_adapter.py` | Float (drops/s) | Derivative packet drop rate: $\Delta \text{drops} / \Delta t$ over interval | Decays to `NaN` after 3.5s | Feature / Bottleneck |
+| **27**| `ran_prb_cell1` | `ran_cell_prb_utilization{cell_id="1"}` | VM-4 DU-1 (:4043) | `ran_adapter.py` | Float (%) | Instantaneous MAC slot allocation: $\frac{NPRB}{106} \times 100.0$ | Decays to `NaN` after 3.5s | Feature / Bottleneck |
+| **28**| `ran_prb_cell2` | `ran_cell_prb_utilization{cell_id="2"}` | VM-4 DU-2 (:4044) | `ran_adapter.py` | Float (%) | Instantaneous MAC slot allocation: $\frac{NPRB}{106} \times 100.0$ | Decays to `NaN` after 3.5s | Feature / Bottleneck |
+| **29**| `ran_mcs_cell1` | `ran_cell_mcs{cell_id="1"}` | VM-4 DU-1 (:4043) | `ran_adapter.py` | Integer (0–28) | Latest UL-SCH Modulation & Coding Scheme index allocated in Cell-1 | Emits `NaN` if unallocated | Feature |
+| **30**| `ran_mcs_cell2` | `ran_cell_mcs{cell_id="2"}` | VM-4 DU-2 (:4044) | `ran_adapter.py` | Integer (0–28) | Latest UL-SCH Modulation & Coding Scheme index allocated in Cell-2 | Emits `NaN` if unallocated | Feature |
+| **31**| `ran_bler_cell1` | `ran_cell_bler{cell_id="1"}` | VM-4 DU-1 (:4043) | `ran_adapter.py` | Float (0.0–1.0) | Latest Block Error Rate on UL-SCH transport blocks in Cell-1 | Emits `NaN` if unallocated | Feature |
+| **32**| `ran_bler_cell2` | `ran_cell_bler{cell_id="2"}` | VM-4 DU-2 (:4044) | `ran_adapter.py` | Float (0.0–1.0) | Latest Block Error Rate on UL-SCH transport blocks in Cell-2 | Emits `NaN` if unallocated | Feature |
+| **33**| `ran_snr_cell1` | `ran_cell_snr_db{cell_id="1"}` | VM-4 DU-1 (:4043) | `ran_adapter.py` | Float (dB) | Latest Uplink Signal-to-Noise Ratio for active UE in Cell-1 | Emits `NaN` if unallocated | Feature |
+| **34**| `ran_snr_cell2` | `ran_cell_snr_db{cell_id="2"}` | VM-4 DU-2 (:4044) | `ran_adapter.py` | Float (dB) | Latest Uplink Signal-to-Noise Ratio for active UE in Cell-2 | Emits `NaN` if unallocated | Feature |
+| **35**| `rapp_diagnosed_bottleneck` | `rapp_diagnosed_bottleneck` | VM-1 rApp | Inference Engine | Integer Enum | Diagnostic classification: `0`=NORMAL, `1`=RAN, `2`=CORE, `3`=JOINT | Emits `0` during training | Prediction Target |
+| **36**| `rapp_confidence` | `rapp_confidence` | VM-1 rApp | Inference Engine | Float (0.0–1.0) | Classifier confidence probability score for predicted class | Emits `1.0` if deterministic | Prediction Target |
+| **37**| `event_phase_id` | `event_phase_id` | VM-6 `record_experiment.py` | Recorder Metadata | String | Active phase identifier (e.g., `phase_1_S1`) | Emits `idle` if unset | Operator Label |
+| **38**| `event_scenario` | `event_scenario` | VM-6 `record_experiment.py` | Recorder Metadata | String Enum | Operator-assigned scenario label: `CLEAR`, `S1`, `S2`, `S3`, `S6`, `S9`, `S10_A`, `S10_B` | Emits `IDLE` if unset | Operator Label |
+| **39**| `event_domain` | `event_domain` | VM-6 `record_experiment.py` | Recorder Metadata | String Enum | Operator-assigned bottleneck domain label: `BASELINE`, `RAN`, `CORE`, `JOINT` | Emits `BASELINE` if unset | Operator Label |
+| **40**| `event_component` | `event_component` | VM-6 `record_experiment.py` | Recorder Metadata | String Enum | Physical component under perturbation (e.g., `DU-1_Cell-1`, `UPF-1_Slice-1`, `NONE`)| Emits `NONE` if unset | Operator Label |
 
 ---
 
@@ -98,11 +102,11 @@ The table below catalogs every column in the generated `telemetry_raw_<RUN_ID>_<
 
 ### 4.1 Distinction: CSV Columns vs. Prometheus Gauge Identifiers
 A common point of confusion is equating the number of columns in the CSV with the number of raw Prometheus metric names. 
-* The **CSV dataset contains exactly 37 columns** representing a flattened, single-row feature vector per second.
+* The **CSV dataset contains exactly 40 columns** representing a flattened, single-row feature vector per second.
 * In Prometheus, several metrics are partitioned across labels:
   * `estimated_slice_load_level{snssai="01000001"}` and `estimated_slice_load_level{snssai="de00007b"}` originate from a single Prometheus metric family with distinct slice labels.
   * `ran_cell_prb_utilization{cell_id="1"}` and `ran_cell_prb_utilization{cell_id="2"}` originate from a single metric family with distinct cell labels.
-* The logger (`record_dual_stream.py`) explicitly evaluates metric labels to populate discrete CSV columns (`ran_prb_cell1`, `ran_prb_cell2`).
+* The recorder (`record_experiment.py`) explicitly evaluates metric labels to populate discrete CSV columns (`ran_prb_cell1`, `ran_prb_cell2`).
 
 ### 4.2 Semantic Limitation of `nwdaf_comm_duration_sec`
 In the upstream OAI NWDAF engine (`components/oai-nwdaf-engine/internal/engine/ue_communication.go`):

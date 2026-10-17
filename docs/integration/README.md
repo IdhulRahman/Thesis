@@ -70,8 +70,8 @@ Exposes standardized 3GPP user-plane communication analytics (`UE_COMMUNICATION`
  ┌──────────────────────┐                       ▼
  │ SMF-1 (QOS_MON)      │            ┌──────────────────────┐
  └──────────┬───────────┘            │ Prometheus &         │
-            ▼ HTTP/2 SBI             │ record_dual_stream   │
- ┌──────────────────────┐            │ (37-Column Dataset)  │
+            ▼ HTTP/2 SBI             │ record_experiment    │
+ ┌──────────────────────┐            │ (40-Column Dataset)  │
  │ oai-nwdaf-sbi/engine │            └──────────────────────┘
  │  └── Kong (:8080)    │
  └──────────────────────┘

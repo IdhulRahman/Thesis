@@ -8,7 +8,8 @@ Responsibilities:
 1. Provide a single, straightforward entry point to record one experiment scenario per session.
 2. Scrape telemetry from Prometheus Exporter (:9100) at 1.000 Hz monotonic cadence.
 3. Save data and raw responses transparently with zero synthetic data and zero quality-gate decisions.
-4. Stop cleanly on target duration or operator Ctrl+C, persisting metadata in manifest.json.
+4. Stop cleanly on target duration or operator signals (SIGINT / SIGTERM), persisting metadata in manifest.json.
+5. Explicitly manage collector lifecycle by closing active_run_id upon completion and tracking storage health.
 """
 
 import argparse
@@ -99,6 +100,12 @@ def extract_telemetry(metrics_url=METRICS_URL_DEFAULT, timeout=0.8):
         "ran_snr_cell1": NAN_STR, "ran_snr_cell2": NAN_STR,
         "rapp_diagnosed_bottleneck": NAN_STR, "rapp_confidence": NAN_STR
     }
+    storage_stats = {
+        "nwdaf_run_polls_written": 0,
+        "nwdaf_run_polls_failed": 0,
+        "nwdaf_raw_polls_total": 0,
+        "nwdaf_raw_polls_failed": 0
+    }
     scrape_ok = 0
     t_start = time.monotonic()
     try:
@@ -186,10 +193,30 @@ def extract_telemetry(metrics_url=METRICS_URL_DEFAULT, timeout=0.8):
                     raw_data["rapp_diagnosed_bottleneck"] = val_str
                 elif name == "rapp_confidence":
                     raw_data["rapp_confidence"] = val_str
+                elif name == "nwdaf_run_raw_polls_written":
+                    try:
+                        storage_stats["nwdaf_run_polls_written"] = int(float(val_str))
+                    except ValueError:
+                        pass
+                elif name == "nwdaf_run_raw_polls_failed":
+                    try:
+                        storage_stats["nwdaf_run_polls_failed"] = int(float(val_str))
+                    except ValueError:
+                        pass
+                elif name == "nwdaf_raw_polls_total":
+                    try:
+                        storage_stats["nwdaf_raw_polls_total"] = int(float(val_str))
+                    except ValueError:
+                        pass
+                elif name == "nwdaf_raw_polls_failed":
+                    try:
+                        storage_stats["nwdaf_raw_polls_failed"] = int(float(val_str))
+                    except ValueError:
+                        pass
     except Exception:
         latency_ms = (time.monotonic() - t_start) * 1000.0
         scrape_ok = 0
-    return raw_data, scrape_ok, latency_ms
+    return raw_data, scrape_ok, latency_ms, storage_stats
 
 
 def resolve_scenario_metadata(raw_scen):
@@ -213,6 +240,24 @@ def get_unique_run_dir(base_dir, base_run_id):
         if not os.path.exists(candidate_dir):
             return candidate_id, candidate_dir
         counter += 1
+
+
+def save_manifest_atomic(manifest_path, manifest_data):
+    """Atomically persists manifest metadata via temporary file replacement."""
+    tmp_path = manifest_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(manifest_data, f, indent=2)
+    os.replace(tmp_path, manifest_path)
+
+
+def count_lines(filepath):
+    if not os.path.exists(filepath):
+        return 0
+    try:
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            return sum(1 for _ in f)
+    except Exception:
+        return 0
 
 
 def main():
@@ -299,6 +344,7 @@ Contoh Penggunaan:
 
     csv_file = os.path.join(run_dir, f"telemetry_{run_id}.csv")
     manifest_file = os.path.join(run_dir, "manifest.json")
+    jsonl_file = os.path.join(run_dir, "nwdaf_raw_poll_responses.jsonl")
 
     start_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
     manifest = {
@@ -316,10 +362,14 @@ Contoh Penggunaan:
         "stop_reason": "IN_PROGRESS",
         "telemetry_csv": f"telemetry_{run_id}.csv",
         "nwdaf_raw_jsonl": "nwdaf_raw_poll_responses.jsonl",
-        "recording_status": "RECORDING"
+        "recording_status": "RECORDING",
+        "storage_audit": {},
+        "storage_warnings": []
     }
-    with open(manifest_file, "w", encoding="utf-8") as mf:
-        json.dump(manifest, mf, indent=2)
+    try:
+        save_manifest_atomic(manifest_file, manifest)
+    except Exception as e:
+        print(f"[!] Warning: Gagal inisialisasi manifest.json: {e}", file=sys.stderr)
 
     print("=" * 80)
     print("5G O-RAN TELEMETRY RECORDER (VM-6)")
@@ -334,28 +384,47 @@ Contoh Penggunaan:
     print("[*] Mulai merekam telemetri 1.0 Hz (Tekan Ctrl+C kapan saja untuk berhenti aman)...\n")
 
     running = True
+    stop_reason = "IN_PROGRESS"
 
     def sig_handler(sig, frame):
-        nonlocal running
-        print("\n[*] Sinyal stop diterima (Ctrl+C). Menutup berkas dengan aman...", flush=True)
+        nonlocal running, stop_reason
+        if sig == signal.SIGINT:
+            stop_reason = "INTERRUPTED_BY_OPERATOR"
+            print("\n[*] Sinyal stop diterima (Ctrl+C). Menutup berkas dengan aman...", flush=True)
+        elif sig == signal.SIGTERM:
+            stop_reason = "TERMINATED_BY_SIGTERM"
+            print("\n[*] Sinyal SIGTERM diterima. Menutup berkas dengan aman...", flush=True)
+        elif hasattr(signal, "SIGBREAK") and sig == signal.SIGBREAK:
+            stop_reason = "INTERRUPTED_BY_OPERATOR"
+            print("\n[*] Sinyal stop diterima (Ctrl+Break). Menutup berkas dengan aman...", flush=True)
+        else:
+            stop_reason = f"TERMINATED_BY_SIGNAL_{sig}"
+            print(f"\n[*] Sinyal {sig} diterima. Menutup berkas dengan aman...", flush=True)
         running = False
 
     signal.signal(signal.SIGINT, sig_handler)
     signal.signal(signal.SIGTERM, sig_handler)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, sig_handler)
 
     total_samples = 0
     scrape_ok_count = 0
     scrape_fail_count = 0
-    stop_reason = "DURATION_REACHED"
+    last_storage_stats = {
+        "nwdaf_run_polls_written": 0,
+        "nwdaf_run_polls_failed": 0,
+        "nwdaf_raw_polls_total": 0,
+        "nwdaf_raw_polls_failed": 0
+    }
 
     write_error = None
+    start_mono = time.monotonic()
     try:
         with open(csv_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(HEADERS)
             f.flush()
 
-            start_mono = time.monotonic()
             next_tick = start_mono
 
             while running:
@@ -366,7 +435,8 @@ Contoh Penggunaan:
                     stop_reason = "DURATION_REACHED"
                     break
 
-                telemetry, scrape_ok, scrape_lat = extract_telemetry(metrics_url=args.metrics_url)
+                telemetry, scrape_ok, scrape_lat, storage_stats = extract_telemetry(metrics_url=args.metrics_url)
+                last_storage_stats = storage_stats
                 if scrape_ok:
                     scrape_ok_count += 1
                 else:
@@ -412,48 +482,122 @@ Contoh Penggunaan:
                 if sleep_wait > 0:
                     time.sleep(sleep_wait)
 
-            if not running and stop_reason != "DURATION_REACHED":
-                stop_reason = "INTERRUPTED_BY_OPERATOR"
+            if stop_reason == "IN_PROGRESS":
+                stop_reason = "COMPLETED"
 
     except Exception as e:
         write_error = str(e)
         stop_reason = f"WRITE_ERROR: {e}"
-        print(f"\n[!] Error penulisan telemetri: {e}", file=sys.stderr)
+        print(f"\n[!] Error penulisan telemetri CSV: {e}", file=sys.stderr)
+
+    # 1. Close session in active_run_id.txt so collector stops adding polls to this finished run
+    try:
+        run_file_path = os.path.join(data_dir, "active_run_id.txt")
+        with open(run_file_path, "w", encoding="utf-8") as f:
+            f.write("")
+            f.flush()
+            os.fsync(f.fileno())
+        event_file_path = os.path.join(data_dir, "active_event.json")
+        with open(event_file_path, "w", encoding="utf-8") as f:
+            json.dump({"phase_id": "idle", "scenario": "IDLE", "domain": "BASELINE", "component": "NONE"}, f)
+            f.flush()
+            os.fsync(f.fileno())
+    except Exception as e:
+        print(f"[!] Warning: Gagal menutup status active_run_id/active_event: {e}", file=sys.stderr)
+
+    # Coordinate and drain any in-flight NWDAF poll in the collector daemon
+    time.sleep(0.3)
 
     end_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    actual_duration = round(time.monotonic() - start_mono, 3) if 'start_mono' in locals() else 0.0
+    actual_duration = round(time.monotonic() - start_mono, 3)
 
-    # Finalize manifest
+    # Final scrape to capture any terminal collector storage counters
+    try:
+        _, _, _, final_storage = extract_telemetry(metrics_url=args.metrics_url, timeout=0.5)
+        if final_storage.get("nwdaf_run_polls_written", 0) > last_storage_stats.get("nwdaf_run_polls_written", 0):
+            last_storage_stats["nwdaf_run_polls_written"] = final_storage["nwdaf_run_polls_written"]
+        if final_storage.get("nwdaf_run_polls_failed", 0) > last_storage_stats.get("nwdaf_run_polls_failed", 0):
+            last_storage_stats["nwdaf_run_polls_failed"] = final_storage["nwdaf_run_polls_failed"]
+    except Exception:
+        pass
+
+    # Audit storage files on disk
+    csv_bytes = os.path.getsize(csv_file) if os.path.exists(csv_file) else 0
+    jsonl_bytes = os.path.getsize(jsonl_file) if os.path.exists(jsonl_file) else 0
+    jsonl_lines = count_lines(jsonl_file)
+
+    storage_warnings = []
+    failed_polls = last_storage_stats.get("nwdaf_run_polls_failed", 0)
+    if failed_polls > 0:
+        storage_warnings.append(f"Collector melaporkan {failed_polls} kegagalan penulisan raw NWDAF poll ke arsip")
+
+    # Determine recording status strictly based on technical storage facts
+    if write_error is not None:
+        rec_status = "FAILED"
+    elif total_samples == 0:
+        rec_status = "FAILED"
+    elif failed_polls > 0:
+        rec_status = "PARTIAL_STORAGE_WARNING"
+    else:
+        rec_status = "SUCCESS"
+
     manifest["end_time_utc"] = end_utc
     manifest["duration_sec"] = actual_duration
     manifest["total_samples"] = total_samples
     manifest["scrape_success_samples"] = scrape_ok_count
     manifest["scrape_failed_samples"] = scrape_fail_count
     manifest["stop_reason"] = stop_reason
-    manifest["recording_status"] = "SUCCESS" if (write_error is None and total_samples > 0) else "FAILED"
+    manifest["recording_status"] = rec_status
+    manifest["storage_warnings"] = storage_warnings
+    manifest["storage_audit"] = {
+        "telemetry_csv": {
+            "filename": f"telemetry_{run_id}.csv",
+            "rows": total_samples,
+            "size_bytes": csv_bytes,
+            "status": "WRITTEN" if total_samples > 0 else "EMPTY"
+        },
+        "nwdaf_raw_jsonl": {
+            "filename": "nwdaf_raw_poll_responses.jsonl",
+            "polls_written_reported": last_storage_stats.get("nwdaf_run_polls_written", 0),
+            "polls_failed_reported": failed_polls,
+            "file_exists": os.path.exists(jsonl_file),
+            "file_bytes": jsonl_bytes,
+            "lines_counted": jsonl_lines
+        }
+    }
     if write_error:
         manifest["error_message"] = write_error
 
+    manifest_write_ok = True
+    manifest_error = None
     try:
-        with open(manifest_file, "w", encoding="utf-8") as mf:
-            json.dump(manifest, mf, indent=2)
+        save_manifest_atomic(manifest_file, manifest)
     except Exception as e:
-        print(f"[!] Warning: Gagal memperbarui manifest.json: {e}", file=sys.stderr)
+        manifest_write_ok = False
+        manifest_error = str(e)
+        manifest["recording_status"] = "FAILED"
+        print(f"[!] Error fatal: Gagal menyimpan manifest akhir {manifest_file}: {e}", file=sys.stderr)
 
     print("\n" + "=" * 80)
     print("HASIL PEREKAMAN EKSPERIMEN")
-    print(f"Status Teknis    : {manifest['recording_status']}")
+    if not manifest_write_ok:
+        print(f"Status Teknis    : FAILED (Gagal menyimpan manifest: {manifest_error})")
+    elif rec_status == "PARTIAL_STORAGE_WARNING":
+        print(f"Status Teknis    : PARTIAL_STORAGE_WARNING ({'; '.join(storage_warnings)})")
+    else:
+        print(f"Status Teknis    : {rec_status}")
     print(f"Identitas Run    : {run_id}")
     print(f"Skenario         : {scenario_name} ({canonical_scenario})")
     print(f"Total Sampel     : {total_samples} baris ({actual_duration:.1f} detik)")
     print(f"Status Scrape    : {scrape_ok_count} OK, {scrape_fail_count} Gagal")
+    print(f"Arsip NWDAF      : {last_storage_stats.get('nwdaf_run_polls_written', 0)} poll tersimpan, {failed_polls} gagal")
     print(f"Alasan Selesai   : {stop_reason}")
     print(f"Direktori Arsip  : {run_dir}")
     print(f"Berkas CSV       : {csv_file}")
     print(f"Berkas Manifest  : {manifest_file}")
     print("=" * 80)
 
-    if manifest["recording_status"] != "SUCCESS":
+    if not manifest_write_ok or rec_status == "FAILED":
         sys.exit(1)
 
 

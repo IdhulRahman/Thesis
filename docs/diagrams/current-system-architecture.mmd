@@ -83,8 +83,8 @@ flowchart LR
         COLLECTOR["Telemetry Collector (:9100)<br/>(telemetry_collector.py)"]
         PROM["Prometheus TSDB (:9090)"]
         GRAF["Grafana (:3000)"]
-        RECORDER["Monotonic Recorder (1 Hz)<br/>(record_dual_stream.py)"]
-        DATASET["37-Column CSV Dataset<br/>(telemetry_raw_<RUN>.csv)"]
+        RECORDER["Telemetry Recorder (1 Hz)<br/>(record_experiment.py)"]
+        DATASET["40-Column CSV Dataset<br/>(telemetry_<RUN>.csv)"]
 
         COLLECTOR --> PROM
         PROM --> GRAF

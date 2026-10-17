@@ -66,7 +66,7 @@ Every variable recorded in the experiment dataset has a fully traceable provenan
 │   │ Real-time raw poll archiving: data/raw/<RUN_ID>/nwdaf_raw_poll_responses.jsonl                               │
 │   │ Prometheus Gauge exposure (nwdaf_comm_*)                                                                    │
 │   ▼                                                                                                             │
-│ [record_dual_stream.py] ──► data/raw/<RUN_ID>/telemetry_<RUN_ID>.csv (1.000 Hz Monotonic CSV)                   │
+│ [record_experiment.py] ──► data/raw/<RUN_ID>/telemetry_<RUN_ID>.csv (1.000 Hz Monotonic CSV)                   │
 └─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -78,7 +78,7 @@ Every variable recorded in the experiment dataset has a fully traceable provenan
 │   │ Persistent file offset seek; Regex parser: NPRB/106, MCS, BLER, SNR                                         │
 │   │ HTTP POST http://10.102.0.67:9100/report (1 Hz cadence)                                                     │
 │   ▼                                                                                                             │
-│ [VM-6: telemetry_collector.py] ──► Prometheus Gauge (ran_cell_*) ──► [record_dual_stream.py] (1.000 Hz CSV)     │
+│ [VM-6: telemetry_collector.py] ──► Prometheus Gauge (ran_cell_*) ──► [record_experiment.py] (1.000 Hz CSV)     │
 └─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -90,7 +90,7 @@ Every variable recorded in the experiment dataset has a fully traceable provenan
 │   │ Ingests qdisc backlog bytes, drops/sec rate, total interface bytes                                          │
 │   │ HTTP POST http://10.102.0.67:9100/report (1 Hz cadence)                                                     │
 │   ▼                                                                                                             │
-│ [VM-6: telemetry_collector.py] ──► Prometheus Gauge (upf_queue_*, upf_packet_*) ──► [record_dual_stream.py]     │
+│ [VM-6: telemetry_collector.py] ──► Prometheus Gauge (upf_queue_*, upf_packet_*) ──► [record_experiment.py]     │
 │ NOTE: Strictly classified as Ground-Truth Validation / Audit; never fed into primary AnLF feature tensor.        │
 └─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
@@ -138,7 +138,7 @@ To guarantee scientific rigor, all telemetry recorded during experiments is stri
 
 ### Tier 3: Metadata, Annotations, and Quality Indicators
 * `timestamp_utc`, `elapsed_sec`, `run_id`
-* `event_scenario`, `event_domain`, `event_component` (Ground-truth disturbance labels from `record_experiment.py`)
+* `event_phase_id`, `event_scenario`, `event_domain`, `event_component` (Operator-assigned labels from `record_experiment.py`)
 * `nwdaf_api_status` (HTTP connectivity status to Kong Gateway)
 * `nwdaf_comm_freshness` (Heuristic indicator: 1 if source URR volume changed within 45s, else 0)
 * `e2e_probe_freshness` (Heuristic indicator: 1 if active canary ping received within 3.5s, else 0)

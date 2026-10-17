@@ -664,6 +664,7 @@ def check_run_state_change():
 def log_raw_nwdaf_poll(poll_record):
     """Archives every raw NWDAF NBI poll response to ensure complete traceability."""
     global active_run_id
+    check_run_state_change()
     raw_poll_stats["total"] += 1
     run_poll_stats["total"] += 1
     with METRICS_LOCK:

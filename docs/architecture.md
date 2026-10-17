@@ -77,7 +77,7 @@ The diagram below reflects the **empirically validated state** of the testbed cu
 #### D. Telemetry Ingestion & Monitoring Subsystem (VM-6)
 * **Telemetry Collector (`telemetry_collector.py`):** Ingests asynchronous HTTP POST reports from `trafgen.sh`, `ran_adapter.py`, and `core_adapter.py`, while concurrently polling the NWDAF NBI API (`:8080`) over HTTP GET. Exposes consolidated gauges over Prometheus `:9100/metrics`.
 * **Prometheus TSDB & Grafana:** Scrapes `:9100/metrics` at 1.0 Hz for live operator visualization.
-* **Monotonic Dual-Stream Recorder (`record_dual_stream.py`):** Scrapes `:9100/metrics` at exactly 1.000 Hz using monotonic time, exporting the definitive 37-column CSV dataset (`telemetry_raw_<RUN>.csv`).
+* **Monotonic Telemetry Recorder (`record_experiment.py`):** Scrapes `:9100/metrics` at exactly 1.000 Hz using monotonic time, exporting the 40-column CSV dataset directly to `data/raw/<RUN_ID>/telemetry_<RUN_ID>.csv` with `manifest.json`.
 
 ---
 
@@ -135,7 +135,7 @@ The diagram below illustrates the complete **proposed multi-timescale closed-loo
    netns ue1 / ue2          ──► iperf3 & ping canaries   ──► trafgen.sh        ──► POST :9100/report (VM-6)
 
  Aggregation & Storage (VM-6)
-   telemetry_collector.py   ──► Prometheus (:9100/metrics) ──► record_dual_stream.py ──► telemetry_raw_<RUN>.csv
+   telemetry_collector.py   ──► Prometheus (:9100/metrics) ──► record_experiment.py ──► telemetry_<RUN_ID>.csv
 ```
 
 ---

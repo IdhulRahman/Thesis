@@ -42,7 +42,7 @@ To validate the hypotheses, the experimental testbed executes **five comparative
 ## 3. Dataset Partitioning & Data Processing Rules
 
 ### 3.1 Data Splitting Strategy
-Experimental datasets recorded via `record_dual_stream.py` are partitioned temporally across contiguous scenario executions:
+Experimental datasets recorded via `record_experiment.py` are partitioned temporally across contiguous scenario executions:
 * **Training Set ($60\%$):** Contiguous scenario blocks used for offline feature normalization and classifier training.
 * **Validation Set ($20\%$):** Independent experiment runs used for hyperparameter tuning and decision threshold calibration.
 * **Testing Set ($20\%$):** Unseen experiment runs evaluated under continuous closed-loop execution.

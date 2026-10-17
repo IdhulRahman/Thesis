@@ -105,6 +105,12 @@ nwdaf_comm_freshness 1
 # HELP nwdaf_api_status NWDAF API Status
 # TYPE nwdaf_api_status gauge
 nwdaf_api_status 200
+# HELP nwdaf_run_raw_polls_written Polls written for active run
+# TYPE nwdaf_run_raw_polls_written gauge
+nwdaf_run_raw_polls_written 5
+# HELP nwdaf_run_raw_polls_failed Polls failed for active run
+# TYPE nwdaf_run_raw_polls_failed gauge
+nwdaf_run_raw_polls_failed 0
 """
 
     def do_GET(self):
@@ -209,7 +215,7 @@ metric_three{empty=""} 0.0
 
     def test_05_telemetry_extraction_against_mock_server(self):
         """POS-05: Real HTTP scrape extracts all expected metrics from Prometheus payload."""
-        data, scrape_ok, lat = record_experiment.extract_telemetry(metrics_url=self.mock_url)
+        data, scrape_ok, lat, storage_stats = record_experiment.extract_telemetry(metrics_url=self.mock_url)
         self.assertEqual(scrape_ok, 1)
         self.assertGreater(lat, 0.0)
         self.assertEqual(data["ran_prb_cell1"], "12.26")
@@ -220,15 +226,18 @@ metric_three{empty=""} 0.0
         self.assertEqual(data["upf_backlog_bytes_embb"], "0")
         self.assertEqual(data["nwdaf_comm_ul_bytes"], "10485760")
         self.assertEqual(data["nwdaf_api_status"], "200")
+        self.assertEqual(storage_stats["nwdaf_run_polls_written"], 5)
+        self.assertEqual(storage_stats["nwdaf_run_polls_failed"], 0)
 
     def test_06_scrape_failure_records_nan_transparently(self):
         """POS-06: Outages or unreachable exporter record scrape_ok=0 and NaN without crash."""
         bad_url = "http://127.0.0.1:1"  # Port 1 will fail connection
-        data, scrape_ok, lat = record_experiment.extract_telemetry(metrics_url=bad_url, timeout=0.1)
+        data, scrape_ok, lat, storage_stats = record_experiment.extract_telemetry(metrics_url=bad_url, timeout=0.1)
         self.assertEqual(scrape_ok, 0)
         self.assertEqual(data["ran_prb_cell1"], "NaN")
         self.assertEqual(data["e2e_slice1_tput_mbps"], "NaN")
         self.assertEqual(data["upf_backlog_bytes_embb"], "NaN")
+        self.assertEqual(storage_stats["nwdaf_run_polls_written"], 0)
 
     def test_07_recording_session_completes_and_generates_manifest(self):
         """POS-07: Full execution of record_experiment records telemetry and valid manifest."""
@@ -278,14 +287,16 @@ metric_three{empty=""} 0.0
             self.assertEqual(m["recording_status"], "SUCCESS")
             self.assertEqual(m["stop_reason"], "DURATION_REACHED")
             self.assertGreaterEqual(m["total_samples"], 2)
+            self.assertIn("storage_audit", m)
+            self.assertEqual(m["storage_audit"]["telemetry_csv"]["status"], "WRITTEN")
 
             # Strict verification: Manifest must NOT contain quality-gate decisions!
             self.assertNotIn("training_eligible", m)
             self.assertNotIn("data_quality_pass", m)
             self.assertNotIn("final_decision", m)
 
-    def test_08_active_run_id_file_synchronized(self):
-        """POS-08: active_run_id.txt is updated so telemetry_collector can route raw NWDAF polls."""
+    def test_08_active_run_id_closed_on_completion(self):
+        """POS-08: active_run_id.txt is closed upon run completion so collector halts archiving to finished run."""
         run_id = "EXP_TEST_ACTIVE_SYNC"
         args = [
             sys.executable,
@@ -303,7 +314,14 @@ metric_three{empty=""} 0.0
         self.assertTrue(os.path.isfile(active_file))
         with open(active_file, "r", encoding="utf-8") as f:
             content = f.read().strip()
-            self.assertEqual(content, run_id)
+            self.assertEqual(content, "", "active_run_id.txt must be cleared upon session completion")
+
+        event_file = os.path.join(self.test_dir, "active_event.json")
+        self.assertTrue(os.path.isfile(event_file))
+        with open(event_file, "r", encoding="utf-8") as f:
+            ev = json.load(f)
+            self.assertEqual(ev.get("phase_id"), "idle")
+            self.assertEqual(ev.get("scenario"), "IDLE")
 
     def test_09_compatibility_with_analyze_dataset(self):
         """POS-09: Recorded CSV can be directly parsed and analyzed by analyze_dataset.py."""
@@ -336,6 +354,98 @@ metric_three{empty=""} 0.0
         self.assertFalse(os.path.exists(pilot_path), "run_pilot_experiment.py must be deleted")
         self.assertFalse(os.path.exists(log_event_path), "log_event.py must be deleted")
         self.assertFalse(os.path.exists(dual_stream_path), "record_dual_stream.py must be deleted")
+
+    def test_11_nwdaf_storage_failure_audit_and_warning(self):
+        """POS-11: Collector NWDAF storage failure counter is tracked and flagged in manifest storage_audit."""
+        # Create a mock handler that simulates 3 failed NWDAF polls
+        class FailingNWDAFHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                payload = b"""# HELP nwdaf_run_raw_polls_written Polls written
+nwdaf_run_raw_polls_written 2
+# HELP nwdaf_run_raw_polls_failed Polls failed
+nwdaf_run_raw_polls_failed 3
+"""
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(payload)
+            def log_message(self, format, *args):
+                pass
+
+        fail_server = socketserver.TCPServer(("127.0.0.1", 0), FailingNWDAFHandler)
+        port = fail_server.server_address[1]
+        fail_url = f"http://127.0.0.1:{port}/metrics"
+        t = threading.Thread(target=fail_server.serve_forever, daemon=True)
+        t.start()
+
+        run_id = "EXP_TEST_STORAGE_FAIL"
+        try:
+            args = [
+                sys.executable,
+                os.path.join(os.path.dirname(__file__), "..", "scripts", "record_experiment.py"),
+                "S1",
+                "--duration", "1",
+                "--run-id", run_id,
+                "--metrics-url", fail_url,
+                "--data-dir", self.test_dir
+            ]
+            res = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            manifest_file = os.path.join(self.test_dir, "raw", run_id, "manifest.json")
+            self.assertTrue(os.path.isfile(manifest_file))
+            with open(manifest_file, "r", encoding="utf-8") as mf:
+                m = json.load(mf)
+                self.assertEqual(m["recording_status"], "PARTIAL_STORAGE_WARNING")
+                self.assertGreater(len(m["storage_warnings"]), 0)
+                self.assertEqual(m["storage_audit"]["nwdaf_raw_jsonl"]["polls_failed_reported"], 3)
+        finally:
+            fail_server.shutdown()
+            fail_server.server_close()
+
+    def test_12_atomic_manifest_failure_returns_exit_1(self):
+        """NEG-02: Manifest write failure results in consistent non-zero exit code and FAILED status."""
+        test_manifest = {"run_id": "TEST_ATOMIC", "status": "IN_PROGRESS"}
+        invalid_path = os.path.join(self.test_dir, "nonexistent_dir_12345", "sub", "manifest.json")
+        with self.assertRaises(Exception):
+            record_experiment.save_manifest_atomic(invalid_path, test_manifest)
+
+    def test_13_signal_stop_reason_operator_interrupt(self):
+        """POS-12: Subprocess terminated via signal properly attributes stop_reason to operator interrupt."""
+        run_id = "EXP_TEST_SIGNAL_STOP"
+        args = [
+            sys.executable,
+            os.path.join(os.path.dirname(__file__), "..", "scripts", "record_experiment.py"),
+            "S1",
+            "--duration", "0",  # infinite / manual mode
+            "--run-id", run_id,
+            "--metrics-url", self.mock_url,
+            "--data-dir", self.test_dir
+        ]
+        if sys.platform == "win32":
+            proc = subprocess.Popen(
+                args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+            )
+            time.sleep(1.8)
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+            proc.wait(timeout=5)
+        else:
+            proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            time.sleep(1.8)
+            proc.send_signal(signal.SIGINT)
+            proc.wait(timeout=5)
+        if proc.stdout:
+            proc.stdout.close()
+        if proc.stderr:
+            proc.stderr.close()
+
+        manifest_file = os.path.join(self.test_dir, "raw", run_id, "manifest.json")
+        self.assertTrue(os.path.isfile(manifest_file))
+        with open(manifest_file, "r", encoding="utf-8") as mf:
+            m = json.load(mf)
+            self.assertEqual(m["stop_reason"], "INTERRUPTED_BY_OPERATOR")
 
 
 if __name__ == "__main__":

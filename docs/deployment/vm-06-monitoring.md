@@ -58,7 +58,7 @@ Ingested via Core Research Telemetry Adapter (`core_adapter.py` v9) and 3GPP Rel
 | `nwdaf_comm_vol_std_bytes`| OAI NWDAF NBI (`UE_COMMUNICATION`) | Bytes (`B`) | Volume variation metric (computed as standard deviation $\sigma$ upstream). |
 | `nwdaf_comm_freshness` | Collector Poller (`telemetry_collector.py`)| Binary (`1/0`) | Freshness indicator for NWDAF NBI telemetry ($1$ if updated within 35s). |
 | `nwdaf_network_performance` | OAI NWDAF NBI (`Nnwdaf_AnalyticsInfo`) | JSON 3GPP TS 29.520 | PDU session control analytics (`SESS_SUCC_RATIO`, static ratio `0`). |
-| `amf_active_pdu_sessions` | AMF SBI (`/namf-comm`) | Counter | Ground-truth count of active PDU sessions across slices. |
+| `amf_active_pdu_sessions` | AMF SBI (`/namf-comm`) | Counter | Empirical count of active PDU sessions across slices. |
 
 ### 2.2 Domain 2: OpenAirInterface Split RAN (VM-4 — `10.102.0.167`)
 Ingested via O-RAN FlexRIC E2 Agent (`E2SM-KPM v2.03` over SCTP `36421`):
@@ -77,7 +77,7 @@ Ingested via A1 PMS REST API (`:8081`), xApp internal telemetry, and rApp decisi
 
 | Metric Name | Source Component | Data Type | Role in Thesis Evaluation |
 |---|---|---|---|
-| `rapp_diagnosed_bottleneck` | rApp Classifier (VM-1) | Enum (`0:NORMAL, 1:RAN, 2:CORE, 3:JOINT`) | Ground-truth classification of bottleneck origin. Core novelty metric. |
+| `rapp_diagnosed_bottleneck` | rApp Classifier (VM-1) | Enum (`0:NORMAL, 1:RAN, 2:CORE, 3:JOINT`) | Diagnostic classification of bottleneck origin. Core novelty metric. |
 | `rapp_classifier_confidence` | rApp Classifier (VM-1) | Float (`0.0 - 1.0`) | AI/heuristic confidence score for root-cause diagnosis. |
 | `a1_policy_threshold` | A1 PMS (VM-1 / VM-2) | Numeric (Type 20008) | Active steering threshold enforced from Non-RT to Near-RT RIC. |
 | `xapp_steering_decision` | xApp (VM-2) | Enum (`KEEP, CELL_1, CELL_2`) | Real-time traffic steering action dispatched via E2SM-RC. |
@@ -89,8 +89,8 @@ Ingested directly from the automated multi-slice traffic generator (`trafgen.sh`
 
 | Metric Name | Workload Generator | Sampling | Role in Thesis Evaluation |
 |---|---|---|---|
-| `e2e_slice1_throughput_mbps` | `iperf3` (Slice 1 eMBB) | 1.0 second | Ground-truth user-plane throughput delivered across Slice 1. |
-| `e2e_slice2_latency_rtt_ms` | Precision Ping (Slice 2 URLLC) | 100 ms | Ground-truth end-to-end RTT latency (min, avg, max, mdev, p95, p99). |
+| `e2e_slice1_throughput_mbps` | `iperf3` (Slice 1 eMBB) | 1.0 second | Measured user-plane throughput delivered across Slice 1. |
+| `e2e_slice2_latency_rtt_ms` | Precision Ping (Slice 2 URLLC) | 100 ms | Measured end-to-end RTT latency (min, avg, max, mdev, p95, p99). |
 | `e2e_slice2_packet_loss_pct` | Precision Ping (Slice 2 URLLC) | Cumulative (`%`) | SLA violation indicator for mission-critical slice. Must remain 0%. |
 | `e2e_sla_violation_status` | SLA Monitor | Binary (`0: OK, 1: VIOLATED`) | Evaluates SLA violation rate ($V_s$) and recovery time ($T_{rec}$). |
 

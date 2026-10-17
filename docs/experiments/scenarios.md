@@ -6,11 +6,11 @@
 
 ---
 
-## 1. Scenario Registry & Ground-Truth Label Definitions
+## 1. Scenario Registry & Operator Label Definitions
 
 The testbed defines discrete, repeatable fault injection scenarios to evaluate bottleneck detection across the spectrum of network conditions. Every scenario is recorded directly using `scripts/record_experiment.py` on VM-6:
 
-| Scenario ID | Formal Scenario Identifier | Ground-Truth Domain | Physical Target Component | Injection Mechanism | Parameter Values | Expected Telemetry Signature |
+| Scenario ID | Formal Scenario Identifier | Operator Domain Label | Physical Target Component | Injection Mechanism | Parameter Values | Expected Telemetry Signature |
 |---|---|:---:|---|---|---|---|
 | **`CLEAR`** | `CLEAR_FAULT` | `NORMAL` | None | Baseline quiescent state | Offered load $10\text{ Mbps}$, no shaping | PRB $\approx 15\%$, UPF backlog $0\text{ B}$, RTT $< 25\text{ ms}$, loss $0\%$. |
 | **`S1`** | `S1_NORMAL_LIGHT` | `NORMAL` | None | Light baseline traffic | Offered load $10\text{ Mbps}$ ($\sim 35\% C_{\text{ran}}^{UL}$) | PRB $\approx 35\%$, UPF backlog $0\text{ B}$, RTT $< 25\text{ ms}$, loss $0\%$. |
