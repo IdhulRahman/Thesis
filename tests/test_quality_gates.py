@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 import record_experiment
 import analyze_dataset
+import telemetry_collector
 
 
 class MockPrometheusHandler(http.server.BaseHTTPRequestHandler):
@@ -446,6 +447,112 @@ nwdaf_run_raw_polls_failed 3
         with open(manifest_file, "r", encoding="utf-8") as mf:
             m = json.load(mf)
             self.assertEqual(m["stop_reason"], "INTERRUPTED_BY_OPERATOR")
+
+    def test_14_cross_run_nwdaf_contamination_prevention_and_late_responses(self):
+        """POS-13: Ensures NWDAF poll archiving strictly binds to request context and drops late responses."""
+        orig_data_dir = os.environ.get("MONITORING_DATA_DIR")
+        os.environ["MONITORING_DATA_DIR"] = self.test_dir
+        try:
+            run_a_dir = os.path.join(self.test_dir, "raw", "RUN_A")
+            run_b_dir = os.path.join(self.test_dir, "raw", "RUN_B")
+            os.makedirs(run_a_dir, exist_ok=True)
+            os.makedirs(run_b_dir, exist_ok=True)
+
+            active_file = os.path.join(self.test_dir, "active_run_id.txt")
+            telemetry_collector.RUN_STATE_FILE = active_file
+
+            # 1. Idle request: target_run_id=None must not write to any run directory even if RUN_B is active
+            with open(active_file, "w", encoding="utf-8") as f:
+                f.write("RUN_B\n")
+            telemetry_collector.check_run_state_change()
+
+            ok, reason = telemetry_collector.log_raw_nwdaf_poll({"poll": "idle"}, target_run_id=None)
+            self.assertFalse(ok)
+            self.assertEqual(reason, "IDLE_REQUEST")
+            self.assertFalse(os.path.exists(os.path.join(run_b_dir, "nwdaf_raw_poll_responses.jsonl")))
+
+            # 2. Late response: request started for RUN_A, but response arrived when RUN_B is active
+            ok, reason = telemetry_collector.log_raw_nwdaf_poll({"poll": "late_A"}, target_run_id="RUN_A")
+            self.assertFalse(ok)
+            self.assertIn("LATE_RESPONSE", reason)
+            # Must NOT be written into RUN_B directory!
+            self.assertFalse(os.path.exists(os.path.join(run_b_dir, "nwdaf_raw_poll_responses.jsonl")))
+            # Must NOT be written into RUN_A directory!
+            self.assertFalse(os.path.exists(os.path.join(run_a_dir, "nwdaf_raw_poll_responses.jsonl")))
+            # RUN_B counters must not have been incremented by RUN_A's response
+            self.assertEqual(telemetry_collector.run_poll_stats["written"], 0)
+
+            # 3. In-context response: request started for RUN_B and arrived when RUN_B is still active
+            ok, reason = telemetry_collector.log_raw_nwdaf_poll({"poll": "valid_B"}, target_run_id="RUN_B")
+            self.assertTrue(ok)
+            self.assertTrue(os.path.exists(os.path.join(run_b_dir, "nwdaf_raw_poll_responses.jsonl")))
+            with open(os.path.join(run_b_dir, "nwdaf_raw_poll_responses.jsonl"), "r", encoding="utf-8") as f:
+                line = json.loads(f.read().strip())
+                self.assertEqual(line["run_id"], "RUN_B")
+            self.assertEqual(telemetry_collector.run_poll_stats["written"], 1)
+
+        finally:
+            if orig_data_dir:
+                os.environ["MONITORING_DATA_DIR"] = orig_data_dir
+            else:
+                os.environ.pop("MONITORING_DATA_DIR", None)
+
+    def test_15_storage_failure_history_retained_across_subsequent_scrape_errors(self):
+        """POS-14: Verifies that observed archive failures are retained even when subsequent scrapes fail (e.g. HTTP 503)."""
+        request_count = 0
+        class FlakyPrometheusHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                nonlocal request_count
+                request_count += 1
+                if request_count <= 2:
+                    # Initial scrapes report 3 failed polls
+                    payload = b"""# HELP nwdaf_run_raw_polls_written Polls written
+nwdaf_run_raw_polls_written 1
+# HELP nwdaf_run_raw_polls_failed Polls failed
+nwdaf_run_raw_polls_failed 3
+# HELP nwdaf_poll_in_flight In flight
+nwdaf_poll_in_flight 0
+"""
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain")
+                    self.end_headers()
+                    self.wfile.write(payload)
+                else:
+                    # Subsequent scrapes fail with HTTP 503
+                    self.send_response(503)
+                    self.end_headers()
+            def log_message(self, format, *args):
+                pass
+
+        flaky_server = socketserver.TCPServer(("127.0.0.1", 0), FlakyPrometheusHandler)
+        port = flaky_server.server_address[1]
+        flaky_url = f"http://127.0.0.1:{port}/metrics"
+        t = threading.Thread(target=flaky_server.serve_forever, daemon=True)
+        t.start()
+
+        run_id = "EXP_TEST_FLAKY_FAIL"
+        try:
+            args = [
+                sys.executable,
+                os.path.join(os.path.dirname(__file__), "..", "scripts", "record_experiment.py"),
+                "S1",
+                "--duration", "2",
+                "--run-id", run_id,
+                "--metrics-url", flaky_url,
+                "--data-dir", self.test_dir
+            ]
+            res = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            manifest_file = os.path.join(self.test_dir, "raw", run_id, "manifest.json")
+            self.assertTrue(os.path.isfile(manifest_file))
+            with open(manifest_file, "r", encoding="utf-8") as mf:
+                m = json.load(mf)
+                # Failure count 3 MUST be retained, status must be PARTIAL_STORAGE_WARNING!
+                self.assertEqual(m["recording_status"], "PARTIAL_STORAGE_WARNING")
+                self.assertEqual(m["storage_audit"]["nwdaf_raw_jsonl"]["polls_failed_reported"], 3)
+                self.assertGreater(len(m["storage_warnings"]), 0)
+        finally:
+            flaky_server.shutdown()
+            flaky_server.server_close()
 
 
 if __name__ == "__main__":

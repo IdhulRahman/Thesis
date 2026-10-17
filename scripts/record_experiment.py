@@ -104,7 +104,8 @@ def extract_telemetry(metrics_url=METRICS_URL_DEFAULT, timeout=0.8):
         "nwdaf_run_polls_written": 0,
         "nwdaf_run_polls_failed": 0,
         "nwdaf_raw_polls_total": 0,
-        "nwdaf_raw_polls_failed": 0
+        "nwdaf_raw_polls_failed": 0,
+        "nwdaf_poll_in_flight": 0
     }
     scrape_ok = 0
     t_start = time.monotonic()
@@ -211,6 +212,11 @@ def extract_telemetry(metrics_url=METRICS_URL_DEFAULT, timeout=0.8):
                 elif name == "nwdaf_raw_polls_failed":
                     try:
                         storage_stats["nwdaf_raw_polls_failed"] = int(float(val_str))
+                    except ValueError:
+                        pass
+                elif name == "nwdaf_poll_in_flight":
+                    try:
+                        storage_stats["nwdaf_poll_in_flight"] = int(float(val_str))
                     except ValueError:
                         pass
     except Exception:
@@ -436,9 +442,13 @@ Contoh Penggunaan:
                     break
 
                 telemetry, scrape_ok, scrape_lat, storage_stats = extract_telemetry(metrics_url=args.metrics_url)
-                last_storage_stats = storage_stats
                 if scrape_ok:
                     scrape_ok_count += 1
+                    # Preserve latest successfully read storage counters; never overwrite with zero on scrape failure
+                    for k in ("nwdaf_run_polls_written", "nwdaf_run_polls_failed", "nwdaf_raw_polls_total", "nwdaf_raw_polls_failed"):
+                        val = storage_stats.get(k, 0)
+                        if val > last_storage_stats.get(k, 0):
+                            last_storage_stats[k] = val
                 else:
                     scrape_fail_count += 1
 
@@ -490,7 +500,23 @@ Contoh Penggunaan:
         stop_reason = f"WRITE_ERROR: {e}"
         print(f"\n[!] Error penulisan telemetri CSV: {e}", file=sys.stderr)
 
-    # 1. Close session in active_run_id.txt so collector stops adding polls to this finished run
+    # 1. Coordinate in-flight poll: if an NWDAF poll for this run is currently in-flight,
+    # wait for it to complete (up to 2.5s) so its results are captured before closing the run.
+    t_coord_start = time.monotonic()
+    while time.monotonic() - t_coord_start < 2.5:
+        _, coord_ok, _, coord_storage = extract_telemetry(metrics_url=args.metrics_url, timeout=0.4)
+        if coord_ok:
+            for k in ("nwdaf_run_polls_written", "nwdaf_run_polls_failed", "nwdaf_raw_polls_total", "nwdaf_raw_polls_failed"):
+                val = coord_storage.get(k, 0)
+                if val > last_storage_stats.get(k, 0):
+                    last_storage_stats[k] = val
+            if coord_storage.get("nwdaf_poll_in_flight", 0) == 0:
+                break
+        else:
+            break
+        time.sleep(0.1)
+
+    # 2. Close session in active_run_id.txt so collector stops adding polls to this finished run
     try:
         run_file_path = os.path.join(data_dir, "active_run_id.txt")
         with open(run_file_path, "w", encoding="utf-8") as f:
@@ -505,19 +531,17 @@ Contoh Penggunaan:
     except Exception as e:
         print(f"[!] Warning: Gagal menutup status active_run_id/active_event: {e}", file=sys.stderr)
 
-    # Coordinate and drain any in-flight NWDAF poll in the collector daemon
-    time.sleep(0.3)
-
     end_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
     actual_duration = round(time.monotonic() - start_mono, 3)
 
     # Final scrape to capture any terminal collector storage counters
     try:
-        _, _, _, final_storage = extract_telemetry(metrics_url=args.metrics_url, timeout=0.5)
-        if final_storage.get("nwdaf_run_polls_written", 0) > last_storage_stats.get("nwdaf_run_polls_written", 0):
-            last_storage_stats["nwdaf_run_polls_written"] = final_storage["nwdaf_run_polls_written"]
-        if final_storage.get("nwdaf_run_polls_failed", 0) > last_storage_stats.get("nwdaf_run_polls_failed", 0):
-            last_storage_stats["nwdaf_run_polls_failed"] = final_storage["nwdaf_run_polls_failed"]
+        _, final_ok, _, final_storage = extract_telemetry(metrics_url=args.metrics_url, timeout=0.5)
+        if final_ok:
+            for k in ("nwdaf_run_polls_written", "nwdaf_run_polls_failed", "nwdaf_raw_polls_total", "nwdaf_raw_polls_failed"):
+                val = final_storage.get(k, 0)
+                if val > last_storage_stats.get(k, 0):
+                    last_storage_stats[k] = val
     except Exception:
         pass
 

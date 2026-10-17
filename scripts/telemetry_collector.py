@@ -59,6 +59,8 @@ metrics_store = {
     "nwdaf_run_raw_polls_total": 0,   # Per-Run Counter: total poll attempts for active_run_id
     "nwdaf_run_raw_polls_written": 0, # Per-Run Counter: polls successfully written for active_run_id
     "nwdaf_run_raw_polls_failed": 0,  # Per-Run Counter: poll archive failures for active_run_id
+    "nwdaf_poll_in_flight": 0,        # Gauge: 1 = NWDAF NBI poll HTTP request in-flight, 0 = idle
+    "nwdaf_late_polls_total": 0,      # Counter: late/out-of-context NWDAF responses discarded
     "estimated_slice_load_level": {
         "01000001": float("nan"),     # Empirical load estimate (Tx / Quota * 100%)
         "de00007b": float("nan")
@@ -317,6 +319,14 @@ def format_prometheus_metrics():
         lines.append("# HELP nwdaf_run_raw_polls_failed Raw NWDAF poll responses that failed to write for current active run")
         lines.append("# TYPE nwdaf_run_raw_polls_failed gauge")
         lines.append(f"nwdaf_run_raw_polls_failed {int(metrics_store['nwdaf_run_raw_polls_failed'])}")
+
+        lines.append("# HELP nwdaf_poll_in_flight Indicates whether an NWDAF NBI HTTP poll is currently in-flight")
+        lines.append("# TYPE nwdaf_poll_in_flight gauge")
+        lines.append(f"nwdaf_poll_in_flight {int(metrics_store['nwdaf_poll_in_flight'])}")
+
+        lines.append("# HELP nwdaf_late_polls_total Total late or out-of-context NWDAF poll responses discarded")
+        lines.append("# TYPE nwdaf_late_polls_total counter")
+        lines.append(f"nwdaf_late_polls_total {int(metrics_store['nwdaf_late_polls_total'])}")
 
         lines.append("# HELP estimated_slice_load_level Estimated slice load percentage derived from UPF interface Tx throughput")
         lines.append("# TYPE estimated_slice_load_level gauge")
@@ -661,24 +671,34 @@ def check_run_state_change():
     return COLLECTOR_START_TIME.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def log_raw_nwdaf_poll(poll_record):
-    """Archives every raw NWDAF NBI poll response to ensure complete traceability."""
+def log_raw_nwdaf_poll(poll_record, target_run_id=None):
+    """Archives raw NWDAF NBI poll response strictly binding request context,
+    target run directory, per-run counters, and metric updates.
+    Explicitly drops late/out-of-context responses.
+    """
     global active_run_id
-    check_run_state_change()
     raw_poll_stats["total"] += 1
-    run_poll_stats["total"] += 1
     with METRICS_LOCK:
         metrics_store["nwdaf_raw_polls_total"] = raw_poll_stats["total"]
-        metrics_store["nwdaf_run_raw_polls_total"] = run_poll_stats["total"]
 
-    if not active_run_id:
-        return
+    # Re-evaluate current run state dynamically
+    check_run_state_change()
 
+    # 1. Idle request: initiated outside any active run; do not archive to any run directory
+    if not target_run_id:
+        return False, "IDLE_REQUEST"
+
+    # 2. Late response: active run transitioned or ended while request was in-flight
+    if active_run_id != target_run_id:
+        with METRICS_LOCK:
+            metrics_store["nwdaf_late_polls_total"] = metrics_store.get("nwdaf_late_polls_total", 0) + 1
+        return False, f"LATE_RESPONSE: target '{target_run_id}' != active '{active_run_id}'"
+
+    # 3. Valid in-context response: target_run_id == active_run_id
     data_dir = os.getenv("MONITORING_DATA_DIR", "/opt/oran/monitoring/data")
-    if "run_id" not in poll_record:
-        poll_record["run_id"] = active_run_id
+    poll_record["run_id"] = target_run_id
     line = json.dumps(poll_record) + "\n"
-    run_dir = os.path.join(data_dir, "raw", active_run_id)
+    run_dir = os.path.join(data_dir, "raw", target_run_id)
     write_success = True
     last_err = ""
 
@@ -689,14 +709,18 @@ def log_raw_nwdaf_poll(poll_record):
         except Exception as e:
             write_success = False
             last_err = f"run_dir write error: {e}"
+    else:
+        write_success = False
+        last_err = f"run_dir '{run_dir}' does not exist"
 
     try:
-        with open(os.path.join(data_dir, f"nwdaf_raw_poll_{active_run_id}.jsonl"), "a", encoding="utf-8") as f:
+        with open(os.path.join(data_dir, f"nwdaf_raw_poll_{target_run_id}.jsonl"), "a", encoding="utf-8") as f:
             f.write(line)
     except Exception as e:
         write_success = False
         last_err = f"{last_err}; data_dir write error: {e}".strip("; ")
 
+    run_poll_stats["total"] += 1
     if write_success:
         raw_poll_stats["written"] += 1
         run_poll_stats["written"] += 1
@@ -709,8 +733,11 @@ def log_raw_nwdaf_poll(poll_record):
     with METRICS_LOCK:
         metrics_store["nwdaf_raw_polls_written"] = raw_poll_stats["written"]
         metrics_store["nwdaf_raw_polls_failed"] = raw_poll_stats["failed"]
+        metrics_store["nwdaf_run_raw_polls_total"] = run_poll_stats["total"]
         metrics_store["nwdaf_run_raw_polls_written"] = run_poll_stats["written"]
         metrics_store["nwdaf_run_raw_polls_failed"] = run_poll_stats["failed"]
+
+    return write_success, last_err
 
 
 def get_nwdaf_query_window():
@@ -724,11 +751,13 @@ def poll_external_nfs():
     global last_nwdaf_poll_time, last_nwdaf_data_change_time, last_nwdaf_signature
     while True:
         start_ts, end_ts, url = None, None, None
+        target_run_id = None
         try:
             # Query 3GPP TS 29.520 UE_COMMUNICATION analytics from NWDAF via Kong Gateway port 8080.
             # Upstream OAI NWDAF Engine (ue_communication.go) filters MongoDB documents by startTs/endTs.
             # Using an isolated per-run window prevents aggregation of historical metrics from prior experiments.
             start_ts, end_ts = get_nwdaf_query_window()
+            target_run_id = active_run_id
             ana_req = json.dumps({"startTs": start_ts, "endTs": end_ts})
             query = urllib.parse.urlencode({
                 "event-id": "UE_COMMUNICATION",
@@ -740,86 +769,95 @@ def poll_external_nfs():
                 headers={"User-Agent": "Thesis-Collector/1.0"}
             )
             poll_start = time.time()
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                poll_latency = time.time() - poll_start
-                if resp.status == 200:
-                    raw_bytes = resp.read()
-                    data = json.loads(raw_bytes.decode())
-                    log_raw_nwdaf_poll({
-                        "poll_timestamp_utc": datetime.now(timezone.utc).isoformat(),
-                        "run_id": active_run_id,
-                        "query_start_ts": start_ts,
-                        "query_end_ts": end_ts,
-                        "query_url": url,
-                        "http_status": resp.status,
-                        "latency_ms": round(poll_latency * 1000, 2),
-                        "response_body": data
-                    })
-                    with METRICS_LOCK:
-                        now = time.time()
-                        last_nwdaf_poll_time = now
-                        metrics_store["nwdaf_api_status"] = 1
-                        ue_comms = data.get("ueComms", [])
-                        if ue_comms:
-                            comm = ue_comms[0]
-                            dur = float(comm.get("commDur", float("nan")))
-                            traf = comm.get("trafChar", {})
-                            ul = float(traf.get("ulVol", float("nan")))
-                            dl = float(traf.get("dlVol", float("nan")))
-                            # Note: Upstream OAI NWDAF ue_communication.go computes std dev (math.Sqrt)
-                            # into the ulVolVariance field:
-                            std_dev = float(traf.get("ulVolVariance", float("nan")))
+            with METRICS_LOCK:
+                metrics_store["nwdaf_poll_in_flight"] = 1
+            try:
+                with urllib.request.urlopen(req, timeout=2.0) as resp:
+                    poll_latency = time.time() - poll_start
+                    if resp.status == 200:
+                        raw_bytes = resp.read()
+                        data = json.loads(raw_bytes.decode())
+                        log_raw_nwdaf_poll({
+                            "poll_timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                            "run_id": target_run_id,
+                            "query_start_ts": start_ts,
+                            "query_end_ts": end_ts,
+                            "query_url": url,
+                            "http_status": resp.status,
+                            "latency_ms": round(poll_latency * 1000, 2),
+                            "response_body": data
+                        }, target_run_id=target_run_id)
+                        with METRICS_LOCK:
+                            now = time.time()
+                            last_nwdaf_poll_time = now
+                            metrics_store["nwdaf_api_status"] = 1
+                            # STRICT BINDING: Only update communication metrics if the response matches the active run
+                            if target_run_id == active_run_id:
+                                ue_comms = data.get("ueComms", [])
+                                if ue_comms:
+                                    comm = ue_comms[0]
+                                    dur = float(comm.get("commDur", float("nan")))
+                                    traf = comm.get("trafChar", {})
+                                    ul = float(traf.get("ulVol", float("nan")))
+                                    dl = float(traf.get("dlVol", float("nan")))
+                                    # Note: Upstream OAI NWDAF ue_communication.go computes std dev (math.Sqrt)
+                                    # into the ulVolVariance field:
+                                    std_dev = float(traf.get("ulVolVariance", float("nan")))
 
-                            sig = (dur, ul, dl, std_dev)
-                            if last_nwdaf_signature is None:
-                                # Initial poll baseline: establish signature without falsely asserting freshness
-                                last_nwdaf_signature = sig
-                            elif sig != last_nwdaf_signature:
-                                # Authentic data change detected during this active session
-                                last_nwdaf_signature = sig
-                                last_nwdaf_data_change_time = now
+                                    sig = (dur, ul, dl, std_dev)
+                                    if last_nwdaf_signature is None:
+                                        # Initial poll baseline: establish signature without falsely asserting freshness
+                                        last_nwdaf_signature = sig
+                                    elif sig != last_nwdaf_signature:
+                                        # Authentic data change detected during this active session
+                                        last_nwdaf_signature = sig
+                                        last_nwdaf_data_change_time = now
 
-                            metrics_store["nwdaf_comm_duration_sec"] = dur
-                            metrics_store["nwdaf_comm_ul_bytes"] = ul
-                            metrics_store["nwdaf_comm_dl_bytes"] = dl
-                            metrics_store["nwdaf_comm_vol_std_bytes"] = std_dev
+                                    metrics_store["nwdaf_comm_duration_sec"] = dur
+                                    metrics_store["nwdaf_comm_ul_bytes"] = ul
+                                    metrics_store["nwdaf_comm_dl_bytes"] = dl
+                                    metrics_store["nwdaf_comm_vol_std_bytes"] = std_dev
 
-                            # Freshness is 1 only if authentic new data was received within 45 seconds (exceeding UPF 30s URR loop)
-                            if last_nwdaf_data_change_time > 0 and (now - last_nwdaf_data_change_time <= 45.0):
-                                metrics_store["nwdaf_comm_freshness"] = 1
-                            else:
-                                metrics_store["nwdaf_comm_freshness"] = 0
-                        else:
-                            # Empty ueComms array indicates no active telemetry reports in queried window
-                            metrics_store["nwdaf_comm_freshness"] = 0
-                            metrics_store["nwdaf_comm_duration_sec"] = float("nan")
-                            metrics_store["nwdaf_comm_ul_bytes"] = float("nan")
-                            metrics_store["nwdaf_comm_dl_bytes"] = float("nan")
-                            metrics_store["nwdaf_comm_vol_std_bytes"] = float("nan")
-                else:
-                    log_raw_nwdaf_poll({
-                        "poll_timestamp_utc": datetime.now(timezone.utc).isoformat(),
-                        "run_id": active_run_id,
-                        "query_start_ts": start_ts,
-                        "query_end_ts": end_ts,
-                        "query_url": url,
-                        "http_status": resp.status,
-                        "error": "Non-200 HTTP status"
-                    })
-                    with METRICS_LOCK:
-                        metrics_store["nwdaf_api_status"] = 0
+                                    # Freshness is 1 only if authentic new data was received within 45 seconds (exceeding UPF 30s URR loop)
+                                    if last_nwdaf_data_change_time > 0 and (now - last_nwdaf_data_change_time <= 45.0):
+                                        metrics_store["nwdaf_comm_freshness"] = 1
+                                    else:
+                                        metrics_store["nwdaf_comm_freshness"] = 0
+                                else:
+                                    # Empty ueComms array indicates no active telemetry reports in queried window
+                                    metrics_store["nwdaf_comm_freshness"] = 0
+                                    metrics_store["nwdaf_comm_duration_sec"] = float("nan")
+                                    metrics_store["nwdaf_comm_ul_bytes"] = float("nan")
+                                    metrics_store["nwdaf_comm_dl_bytes"] = float("nan")
+                                    metrics_store["nwdaf_comm_vol_std_bytes"] = float("nan")
+                    else:
+                        log_raw_nwdaf_poll({
+                            "poll_timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                            "run_id": target_run_id,
+                            "query_start_ts": start_ts,
+                            "query_end_ts": end_ts,
+                            "query_url": url,
+                            "http_status": resp.status,
+                            "error": "Non-200 HTTP status"
+                        }, target_run_id=target_run_id)
+                        with METRICS_LOCK:
+                            metrics_store["nwdaf_api_status"] = 0
+            finally:
+                with METRICS_LOCK:
+                    metrics_store["nwdaf_poll_in_flight"] = 0
         except Exception as e:
+            with METRICS_LOCK:
+                metrics_store["nwdaf_poll_in_flight"] = 0
+                metrics_store["nwdaf_api_status"] = 0
             log_raw_nwdaf_poll({
                 "poll_timestamp_utc": datetime.now(timezone.utc).isoformat(),
-                "run_id": active_run_id,
+                "run_id": target_run_id,
                 "query_start_ts": start_ts,
                 "query_end_ts": end_ts,
                 "query_url": url,
                 "http_status": getattr(e, "code", 0),
                 "error": str(e)
-            })
-            with METRICS_LOCK:
-                metrics_store["nwdaf_api_status"] = 0
+            }, target_run_id=target_run_id)
 
         time.sleep(2)
 
