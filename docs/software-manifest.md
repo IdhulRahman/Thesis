@@ -48,9 +48,9 @@ All virtual machines operate within the dedicated inter-VM subnet `10.102.0.0/24
 
 | Component | Upstream Repository | Target Branch / Tag | Pinned Commit Hash | Deployed Artifact / Binary |
 |---|---|---|---|---|
-| **OAI gNB CU-CP & CU-UP** | `openairinterface/openairinterface5g` | `develop` (`2024.w39`) | `b99e742` | Native binary: `cmake_targets/ran_build/build/nr-softmodem` |
-| **OAI gNB DU-1 (Cell-1)** | `openairinterface/openairinterface5g` | `develop` (`2024.w39`) | `b99e742` | Native binary: `nr-softmodem --rfsim` (PCI 1, TCP server `:4043`) |
-| **OAI gNB DU-2 (Cell-2)** | `openairinterface/openairinterface5g` | `develop` (`2024.w39`) | `b99e742` | Native binary: `nr-softmodem --rfsim` (PCI 2, TCP server `:4044`) |
+| **OAI gNB CU-CP & CU-UP** | `openairinterface/openairinterface5g` | `develop` (`2026.w39`) | `29d5fa7d` | Native binary: `cmake_targets/ran_build/build/nr-softmodem` |
+| **OAI gNB DU-1 (Cell-1)** | `openairinterface/openairinterface5g` | `develop` (`2026.w39`) | `29d5fa7d` | Native binary: `nr-softmodem --rfsim` (PCI 1, TCP server `:4043`) |
+| **OAI gNB DU-2 (Cell-2)** | `openairinterface/openairinterface5g` | `develop` (`2026.w39`) | `29d5fa7d` | Native binary: `nr-softmodem --rfsim` (PCI 2, TCP server `:4044`) |
 | **FlexRIC E2 Agent** | FlexRIC submodule (`openairinterface5g`) | `develop` | Pinned to OAI | Embedded shared library linked into CU softmodem |
 | **RAN Adapter Daemon** | In-house Python daemon | v1.0.0 | Repository HEAD | Host process (`scripts/ran_adapter.py`) reading `du1.log` & `du2.log` |
 
@@ -71,7 +71,7 @@ All virtual machines operate within the dedicated inter-VM subnet `10.102.0.0/24
 
 | Component | Upstream Repository | Target Branch / Tag | Deployed Artifact / Script | Execution Context |
 |---|---|---|---|---|
-| **OAI nrUE Emulator** | `openairinterface/openairinterface5g` | `develop` (`2024.w39`) | Native binary: `nr-uesoftmodem` | Staggered multi-instance spawner in Linux netns |
+| **OAI nrUE Emulator** | `openairinterface/openairinterface5g` | `develop` (`2026.w39`) | Native binary: `nr-uesoftmodem` | Staggered multi-instance spawner in Linux netns |
 | **Multi-UE Spawner** | In-house Bash script | v2.0.0 | `scripts/spawn_multi_ue.sh` | Orchestrates namespaces `ue1`, `ue2`, veth, and NAT |
 | **Multi-Slice TrafGen** | In-house Bash script | v2.0.0 | `scripts/trafgen.sh` | Injects iperf3 UDP & ICMP canary probes |
 

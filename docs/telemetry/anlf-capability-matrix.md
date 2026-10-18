@@ -7,7 +7,7 @@
 **Upstream Commit References:**
 * `oai-cn5g-nwdaf`: `9d82b7547586a6e04dc0719ef18910ea01fcd9e7` (branch `develop`)
 * `oai-cn5g-fed`: `v2.0.1` (Docker Compose deployment)
-* `openairinterface5g`: `2024.w39` / develop (gNB DU/CU)
+* `openairinterface5g`: `2026.w39` / `develop` (commit `29d5fa7d`, gNB DU/CU & nrUE)
 
 ---
 
