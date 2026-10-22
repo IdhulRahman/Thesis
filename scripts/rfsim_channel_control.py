@@ -127,16 +127,26 @@ class OaiTelnetClient:
         return response
 
 
+DEFAULT_BASELINE_PLOSS = 20.0  # Standard OAI RFsim default baseline path_loss_dB
+
+
+def get_channel_block(raw: str, channel_id: int) -> str:
+    """Extract the specific text block corresponding to model/channel <channel_id>."""
+    pattern = rf'(?:model|channel)\s+{channel_id}\b.*?(?=(?:model|channel)\s+\d+\b|\Z)'
+    m = re.search(pattern, raw, re.DOTALL | re.IGNORECASE)
+    return m.group(0) if m else raw
+
+
 def get_channel_state(client: OaiTelnetClient, channel_id: int = 0) -> dict:
-    """Read current channel parameters and parse path_loss_dB and noise_power_dB."""
+    """Read current channel parameters and parse path_loss_dB and noise_power_dB for target channel."""
     raw_status = client.execute("channelmod show current")
-    # Search for target channel block or whole string
-    ploss_match = PLOSS_REGEX.search(raw_status)
-    noise_match = NOISE_REGEX.search(raw_status)
+    block = get_channel_block(raw_status, channel_id)
+    ploss_match = PLOSS_REGEX.search(block)
+    noise_match = NOISE_REGEX.search(block)
 
     if not ploss_match:
         raise ValueError(
-            f"Could not parse path_loss_dB from 'channelmod show current'. Raw output:\n{raw_status}"
+            f"Could not parse path_loss_dB for channel {channel_id} from 'channelmod show current'. Block output:\n{block}"
         )
 
     ploss_val = float(ploss_match.group("val"))
@@ -146,7 +156,8 @@ def get_channel_state(client: OaiTelnetClient, channel_id: int = 0) -> dict:
         "channel_id": channel_id,
         "path_loss_dB": ploss_val,
         "noise_power_dB": noise_val,
-        "raw": raw_status
+        "raw": raw_status,
+        "block": block
     }
 
 
@@ -187,12 +198,19 @@ def cmd_show(args):
         client.connect()
 
         print("\n--- [1] Current Channel Modeling Status (channelmod show current) ---")
-        curr_state = get_channel_state(client, args.channel_id)
-        print(curr_state["raw"])
-        print(f"\n>> Parsed Channel {args.channel_id} State:")
-        print(f"   path_loss_dB   : {curr_state['path_loss_dB']:+.2f} dB  (Negative = Attenuation, Positive = Gain)")
-        if curr_state['noise_power_dB'] is not None:
-            print(f"   noise_power_dB : {curr_state['noise_power_dB']:+.2f} dB")
+        raw_status = client.execute("channelmod show current")
+        print(raw_status)
+
+        for ch in (0, 1):
+            try:
+                st = get_channel_state(client, ch)
+                role = "Downlink (gNB TX)" if ch == 0 else "Uplink (UE TX)"
+                print(f">> Parsed Channel {ch} State [{role}]:")
+                print(f"   path_loss_dB   : {st['path_loss_dB']:+.2f} dB  (Baseline is typically +20.00 dB)")
+                if st['noise_power_dB'] is not None:
+                    print(f"   noise_power_dB : {st['noise_power_dB']:+.2f} dB")
+            except Exception as ex:
+                print(f"   Channel {ch}: could not parse ({ex})")
 
         print("\n--- [2] Predefined Channel Models (channelmod show predef) ---")
         out_predef = client.execute("channelmod show predef")
@@ -205,7 +223,7 @@ def cmd_show(args):
 
 
 def cmd_set_attenuation(args):
-    """Sets additional attenuation in dB relative to current or specified baseline."""
+    """Sets additional attenuation in dB relative to baseline (+20.0 dB or explicit baseline)."""
     client = OaiTelnetClient(args.host, args.port, audit_log=args.audit_log)
     try:
         if args.attenuation < 0:
@@ -214,16 +232,17 @@ def cmd_set_attenuation(args):
         print(f"Connecting to OAI Telnet at {args.host}:{args.port}...")
         client.connect()
 
-        init_state = get_channel_state(client, args.channel_id)
-        base_ploss = init_state["path_loss_dB"] if args.baseline is None else args.baseline
+        base_ploss = DEFAULT_BASELINE_PLOSS if args.baseline is None else args.baseline
         target_ploss = base_ploss - args.attenuation
 
-        print(f"Baseline path_loss_dB : {base_ploss:+.2f} dB")
+        ch_role = "Downlink" if args.channel_id == 0 else "Uplink"
+        print(f"Target Channel        : {args.channel_id} ({ch_role})")
+        print(f"Fixed Baseline dB     : {base_ploss:+.2f} dB")
         print(f"Requested Attenuation : {args.attenuation:.2f} dB")
         print(f"Target path_loss_dB   : {target_ploss:+.2f} dB")
 
         verified = set_channel_ploss(client, args.channel_id, target_ploss)
-        print(f"\n[SUCCESS] Channel {args.channel_id} path_loss_dB set and verified to {verified:+.2f} dB.")
+        print(f"\n[SUCCESS] Channel {args.channel_id} ({ch_role}) path_loss_dB set and verified to {verified:+.2f} dB.")
     except Exception as e:
         print(f"\n[ERROR] Command failed: {e}", file=sys.stderr)
         sys.exit(1)
@@ -237,9 +256,29 @@ def cmd_set_raw_ploss(args):
     try:
         print(f"Connecting to OAI Telnet at {args.host}:{args.port}...")
         client.connect()
-        print(f"Setting raw path_loss_dB to {args.ploss:+.2f} dB on channel {args.channel_id}...")
+        ch_role = "Downlink" if args.channel_id == 0 else "Uplink"
+        print(f"Setting raw path_loss_dB to {args.ploss:+.2f} dB on channel {args.channel_id} ({ch_role})...")
         verified = set_channel_ploss(client, args.channel_id, args.ploss)
-        print(f"\n[SUCCESS] Verified: path_loss_dB = {verified:+.2f} dB.")
+        print(f"\n[SUCCESS] Verified Channel {args.channel_id} ({ch_role}): path_loss_dB = {verified:+.2f} dB.")
+    except Exception as e:
+        print(f"\n[ERROR] Command failed: {e}", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        client.close()
+
+
+def cmd_reset(args):
+    """Resets channel path_loss_dB back to default baseline (+20.0 dB)."""
+    client = OaiTelnetClient(args.host, args.port, audit_log=args.audit_log)
+    try:
+        print(f"Connecting to OAI Telnet at {args.host}:{args.port}...")
+        client.connect()
+        targets = [args.channel_id] if args.channel_id is not None else [0, 1]
+        for ch in targets:
+            ch_role = "Downlink" if ch == 0 else "Uplink"
+            print(f"Resetting Channel {ch} ({ch_role}) to {DEFAULT_BASELINE_PLOSS:+.2f} dB...")
+            verified = set_channel_ploss(client, ch, DEFAULT_BASELINE_PLOSS)
+            print(f"  [SUCCESS] Channel {ch} ({ch_role}) restored to {verified:+.2f} dB.")
     except Exception as e:
         print(f"\n[ERROR] Command failed: {e}", file=sys.stderr)
         sys.exit(1)
@@ -384,6 +423,14 @@ Usage Examples:
     p_raw.add_argument("ploss", type=float, help="Raw path_loss_dB value in dB (e.g. -15.0, 0.0)")
     p_raw.add_argument("--channel-id", type=int, default=0, help="Channel index (default: 0)")
     p_raw.set_defaults(func=cmd_set_raw_ploss)
+
+    # Subcommand: reset
+    p_reset = subparsers.add_parser(
+        "reset", parents=[base_parser],
+        help="Reset channel(s) back to default baseline (+20.0 dB)"
+    )
+    p_reset.add_argument("--channel-id", type=int, default=None, help="Channel index (default: both 0 and 1)")
+    p_reset.set_defaults(func=cmd_reset)
 
     # Subcommand: sweep
     p_sweep = subparsers.add_parser(
