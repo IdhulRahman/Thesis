@@ -29,10 +29,8 @@ nohup sudo ./nr-softmodem -O "$CONF_DIR/du_gnb1.conf" --rfsim \
   > "$LOG_DIR/du1.log" 2>&1 &
 sleep 2
 
-echo "=== 3. Starting DU-2 (Cell-2, Port 4044, Telnet 9091) in background ==="
+echo "=== 3. Starting DU-2 (Cell-2, Port 4044, Baseline Control) in background ==="
 nohup sudo ./nr-softmodem -O "$CONF_DIR/du_gnb2.conf" --rfsim \
-  --rfsimulator.options chanmod \
-  --telnetsrv --telnetsrv.listenport 9091 \
   > "$LOG_DIR/du2.log" 2>&1 &
 sleep 2
 
