@@ -24,7 +24,7 @@ STALE_THRESHOLD_SEC = 3.5
 # Comprehensive regex to parse OAI DU scheduler telemetry per UE
 RADIO_STATS_PATTERN = re.compile(
     r'ulsch_errors\s+(?P<errors>\d+).*?'
-    r'BLER\s+(?P<bler>[0-9.]+).*?'
+    r'BLER?\s+(?P<bler>[0-9.]+).*?'
     r'MCS\s*(?:\([^)]*\))?\s*(?P<mcs>\d+).*?'
     r'NPRB\s+(?P<nprb>\d+).*?'
     r'SNR\s+(?P<snr>[-0-9.]+).*?'
