@@ -27,7 +27,6 @@ sleep 4
 
 echo "=== 2. Starting DU-1 (Cell-1, Port 4043, Telnet 9090) in background ==="
 nohup sudo ./nr-softmodem -O "$CONF_DIR/du_gnb1.conf" --rfsim \
-  --rfsimulator.options chanmod \
   --telnetsrv --telnetsrv.listenport 9090 \
   < /dev/null > "$LOG_DIR/du1.log" 2>&1 &
 sleep 2
