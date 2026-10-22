@@ -22,13 +22,17 @@ nohup sudo ./nr-softmodem -O "$CONF_DIR/cu_gnb.conf" \
 echo "Waiting for CU to establish N2 (AMF) and E2 (Near-RT RIC)..."
 sleep 4
 
-echo "=== 2. Starting DU-1 (Cell-1, Port 4043) in background ==="
+echo "=== 2. Starting DU-1 (Cell-1, Port 4043, Telnet 9090) in background ==="
 nohup sudo ./nr-softmodem -O "$CONF_DIR/du_gnb1.conf" --rfsim \
+  --rfsimulator.options chanmod \
+  --telnetsrv --telnetsrv.listenport 9090 \
   > "$LOG_DIR/du1.log" 2>&1 &
 sleep 2
 
-echo "=== 3. Starting DU-2 (Cell-2, Port 4044) in background ==="
+echo "=== 3. Starting DU-2 (Cell-2, Port 4044, Telnet 9091) in background ==="
 nohup sudo ./nr-softmodem -O "$CONF_DIR/du_gnb2.conf" --rfsim \
+  --rfsimulator.options chanmod \
+  --telnetsrv --telnetsrv.listenport 9091 \
   > "$LOG_DIR/du2.log" 2>&1 &
 sleep 2
 
