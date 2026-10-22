@@ -45,9 +45,148 @@ Step 6: VM-6 (Monitor) ◄── Step 5: VM-5 (nrUE)      ◄── Step 4: VM-2
 
 ---
 
-## 3. Related Documentation
+## 3. Standard Operating Procedure (SOP): Topological System Bring-up & Outage Recovery
+
+### 3.1 Architectural Invariant: Why Topological Sequencing is Mandatory
+
+In 3GPP and O-RAN split architectures, session and state synchronization flow downstream:
+
+```text
+┌─────────────────────────┐       N2 SCTP       ┌─────────────────────────┐      RFsim TCP      ┌─────────────────────────┐
+│     VM-3: 5G Core       │ ◄────────────────── │     VM-4: Split RAN     │ ◄────────────────── │      VM-5: nrUE         │
+│ (AMF / SMF / UPF / UDM) │                     │ (CU-CP / DU-1 / DU-2)   │                     │ (netns ue1 / ue2)       │
+└─────────────────────────┘                     └─────────────────────────┘                     └─────────────────────────┘
+```
+
+1. **State Dependency:**  
+   * The gNodeB CU cannot register tracking areas without an active AMF N2 SCTP association.
+   * nrUE cannot complete cell acquisition (PBCH), contention resolution (RACH), and PDU Session Establishment without both CU and DU being `in service`.
+2. **Socket Severance Cascades:**  
+   * **If RAN restarts:** Connected UEs lose their RFsimulator TCP socket (`:4043` / `:4044`). In OAI, the `nr-uesoftmodem` client does not automatically re-acquire the cell; it hangs or moves into `RRC moved into IDLE state` and deletes `oaitun_ue1`. **Whenever RAN restarts, UEs MUST be re-spawned.**
+   * **If Core restarts:** The CU loses its N2 SCTP association and in-memory PDU session contexts are cleared. Even if UEs remain running, upstream routing fails. **Whenever Core restarts, the sequence Core ──► RAN ──► UE MUST be executed.**
+
+---
+
+### 3.2 Routine Clean Bring-up SOP
+
+Execute commands across nodes in the following exact order:
+
+#### Step 1: VM-3 (5G Core)
+```bash
+cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
+sudo docker compose \
+  -f docker-compose-slicing-basic-nrf.yaml \
+  -f compose.amf-nrf-uri.yaml \
+  -f compose.upf-poc.yaml \
+  restart
+
+# Wait 15 seconds for internal NRF and MySQL initialization
+sleep 15
+
+# Confirm all core functions are healthy:
+sudo docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "mysql|amf|udm|ausf|upf"
+```
+*Verification requirement: Status must show `(healthy)`, not `(health: starting)`.*
+
+#### Step 2: VM-4 (Split RAN)
+```bash
+# Launch CU, DU-1 with Telnet 9090, and DU-2 Baseline
+bash /opt/oran/ran/scripts/start_ran.sh
+
+# Confirm AMF association and both cell IDs are in service:
+grep -E "associated AMF|is in service" /opt/oran/ran/cu.log | tail -n 5
+
+# Confirm Telnet server is listening:
+ss -tulpn | grep 9090
+```
+*Verification requirement: Must show `associated AMF 1`, `Cell ID 12345678 is in service`, `Cell ID 11111111 is in service`, and `0.0.0.0:9090 LISTEN`.*
+
+#### Step 3: VM-5 (nrUE Emulator)
+```bash
+# Clean previous processes and spawn UEs
+sudo bash /opt/oran/ue/scripts/stop_multi_ue.sh
+sudo bash /opt/oran/ue/scripts/spawn_multi_ue.sh -s1 1 -s2 1
+
+# Verify canary ping to Data Network (EXT-DN):
+sudo ip netns exec ue1 ping -c 3 192.168.70.145
+```
+*Verification requirement: `oaitun_ue1` must be assigned IP `12.1.1.2`, and ping must achieve `0% packet loss`.*
+
+#### Step 4: Data Traffic Flow (iperf3)
+```bash
+# On VM-3: Ensure iperf3 server daemon is active inside EXT-DN container
+sudo docker exec -d oai-ext-dn iperf3 -s -p 5201
+
+# On VM-5: Pump continuous 15 Mbps Uplink UDP stream
+sudo ip netns exec ue1 iperf3 -c 192.168.70.145 -u -b 15M -t 600 -i 1
+```
+
+---
+
+### 3.3 Outage & Interface Teardown Recovery SOP (`oaitun_ue1 DOWN` / `Fail`)
+
+When a failure occurs (e.g., `iperf3: Network is unreachable` or `oaitun_ue1 DOWN` during experimental fault injections), apply the appropriate recovery level:
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│ Failure Detected: oaitun_ue1 DOWN / Ping 100% Packet Loss   │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+            Is failure limited to UE radio impairment?
+                               │
+            ┌──────────────────┴──────────────────┐
+           YES                                    NO (Core reject / N2 lost)
+            ▼                                     ▼
+   [Level 1: Quick UE Reset]             [Level 2: Full Topological Reset]
+   1. Reset RFsim ploss on VM-4          1. Truncate Docker logs on VM-3
+   2. Respawn UE on VM-5                 2. Restart 5GC on VM-3 (wait healthy)
+   Time: ~15 seconds                     3. Restart RAN on VM-4 (verify cells)
+                                         4. Respawn UE on VM-5 (verify tunnel)
+                                         Time: ~45 seconds
+```
+
+#### Level 1: Quick Recovery (UE RLF or Channel Attenuation Outage — ~15s)
+Use this when gNodeB and 5GC are healthy, but excessive radio impairment ($\ge 20\text{ dB}$) triggered Radio Link Failure:
+1. **On VM-4:** Restore default RFsim channel parameters:
+   ```bash
+   python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
+   ```
+2. **On VM-5:** Respawn UEs and re-establish PDU sessions:
+   ```bash
+   sudo bash /opt/oran/ue/scripts/stop_multi_ue.sh
+   sudo bash /opt/oran/ue/scripts/spawn_multi_ue.sh -s1 1 -s2 1
+   sudo ip netns exec ue1 ping -c 3 192.168.70.145
+   ```
+
+#### Level 2: Full Topological Reset (5GC Out-of-Sync / `Illegal_UE` / N2 Drop — ~45s)
+Use this when AMF rejects registrations, Docker freezes, or SCTP associations drop:
+1. **On VM-3:** Truncate log bloat and restart core:
+   ```bash
+   sudo find /var/lib/docker/containers/ -name "*-json.log" -exec truncate -s 0 {} +
+   cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
+   sudo docker compose -f docker-compose-slicing-basic-nrf.yaml -f compose.amf-nrf-uri.yaml -f compose.upf-poc.yaml restart
+   sleep 15
+   sudo docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "mysql|amf|udm"
+   ```
+2. **On VM-4:** Restart OAI Split RAN:
+   ```bash
+   bash /opt/oran/ran/scripts/start_ran.sh
+   grep -E "is in service|associated AMF" /opt/oran/ran/cu.log | tail -n 5
+   ```
+3. **On VM-5:** Respawn UEs:
+   ```bash
+   sudo bash /opt/oran/ue/scripts/stop_multi_ue.sh
+   sudo bash /opt/oran/ue/scripts/spawn_multi_ue.sh -s1 1 -s2 1
+   sudo ip netns exec ue1 ping -c 3 192.168.70.145
+   ```
+
+---
+
+## 4. Related Documentation
 
 * **Software Manifest:** [docs/software-manifest.md](../software-manifest.md)
 * **Integration Guides:** [docs/integration/README.md](../integration/README.md)
 * **Metric Catalog:** [docs/telemetry/metric-catalog.md](../telemetry/metric-catalog.md)
 * **Troubleshooting Index:** [docs/troubleshooting/README.md](../troubleshooting/README.md)
+* **RAN & UE Troubleshooting:** [docs/troubleshooting/ran-ue.md](../troubleshooting/ran-ue.md)
+

@@ -596,3 +596,148 @@ The MySQL subscriber database (`oai_db`) had conflicting S-NSSAI provisioning fo
    ```
 
 ---
+
+<a id="case-50"></a>
+## Case 50 — OAI Telnet Server Missing (`libtelnetsrv.so`) & CLI Array Parsing Failure
+
+### Symptom
+When starting `nr-softmodem` on VM-4 with `--telnetsrv` flags, the process aborts or logs:
+```text
+[LOADER] library libtelnetsrv.so is not loaded: No such file or directory
+[CONFIG] unknown option: --telnetsrv.listenport
+```
+Furthermore, passing `--rfsimulator.options chanmod` via CLI fails with:
+```text
+[CONFIG] unknown option: chanmod
+```
+
+### Cause
+1. In the OAI CMake build configuration, `ENABLE_TELNETSRV` is marked as an optional component (`OPTIONAL_LIBRARIES`) and defaults to `OFF`. The softmodem attempts runtime `dlopen("libtelnetsrv.so")`. If not compiled, the Telnet server command-line options fail to register.
+2. In `du_gnb1.conf`, `rfsimulator.options` is typed as a libconfig array of strings (e.g., `options = ("chanmod");`). The OAI CLI parser does not support appending string elements to array structures from raw scalar command-line arguments.
+
+### Solution
+1. Reconfigure CMake and compile the Telnet shared library targets:
+   ```bash
+   cd /opt/oran/ran/openairinterface5g/cmake_targets/ran_build/build
+   cmake -DENABLE_TELNETSRV=ON .
+   ninja telnetsrv
+   ls -la libtelnetsrv*.so
+   ```
+   *Verified output confirms `libtelnetsrv.so` and `libtelnetsrv_ci.so` (Channel Impairment) are built.*
+
+2. Configure `options = ("chanmod");` directly inside `/opt/oran/ran/conf/du_gnb1.conf`:
+   ```hcl
+   rfsimulator = (
+     {
+       serveraddr = "server";
+       serverport = 4043;
+       options = ("chanmod");
+       modelname = "AWGN";
+       IQfile = "/tmp/rfsimulator.iqs";
+     }
+   );
+   ```
+
+3. Launch DU-1 cleanly without CLI array overrides:
+   ```bash
+   ./nr-softmodem -O /opt/oran/ran/conf/du_gnb1.conf --rfsim --telnetsrv --telnetsrv.listenport 9090
+   ```
+
+---
+
+<a id="case-51"></a>
+## Case 51 — Radio Impairment Control Target Confusion: Downlink (Model 0) vs Uplink (Model 1)
+
+### Symptom
+Executing `channelmod modify 0 ploss <dB>` via Telnet succeeds, but monitoring DU-1 scheduler logs (`ulsch`) shows that Uplink SNR, RSSI, and MCS remain unchanged.
+
+### Cause
+In OAI RFsimulator (`apply_channelmod.c`), radio channel descriptors are directional:
+* **`model 0: rfsimu_channel_enB0`** $\implies$ **Downlink Channel (gNB TX $\to$ UE RX)**.
+* **`model 1: rfsimu_channel_ue0`** $\implies$ **Uplink Channel (UE TX $\to$ gNB RX)**.
+
+Because the thesis evaluation traffic and `ran_adapter.py` inspect the Uplink Shared Channel (`ulsch`), modifying Model 0 only attenuates Downlink signals perceived by the UE. To induce degradation on Uplink telemetry, Model 1 must be targeted.
+
+### Solution
+1. Direct channel impairment commands explicitly to Channel 1 (Uplink):
+   ```bash
+   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 10.0 --channel-id 1 --port 9090
+   ```
+2. The controller script `rfsim_channel_control.py` uses isolated per-channel regex extraction (`get_channel_block`) to ensure status queries accurately reflect Model 1 independently of Model 0.
+
+---
+
+<a id="case-52"></a>
+## Case 52 — OAI MAC Log String Truncation (`BLER` to `BLE`) Under High HARQ Retransmissions
+
+### Symptom
+When severe channel attenuation ($\ge 15\text{ dB}$) is injected, `ran_adapter.py` intermittently drops telemetric readings or falls back to `N/A`, even though `du1.log` continues to update.
+
+### Cause
+In OAI `nr_mac_gNB.c`, the scheduler log output has fixed character field widths. When the round counter numbers reach 5 to 6 digits (e.g., `ulsch_rounds 66483/6159/210/165`), the token `BLER` is truncated by 1 character to `BLE` (`BLE 0.80550 MCS (0) 14`). The strict regex pattern `BLER\s+` fails to match these lines.
+
+### Solution
+Update `RADIO_STATS_PATTERN` in `scripts/ran_adapter.py` to make the trailing 'R' optional:
+```python
+RADIO_STATS_PATTERN = re.compile(
+    r'ulsch_errors\s+(?P<errors>\d+).*?'
+    r'BLER?\s+(?P<bler>[0-9.]+).*?'
+    r'MCS\s*(?:\([^)]*\))?\s*(?P<mcs>\d+).*?'
+    r'NPRB\s+(?P<nprb>\d+).*?'
+    r'SNR\s+(?P<snr>[-0-9.]+).*?'
+    r'RSSI\s+(?P<rssi>[-0-9.]+)'
+)
+```
+This guarantees 100% regex match success across baseline (`BLER 0.1000`) and degraded states (`BLE 0.8055`).
+
+---
+
+<a id="case-53"></a>
+## Case 53 — Radio Link Failure (RLF) Breakdown Threshold & Tunnel Teardown
+
+### Symptom
+Injecting high attenuation ($\ge 20 - 25\text{ dB}$) causes client traffic (`iperf3`) to abort with:
+```text
+iperf3: error - unable to write to stream socket: Network is unreachable
+iperf3: error - unable to send control message: Connection reset by peer
+```
+Interface `oaitun_ue1` is deleted from namespace `ue1`.
+
+### Cause
+Applying an attenuation of $\ge 20\text{ dB}$ (e.g., reducing `path_loss_dB` from $+20\text{ dB}$ down to $\le 0\text{ dB}$) drives the received signal power below the receiver sensitivity threshold. `pucch0_DTX` spikes above 1000, and OAI triggers standard 3GPP Radio Link Failure (RLF). Upon RLF, the Linux kernel removes the PDU session tunnel `oaitun_ue1`.
+
+### Solution
+1. **Calibrated Operating Regimes:**
+   * **Degraded Channel Evaluation (Non-RLF):** Use attenuation values between **$5\text{ dB}$ and $16\text{ dB}$**. In this range, RSSI drops by up to $15\text{ dB}$, BLER rises dynamically ($10\% \to 80\%$), and MCS adapts gracefully ($28 \to 0$) without dropping the PDU session.
+   * **Outage & Service Disruption Evaluation:** Use attenuation **$\ge 20\text{ dB}$** to trigger deterministic RLF and interface teardown.
+2. **Recovery from Outage:**
+   Reset the RFsim channels on VM-4:
+   ```bash
+   python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
+   ```
+   Respawn the UE instances on VM-5:
+   ```bash
+   sudo bash /opt/oran/ue/scripts/stop_multi_ue.sh
+   sudo bash /opt/oran/ue/scripts/spawn_multi_ue.sh -s1 1 -s2 1
+   ```
+
+---
+
+<a id="case-54"></a>
+## Case 54 — 5G Core Docker JSON Log Bloat Causing Extreme CLI Latency and Freezing
+
+### Symptom
+Executing diagnostic commands on VM-3 such as `sudo docker logs oai-amf --tail 30` takes over 30 seconds or causes the SSH session to hang.
+
+### Cause
+Without Docker daemon log rotation limits (`max-size`), continuous multi-week execution of the 23 5GC containers causes `/var/lib/docker/containers/*/*-json.log` to swell to multiple gigabytes. Reading the tail of these files forces Docker daemon to parse gigabytes of JSON lines.
+
+### Solution
+Instantly truncate all container log files to zero bytes on VM-3:
+```bash
+sudo find /var/lib/docker/containers/ -name "*-json.log" -exec truncate -s 0 {} +
+```
+Subsequent `docker logs` calls complete instantaneously (<100 ms).
+
+---
+

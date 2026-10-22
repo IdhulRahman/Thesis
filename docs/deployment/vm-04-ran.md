@@ -297,6 +297,18 @@ sudo cp $(find /opt/oran/ran/openairinterface5g/cmake_targets/ran_build/build -n
 ls -la /usr/local/lib/flexric/
 ```
 
+Compile OAI Telnet Server Shared Libraries (`libtelnetsrv.so`):
+```bash
+# Enable Telnet Server module and build telnetsrv targets
+cd /opt/oran/ran/openairinterface5g/cmake_targets/ran_build/build
+cmake -DENABLE_TELNETSRV=ON .
+ninja telnetsrv
+
+# Verify Telnet and Channel Impairment libraries
+ls -la libtelnetsrv*.so
+# Output: libtelnetsrv.so, libtelnetsrv_ci.so
+```
+
 Verify the compiled binary exists:
 ```bash
 ls -la /opt/oran/ran/openairinterface5g/cmake_targets/ran_build/build/nr-softmodem
@@ -562,13 +574,15 @@ sudo ./nr-softmodem -O /opt/oran/ran/conf/cu_gnb.conf \
   2>&1 | tee /opt/oran/ran/cu.log
 ```
 
-### Step 2: Start Distributed Unit 1 (DU-1 / Cell-1)
+### Step 2: Start Distributed Unit 1 (DU-1 / Cell-1 with Telnet & Channel Modeling)
 ```bash
 cd /opt/oran/ran/openairinterface5g/cmake_targets/ran_build/build
-sudo ./nr-softmodem -O /opt/oran/ran/conf/du_gnb1.conf --rfsim 2>&1 | tee /opt/oran/ran/du1.log
+sudo ./nr-softmodem -O /opt/oran/ran/conf/du_gnb1.conf \
+  --rfsim --telnetsrv --telnetsrv.listenport 9090 \
+  2>&1 | tee /opt/oran/ran/du1.log
 ```
 
-### Step 3: Start Distributed Unit 2 (DU-2 / Cell-2)
+### Step 3: Start Distributed Unit 2 (DU-2 / Cell-2 Baseline Control)
 ```bash
 cd /opt/oran/ran/openairinterface5g/cmake_targets/ran_build/build
 sudo ./nr-softmodem -O /opt/oran/ran/conf/du_gnb2.conf --rfsim 2>&1 | tee /opt/oran/ran/du2.log
@@ -595,6 +609,36 @@ To execute the Split RAN components cleanly and automatically in the background 
 tail -f /opt/oran/ran/cu.log
 tail -f /opt/oran/ran/du1.log
 tail -f /opt/oran/ran/du2.log
+```
+
+---
+
+### 9.2 Dynamic Radio Impairment Controller (`rfsim_channel_control.py`)
+
+To dynamically inject channel impairments without restarting gNodeB or interrupting active PDU sessions, use the Python Telnet controller:
+
+* **Script:** [`scripts/rfsim_channel_control.py`](../../scripts/rfsim_channel_control.py) (deployed on VM-4 at `/opt/oran/ran/scripts/rfsim_channel_control.py`)
+
+#### Key Commands:
+```bash
+# 1. Inspect current status across both Downlink (Model 0) and Uplink (Model 1):
+python3 /opt/oran/ran/scripts/rfsim_channel_control.py show --port 9090
+
+# 2. Reset both channels back to clean baseline (+20.00 dB):
+python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
+
+# 3. Inject controlled degradation on Uplink (Model 1):
+# 8 dB attenuation (slight stress):
+python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 8.0 --channel-id 1 --port 9090
+
+# 15 dB attenuation (severe degradation: MCS drops to QPSK, BLER rises to ~80%):
+python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 15.0 --channel-id 1 --port 9090
+
+# 4. Trigger deterministic Radio Link Failure (RLF Outage):
+python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 25.0 --channel-id 1 --port 9090
+
+# 5. Restore baseline after experiment:
+python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
 ```
 
 ---
