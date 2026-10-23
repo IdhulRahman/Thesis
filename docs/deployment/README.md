@@ -138,15 +138,14 @@ When a failure occurs (e.g., `iperf3: Network is unreachable` or `oaitun_ue1 DOW
            YES                                    NO (Core reject / N2 lost)
             ▼                                     ▼
    [Level 1: Quick UE Reset]             [Level 2: Full Topological Reset]
-   1. Reset RFsim ploss on VM-4          1. Truncate Docker logs on VM-3
-   2. Respawn UE on VM-5                 2. Restart 5GC on VM-3 (wait healthy)
-   Time: ~15 seconds                     3. Restart RAN on VM-4 (verify cells)
-                                         4. Respawn UE on VM-5 (verify tunnel)
+   1. Reset RFsim ploss on VM-4          1. Restart 5GC on VM-3 (wait healthy)
+   2. Respawn UE on VM-5                 2. Restart RAN on VM-4 (verify cells)
+   Time: ~15 seconds                     3. Respawn UE on VM-5 (verify tunnel)
                                          Time: ~45 seconds
 ```
 
 #### Level 1: Quick Recovery (UE RLF or Channel Attenuation Outage — ~15s)
-Use this when gNodeB and 5GC are healthy, but excessive radio impairment ($\ge 20\text{ dB}$) triggered Radio Link Failure:
+Use this when gNodeB and 5GC are healthy, but channel attenuation or radio stress triggered Radio Link Failure (RLF) or interface teardown:
 1. **On VM-4:** Restore default RFsim channel parameters:
    ```bash
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
@@ -159,15 +158,18 @@ Use this when gNodeB and 5GC are healthy, but excessive radio impairment ($\ge 2
    ```
 
 #### Level 2: Full Topological Reset (5GC Out-of-Sync / `Illegal_UE` / N2 Drop — ~45s)
-Use this when AMF rejects registrations, Docker freezes, or SCTP associations drop:
-1. **On VM-3:** Truncate log bloat and restart core:
+Use this when AMF rejects registrations, Docker containers stall, or SCTP associations drop:
+1. **On VM-3:** Restart 5GC slicing containers and confirm healthy status:
    ```bash
-   sudo find /var/lib/docker/containers/ -name "*-json.log" -exec truncate -s 0 {} +
    cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
    sudo docker compose -f docker-compose-slicing-basic-nrf.yaml -f compose.amf-nrf-uri.yaml -f compose.upf-poc.yaml restart
    sleep 15
    sudo docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "mysql|amf|udm"
    ```
+   > [!NOTE]
+   > **Log Management Best Practice:**  
+   > Do **not** manually truncate container `*-json.log` files during routine recovery. Direct file truncation deletes diagnostic history and can desynchronize Docker's logging driver handles. Manage container log volume sustainably using standard Docker log rotation via `/etc/docker/daemon.json` (`"max-size": "50m"`, `"max-file": "3"`).
+
 2. **On VM-4:** Restart OAI Split RAN:
    ```bash
    bash /opt/oran/ran/scripts/start_ran.sh

@@ -646,35 +646,37 @@ Furthermore, passing `--rfsimulator.options chanmod` via CLI fails with:
 ---
 
 <a id="case-51"></a>
-## Case 51 — Radio Impairment Control Target Confusion: Downlink (Model 0) vs Uplink (Model 1)
+## Case 51 — Radio Impairment Target Identification: Downlink (Model 0) vs Uplink (Model 1) in `du_gnb1.conf`
 
 ### Symptom
 Executing `channelmod modify 0 ploss <dB>` via Telnet succeeds, but monitoring DU-1 scheduler logs (`ulsch`) shows that Uplink SNR, RSSI, and MCS remain unchanged.
 
 ### Cause
-In OAI RFsimulator (`apply_channelmod.c`), radio channel descriptors are directional:
-* **`model 0: rfsimu_channel_enB0`** $\implies$ **Downlink Channel (gNB TX $\to$ UE RX)**.
-* **`model 1: rfsimu_channel_ue0`** $\implies$ **Uplink Channel (UE TX $\to$ gNB RX)**.
+In this testbed's configuration (`du_gnb1.conf`), channel modeling descriptors configured under `modellist_rfsimu_1` are mapped sequentially by index:
+* **`model 0: rfsimu_channel_enB0`** $\implies$ Configured as Downlink Channel (gNB TX $\to$ UE RX).
+* **`model 1: rfsimu_channel_ue0`** $\implies$ Configured as Uplink Channel (UE TX $\to$ gNB RX).
 
-Because the thesis evaluation traffic and `ran_adapter.py` inspect the Uplink Shared Channel (`ulsch`), modifying Model 0 only attenuates Downlink signals perceived by the UE. To induce degradation on Uplink telemetry, Model 1 must be targeted.
+Because the telemetry pipeline and `ran_adapter.py` monitor the Uplink Shared Channel (`ulsch`) scheduler logs on gNB, modifying Model 0 primarily impacts Downlink signal reception at the UE. To induce degradation on Uplink telemetry metrics, Model 1 must be targeted.
+> [!NOTE]
+> This channel assignment is defined by the model list in `du_gnb1.conf`, not an immutable hardcoded constant of OAI. If the configuration order or model names change, verify active models with `channelmod show current`.
 
 ### Solution
-1. Direct channel impairment commands explicitly to Channel 1 (Uplink):
+1. Target channel modifications explicitly to Channel 1 (Uplink in this testbed):
    ```bash
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 10.0 --channel-id 1 --port 9090
    ```
-2. The controller script `rfsim_channel_control.py` uses isolated per-channel regex extraction (`get_channel_block`) to ensure status queries accurately reflect Model 1 independently of Model 0.
+2. The controller script `rfsim_channel_control.py` uses isolated per-channel regex extraction (`get_channel_block`) and explicitly fails if the requested channel index is not present in the softmodem response.
 
 ---
 
 <a id="case-52"></a>
-## Case 52 — OAI MAC Log String Truncation (`BLER` to `BLE`) Under High HARQ Retransmissions
+## Case 52 — OAI MAC Log String Truncation (`BLER` to `BLE`) Observed Under High HARQ Retransmissions
 
 ### Symptom
-When severe channel attenuation ($\ge 15\text{ dB}$) is injected, `ran_adapter.py` intermittently drops telemetric readings or falls back to `N/A`, even though `du1.log` continues to update.
+When severe channel attenuation is injected on DU-1, `ran_adapter.py` intermittently dropped telemetric readings or fell back to `N/A`, even though `du1.log` continued to update.
 
 ### Cause
-In OAI `nr_mac_gNB.c`, the scheduler log output has fixed character field widths. When the round counter numbers reach 5 to 6 digits (e.g., `ulsch_rounds 66483/6159/210/165`), the token `BLER` is truncated by 1 character to `BLE` (`BLE 0.80550 MCS (0) 14`). The strict regex pattern `BLER\s+` fails to match these lines.
+In live testbed log samples under high retransmission conditions, lines matching `BLE <float>` were observed in place of the expected `BLER <float>` (e.g., `ulsch_rounds 66483/6159/210/165 ... BLE 0.80550 MCS (0) 14`). While the exact underlying formatting behavior in OAI C code remains under investigation, the strict pattern `BLER\s+` fails to match these lines whenever the trailing 'R' is missing.
 
 ### Solution
 Update `RADIO_STATS_PATTERN` in `scripts/ran_adapter.py` to make the trailing 'R' optional:
@@ -688,7 +690,7 @@ RADIO_STATS_PATTERN = re.compile(
     r'RSSI\s+(?P<rssi>[-0-9.]+)'
 )
 ```
-This guarantees 100% regex match success across baseline (`BLER 0.1000`) and degraded states (`BLE 0.8055`).
+This regex accommodates both observed variants (`BLER` and `BLE`), ensuring continuous metric extraction across baseline and degraded states.
 
 ---
 
@@ -696,7 +698,7 @@ This guarantees 100% regex match success across baseline (`BLER 0.1000`) and deg
 ## Case 53 — Radio Link Failure (RLF) Breakdown Threshold & Tunnel Teardown
 
 ### Symptom
-Injecting high attenuation ($\ge 20 - 25\text{ dB}$) causes client traffic (`iperf3`) to abort with:
+Injecting excessive attenuation causes client traffic (`iperf3`) to abort with:
 ```text
 iperf3: error - unable to write to stream socket: Network is unreachable
 iperf3: error - unable to send control message: Connection reset by peer
@@ -704,12 +706,14 @@ iperf3: error - unable to send control message: Connection reset by peer
 Interface `oaitun_ue1` is deleted from namespace `ue1`.
 
 ### Cause
-Applying an attenuation of $\ge 20\text{ dB}$ (e.g., reducing `path_loss_dB` from $+20\text{ dB}$ down to $\le 0\text{ dB}$) drives the received signal power below the receiver sensitivity threshold. `pucch0_DTX` spikes above 1000, and OAI triggers standard 3GPP Radio Link Failure (RLF). Upon RLF, the Linux kernel removes the PDU session tunnel `oaitun_ue1`.
+When path loss increases substantially beyond receiver sensitivity, received signal power drops below detection threshold, `pucch0_DTX` counters rise, and OAI triggers standard 3GPP Radio Link Failure (RLF). Upon RLF and session teardown, the Linux kernel removes the PDU session tunnel `oaitun_ue1`.
 
 ### Solution
-1. **Calibrated Operating Regimes:**
-   * **Degraded Channel Evaluation (Non-RLF):** Use attenuation values between **$5\text{ dB}$ and $16\text{ dB}$**. In this range, RSSI drops by up to $15\text{ dB}$, BLER rises dynamically ($10\% \to 80\%$), and MCS adapts gracefully ($28 \to 0$) without dropping the PDU session.
-   * **Outage & Service Disruption Evaluation:** Use attenuation **$\ge 20\text{ dB}$** to trigger deterministic RLF and interface teardown.
+1. **Calibrated Operating Regimes (Testbed-Specific):**
+   * **Degraded Channel Evaluation (Non-RLF):** Under this testbed's baseline configuration (`du_gnb1.conf`, AWGN, full-buffer 15 Mbps UDP, MCS baseline 28), attenuation values between **$5\text{ dB}$ and $16\text{ dB}$** provide controlled stress: RSSI decreases, BLER dynamically rises into the ~30–80% range, and MCS adapts without dropping the PDU session.
+   * **Outage & Service Disruption Evaluation:** In this testbed, attenuation $\ge 20 - 25\text{ dB}$ consistently induced RLF and interface teardown.
+   > [!NOTE]
+   > Exact threshold values depend on the specific channel model, configured noise power, bandwidth, and traffic load, and should be calibrated for each experimental environment.
 2. **Recovery from Outage:**
    Reset the RFsim channels on VM-4:
    ```bash
@@ -724,20 +728,30 @@ Applying an attenuation of $\ge 20\text{ dB}$ (e.g., reducing `path_loss_dB` fro
 ---
 
 <a id="case-54"></a>
-## Case 54 — 5G Core Docker JSON Log Bloat Causing Extreme CLI Latency and Freezing
+## Case 54 — 5G Core Docker JSON Log Growth and Rotation Configuration
 
 ### Symptom
 Executing diagnostic commands on VM-3 such as `sudo docker logs oai-amf --tail 30` takes over 30 seconds or causes the SSH session to hang.
 
 ### Cause
-Without Docker daemon log rotation limits (`max-size`), continuous multi-week execution of the 23 5GC containers causes `/var/lib/docker/containers/*/*-json.log` to swell to multiple gigabytes. Reading the tail of these files forces Docker daemon to parse gigabytes of JSON lines.
+When the 23 5GC containers run across extended testing campaigns without log rotation limits, individual container log files (`/var/lib/docker/containers/*/*-json.log`) can grow to multiple gigabytes. Reading the tail of bloated JSON files requires the Docker daemon to traverse large files on disk.
 
 ### Solution
-Instantly truncate all container log files to zero bytes on VM-3:
-```bash
-sudo find /var/lib/docker/containers/ -name "*-json.log" -exec truncate -s 0 {} +
+Configure standard Docker daemon log rotation on VM-3 by editing `/etc/docker/daemon.json`:
+```json
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "50m",
+    "max-file": "3"
+  }
+}
 ```
-Subsequent `docker logs` calls complete instantaneously (<100 ms).
-
----
-
+Reload and restart the Docker service:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+```
+> [!WARNING]
+> **Avoid Manual `truncate` of Container Log Files:**  
+> According to [official Docker documentation](https://docs.docker.com/engine/logging/drivers/json-file/), directly truncating active container log files (`*-json.log`) can corrupt internal logging file descriptor tracking and permanently erases diagnostic evidence across all containers. Always use Docker's native log rotation (`max-size` / `max-file`) or Docker Compose logging options.
