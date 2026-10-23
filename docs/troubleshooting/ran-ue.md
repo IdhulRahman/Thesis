@@ -760,26 +760,39 @@ sudo systemctl restart docker
 > **Daemon Config Does Not Retroactively Update Running Containers:**  
 > According to [official Docker documentation](https://docs.docker.com/engine/logging/drivers/json-file/), changing `daemon.json` only applies to *newly created* containers. Existing containers keep the logging driver configuration they were originally started with. Merely restarting the Docker service does **not** update existing container log settings.
 
-1. **Verify Volume Persistence First:**
+> [!CAUTION]
+> **Maintain Full Compose Override Chain During Recreate:**  
+> Docker Compose merges multiple compose files strictly in the order supplied (`-f file1 -f file2 ...`). Recreating containers with only the base file (`docker-compose-slicing-basic-nrf.yaml`) will drop the overlays [`compose.amf-nrf-uri.yaml`](../../deploy/compose.amf-nrf-uri.yaml) and [`compose.upf-poc.yaml`](../../deploy/compose.upf-poc.yaml), reverting AMF and UPF to unpatched upstream images and breaking the testbed. Always use the exact same file chain for both configuration validation (`config`) and container recreation (`up -d --force-recreate`).
+
+1. **Verify Volume Persistence and Validate Merged Configuration:**
    Before recreating containers, verify that stateful datastores use persistent Docker volumes so subscriber identities and metrics are preserved:
    * **MySQL (`oai-db`):** Verify named volume `db-data` or directory mount in `docker-compose-slicing-basic-nrf.yaml` (`/var/lib/mysql`).
    * **MongoDB (`mongodb`):** Verify named volume `mongodb-data` (`/data/db`).
    * *Note:* All other 5GC core network functions (AMF, SMF, UPF, NRF, AUSF, UDM, UDR, NWDAF) are stateless microservices that reconstruct session state from database/NRF registrations.
 
-2. **Inspect and Recreate Containers:**
-   Check current container logging config (typically empty before recreation):
-   ```bash
-   docker inspect oai-amf --format '{{json .HostConfig.LogConfig}}'
-   ```
-   Recreate the 5GC stack to inherit the new daemon logging limits:
+   Inspect the merged configuration, target container images, and volume mounts before executing recreate:
    ```bash
    cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
-   docker compose -f docker-compose-slicing-basic-nrf.yaml up -d --force-recreate
+   sudo docker compose \
+     -f docker-compose-slicing-basic-nrf.yaml \
+     -f compose.amf-nrf-uri.yaml \
+     -f compose.upf-poc.yaml \
+     config
    ```
-   Recreate the NWDAF stack:
+   *Verify:* Confirm that `oai_amf` resolves to `oai-amf:thesis-nrf-uri-v1` and `oai_upf_slice1` resolves to `oai-upf:poc-develop-ie43-compat-v1`.
+
+2. **Recreate Containers with the Complete Overlay Chain:**
+   Recreate the 5GC stack with all overrides applied so containers inherit the new daemon logging limits without losing testbed customizations:
    ```bash
-   cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
-   docker compose -f docker-compose-nwdaf.yaml up -d --force-recreate
+   sudo docker compose \
+     -f docker-compose-slicing-basic-nrf.yaml \
+     -f compose.amf-nrf-uri.yaml \
+     -f compose.upf-poc.yaml \
+     up -d --force-recreate
+   ```
+   Recreate the NWDAF stack (if running in a separate compose project):
+   ```bash
+   sudo docker compose -f docker-compose-nwdaf.yaml up -d --force-recreate
    ```
 
 3. **Verify Active Log Limits on Running Containers:**
@@ -788,6 +801,12 @@ sudo systemctl restart docker
    docker inspect oai-amf --format '{{json .HostConfig.LogConfig}}'
    # Expected output: {"Type":"json-file","Config":{"max-file":"3","max-size":"50m"}}
    ```
+
+4. **Follow Standard Post-Reset Recovery Sequence (Core $\to$ RAN $\to$ UE):**
+   Recreating the 5GC containers resets active SCTP associations and GTP-U tunnel endpoints. Follow the routine recovery sequence as documented in the [Deployment SOP](../deployment/README.md#32-routine-clean-bring-up-sop):
+   * **Core (VM-3):** Wait 15 seconds for MySQL/NRF initialization, confirm healthy status (`mysql`, `amf`, `udm`, `ausf`, `upf`).
+   * **RAN (VM-4):** Restart Split RAN (`bash /opt/oran/ran/scripts/start_ran.sh`) and confirm SCTP association (`grep -E "associated AMF|is in service" /opt/oran/ran/cu.log`).
+   * **UE (VM-5):** Respawn UEs and re-establish PDU sessions (`sudo bash /opt/oran/ue/scripts/stop_multi_ue.sh && sudo bash /opt/oran/ue/scripts/spawn_multi_ue.sh -s1 1 -s2 1`), then verify user-plane connectivity (`sudo ip netns exec ue1 ping -c 3 192.168.70.145`).
 
 > [!WARNING]
 > **Avoid Manual `truncate` of Container Log Files:**  
