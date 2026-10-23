@@ -59,3 +59,8 @@ For authorized repository edits, commit coherent, relevant changes after the app
 ## 15. Report Completion Precisely
 
 End with what changed or was found, why it matters, how it was verified, and any material remaining limitation. Name the files or components involved. When a problem remains, identify its location and a concrete next action. When no new issue is found, say so without inventing additional work. Use the term "resolved" only within the scope actually verified.
+
+## 16. Prioritize GitHub cURL for VM Deployment
+
+When guiding the user to update, synchronize, or deploy scripts, configuration files, and tools on the testbed virtual machines (VM-1 through VM-6), always prioritize downloading the authoritative files directly from the user's GitHub repository using `curl` (e.g., `curl -sSL https://raw.githubusercontent.com/IdhulRahman/Thesis/main/<path> -o <target_path>`) over local `scp` or manual copy-pasting. Ensure the relevant changes are committed and pushed to GitHub first before providing the `curl` commands, and include necessary permission flags (e.g., `chmod +x`).
+
