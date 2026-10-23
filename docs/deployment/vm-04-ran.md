@@ -619,27 +619,40 @@ To dynamically inject channel impairments without restarting gNodeB or interrupt
 
 * **Script:** [`scripts/rfsim_channel_control.py`](../../scripts/rfsim_channel_control.py) (deployed on VM-4 at `/opt/oran/ran/scripts/rfsim_channel_control.py`)
 
-#### Key Commands:
-```bash
-# 1. Inspect current status across both Downlink (Model 0) and Uplink (Model 1):
-python3 /opt/oran/ran/scripts/rfsim_channel_control.py show --port 9090
+#### Channel Index Assignment in `du_gnb1.conf`:
+* **Channel 0 (`rfsimu_channel_enB0`):** Downlink Channel (gNodeB TX $\to$ UE RX).
+* **Channel 1 (`rfsimu_channel_ue0`):** Uplink Channel (UE TX $\to$ gNodeB RX).  
+  *Note:* Because the telemetry pipeline and `ran_adapter.py` monitor Uplink Shared Channel (`ulsch`) scheduler logs on gNodeB, channel impairments targeting thesis telemetry metrics must specify `--channel-id 1`.
 
-# 2. Reset both channels back to clean baseline (+20.00 dB):
-python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
+#### Calibrated Operating Regimes (Observed Under Testbed Baseline):
+Under this testbed's baseline configuration (`du_gnb1.conf`, AWGN channel, -2 dB noise power, 15 Mbps UDP offered load, MCS baseline 28):
 
-# 3. Inject controlled degradation on Uplink (Model 1):
-# 8 dB attenuation (slight stress):
-python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 8.0 --channel-id 1 --port 9090
+1. **Controlled Degradation Regime ($5\text{ dB} - 16\text{ dB}$ attenuation):**
+   * **Observed Response:** Signal attenuation reduces received RSSI; link adaptation triggers downward MCS adjustment (e.g., from 28 down to 4–14), and scheduler logs (`du1.log`) show dynamic BLER elevation into the ~30–80% range with elevated HARQ retransmissions (`ulsch_rounds`), while maintaining PDU session connectivity.
+   ```bash
+   # Inject 10 dB Uplink attenuation (moderate stress):
+   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 10.0 --channel-id 1 --port 9090
+   ```
 
-# 15 dB attenuation (severe degradation: MCS drops to QPSK, BLER rises to ~80%):
-python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 15.0 --channel-id 1 --port 9090
+2. **Severe Link Budget Collapse / Outage ($\ge 20 - 25\text{ dB}$ attenuation):**
+   * **Observed Response:** Attenuation beyond 20 dB drives received signal below receiver sensitivity threshold in this setup. In live logs, `pucch0_DTX` spikes, triggering standard 3GPP Radio Link Failure (RLF), and the Linux kernel tears down tunnel interface `oaitun_ue1`.
+   ```bash
+   # Induce severe link collapse leading to RLF:
+   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 25.0 --channel-id 1 --port 9090
+   ```
 
-# 4. Trigger deterministic Radio Link Failure (RLF Outage):
-python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 25.0 --channel-id 1 --port 9090
+3. **Status Query & Baseline Restoration:**
+   ```bash
+   # Inspect active path_loss_dB across all configured channels:
+   python3 /opt/oran/ran/scripts/rfsim_channel_control.py show --port 9090
 
-# 5. Restore baseline after experiment:
-python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
-```
+   # Restore both channels back to testbed baseline (+20.00 dB):
+   python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
+   ```
+
+> [!NOTE]
+> **Testbed Empirical Calibration Context:**  
+> The BLER ranges, MCS transitions, and RLF thresholds documented above represent empirical observations on this specific testbed configuration (`du_gnb1.conf` with AWGN model and 15 Mbps UDP load). If noise figures, bandwidth, or channel profiles are altered, exact breakdown thresholds must be re-calibrated.
 
 ---
 

@@ -737,7 +737,9 @@ Executing diagnostic commands on VM-3 such as `sudo docker logs oai-amf --tail 3
 When the 23 5GC containers run across extended testing campaigns without log rotation limits, individual container log files (`/var/lib/docker/containers/*/*-json.log`) can grow to multiple gigabytes. Reading the tail of bloated JSON files requires the Docker daemon to traverse large files on disk.
 
 ### Solution
-Configure standard Docker daemon log rotation on VM-3 by editing `/etc/docker/daemon.json`:
+
+#### Step 1: Configure Docker Daemon Log Rotation
+Edit `/etc/docker/daemon.json` on VM-3 to enforce log rotation globally for newly created containers:
 ```json
 {
   "log-driver": "json-file",
@@ -752,6 +754,41 @@ Reload and restart the Docker service:
 sudo systemctl daemon-reload
 sudo systemctl restart docker
 ```
+
+#### Step 2: Recreate Existing Containers to Apply Log Rotation
+> [!IMPORTANT]
+> **Daemon Config Does Not Retroactively Update Running Containers:**  
+> According to [official Docker documentation](https://docs.docker.com/engine/logging/drivers/json-file/), changing `daemon.json` only applies to *newly created* containers. Existing containers keep the logging driver configuration they were originally started with. Merely restarting the Docker service does **not** update existing container log settings.
+
+1. **Verify Volume Persistence First:**
+   Before recreating containers, verify that stateful datastores use persistent Docker volumes so subscriber identities and metrics are preserved:
+   * **MySQL (`oai-db`):** Verify named volume `db-data` or directory mount in `docker-compose-slicing-basic-nrf.yaml` (`/var/lib/mysql`).
+   * **MongoDB (`mongodb`):** Verify named volume `mongodb-data` (`/data/db`).
+   * *Note:* All other 5GC core network functions (AMF, SMF, UPF, NRF, AUSF, UDM, UDR, NWDAF) are stateless microservices that reconstruct session state from database/NRF registrations.
+
+2. **Inspect and Recreate Containers:**
+   Check current container logging config (typically empty before recreation):
+   ```bash
+   docker inspect oai-amf --format '{{json .HostConfig.LogConfig}}'
+   ```
+   Recreate the 5GC stack to inherit the new daemon logging limits:
+   ```bash
+   cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
+   docker compose -f docker-compose-slicing-basic-nrf.yaml up -d --force-recreate
+   ```
+   Recreate the NWDAF stack:
+   ```bash
+   cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
+   docker compose -f docker-compose-nwdaf.yaml up -d --force-recreate
+   ```
+
+3. **Verify Active Log Limits on Running Containers:**
+   Confirm that recreated containers have active rotation constraints:
+   ```bash
+   docker inspect oai-amf --format '{{json .HostConfig.LogConfig}}'
+   # Expected output: {"Type":"json-file","Config":{"max-file":"3","max-size":"50m"}}
+   ```
+
 > [!WARNING]
 > **Avoid Manual `truncate` of Container Log Files:**  
-> According to [official Docker documentation](https://docs.docker.com/engine/logging/drivers/json-file/), directly truncating active container log files (`*-json.log`) can corrupt internal logging file descriptor tracking and permanently erases diagnostic evidence across all containers. Always use Docker's native log rotation (`max-size` / `max-file`) or Docker Compose logging options.
+> Directly truncating active container log files (`*-json.log`) can corrupt internal logging file descriptor tracking and permanently erases diagnostic evidence across all containers. Always use Docker's native log rotation (`max-size` / `max-file`) or Docker Compose logging options as described above.

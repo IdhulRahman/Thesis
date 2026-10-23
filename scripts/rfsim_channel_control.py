@@ -230,6 +230,7 @@ def cmd_show(args):
         found_ids = sorted(list(set(int(x) for x in re.findall(r'(?:model|channel)\s+(\d+)\b', raw_status, re.IGNORECASE))))
         target_channels = [args.channel_id] if args.channel_id is not None else (found_ids or [0, 1])
 
+        has_error = False
         for ch in target_channels:
             try:
                 st = get_channel_state(client, ch)
@@ -240,11 +241,17 @@ def cmd_show(args):
                 if st['noise_power_dB'] is not None:
                     print(f"   noise_power_dB : {st['noise_power_dB']:+.2f} dB")
             except Exception as ex:
-                print(f"\n>> Channel {ch}: could not parse state ({ex})")
+                print(f"\n>> Channel {ch}: could not parse state ({ex})", file=sys.stderr)
+                if args.channel_id is not None:
+                    has_error = True
 
         print("\n--- [2] Predefined Channel Models (channelmod show predef) ---")
         out_predef = client.execute("channelmod show predef")
         print(out_predef)
+
+        if has_error:
+            print(f"\n[ERROR] Requested channel {args.channel_id} could not be retrieved or parsed.", file=sys.stderr)
+            sys.exit(1)
     except Exception as e:
         print(f"\n[ERROR] Command failed: {e}", file=sys.stderr)
         sys.exit(1)
@@ -462,7 +469,16 @@ def cmd_sweep(args):
         print("\n[WARNING SUMMARY] Sweep steps succeeded, BUT baseline rollback failed!", file=sys.stderr)
         sys.exit(2)
 
-    print("\n[SUMMARY] Sweep and baseline restoration completed cleanly.", flush=True)
+    if not args.reset_after:
+        print(
+            "\n[SUMMARY] Sweep completed successfully. Baseline restoration deliberately omitted "
+            "(--no-reset specified; channel remains at final sweep value).",
+            flush=True
+        )
+    elif restoration_attempted and restoration_ok:
+        print("\n[SUMMARY] Sweep and baseline restoration completed cleanly.", flush=True)
+    else:
+        print("\n[SUMMARY] Sweep completed successfully.", flush=True)
 
 
 # ==============================================================================
