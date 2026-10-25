@@ -554,9 +554,9 @@ docker logs oai-amf | grep -i "SST"
 
 ---
 
-## 12. NWDAF & Core Telemetry / Actuation Adapter
+## 12. NWDAF & Core Host Telemetry Adapter
 
-To support cross-domain closed-loop coordination with the O-RAN Non-RT RIC, VM-3 exposes standard-aligned Core analytics and provides user-plane actuation endpoints.
+To support cross-domain observability and enable evaluation with the O-RAN Non-RT RIC, VM-3 exposes standard-aligned Core analytics and runs a lightweight host telemetry scraper (`core_adapter.py`). Autonomous closed-loop actuation remains planned for Phase B.
 
 ### 12.1 Standards Compliance
 - **3GPP TS 23.288:** Architecture for 5G System Network Data Analytics Function (NWDAF).
@@ -861,14 +861,14 @@ The source code for the UPF kernel physical adapter v9 is centrally managed at:
 
 ## 13. VM-3 Baseline Configuration Modes
 
-| Baseline ID | Mode Name | Core Adapter Behavior | User-Plane Adaptation Mechanism |
+| Baseline ID | Mode Name | Core Host Adapter (`core_adapter.py`) | User-Plane Adaptation / Emulation Mechanism |
 |---|---|---|---|
-| **B0** | Static Default | Inactive. Static queues on both UPFs. | None. Unmitigated congestion under overload. |
-| **B1** | RAN-Only Control | Telemetry logging only. No Core actuation. | None. UPF bottleneck is ignored; xApp steers blind. |
-| **B2** | Core-Only Control | **Autonomous Core Shaping.** Directly throttles non-priority flows when UPF queue delay exceeds 30ms. | Dynamic rate shaping via `tc tbf` without radio coordination. |
-| **B3** | Decoupled | Autonomous Core Shaping runs concurrently with independent xApp. | Operates without cross-domain synchronization (risks action churn). |
-| **B4** | Coordinated (Fixed Heuristic) | Passive until commanded by rApp after radio handover timeout. | Applied as fallback step after radio steering timeout. |
-| **Proposed** | Bottleneck-Aware Closed-Loop | **Targeted Actuation.** Activated immediately when `CORE_BOTTLENECK` or `JOINT_BOTTLENECK` is classified by rApp. | Targeted user-plane rate conditioning coordinated with RAN backpressure. |
+| **B0** | Static Default | Inactive / Passive logging. Static queues on both UPFs. | None. Unmitigated congestion under overload. |
+| **B1** | RAN-Only Control | Passive telemetry logging at 1.0 Hz. No Core actuation. | None. UPF bottleneck is unmitigated; xApp steers based on radio state. |
+| **B2** | Core-Only Control | Passive telemetry logging at 1.0 Hz. | **Emulated Core Mitigation:** Scripted rate shaping (`tc tbf`) applied to non-priority flows without radio coordination. |
+| **B3** | Decoupled | Passive telemetry logging at 1.0 Hz. | **Independent Core Mitigation:** Scripted rate shaping applied concurrently with independent radio xApp (evaluates action churn). |
+| **B4** | Coordinated (Fixed Heuristic) | Passive telemetry logging at 1.0 Hz. | **Sequential Fallback Mitigation:** Scripted core rate shaping executed after radio steering timeout. |
+| **Proposed** | Bottleneck-Aware Closed-Loop | Passive telemetry logging at 1.0 Hz. | **Planned Autonomous Core Actuator (Phase B):** Targeted rate conditioning dispatched upon rApp `CORE_BOTTLENECK` / `JOINT_BOTTLENECK` classification. |
 
 ---
 

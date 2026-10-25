@@ -56,42 +56,53 @@ Ingested via Core Research Telemetry Adapter (`core_adapter.py` v9) and 3GPP Rel
 | `nwdaf_comm_ul_bytes` | OAI NWDAF NBI (`UE_COMMUNICATION`) | Bytes (`B`) | Cumulative uplink user-plane volume reported by NWDAF. |
 | `nwdaf_comm_dl_bytes` | OAI NWDAF NBI (`UE_COMMUNICATION`) | Bytes (`B`) | Cumulative downlink user-plane volume reported by NWDAF. |
 | `nwdaf_comm_vol_std_bytes`| OAI NWDAF NBI (`UE_COMMUNICATION`) | Bytes (`B`) | Volume variation metric (computed as standard deviation $\sigma$ upstream). |
-| `nwdaf_comm_freshness` | Collector Poller (`telemetry_collector.py`)| Binary (`1/0`) | Freshness indicator for NWDAF NBI telemetry ($1$ if updated within 35s). |
+| `nwdaf_comm_freshness` | Collector Poller (`telemetry_collector.py`)| Binary (`1/0`) | Value-change heuristic for NWDAF NBI telemetry ($1$ if reported volume updated within 45s, else $0$). |
 | `nwdaf_network_performance` | OAI NWDAF NBI (`Nnwdaf_AnalyticsInfo`) | JSON 3GPP TS 29.520 | PDU session control analytics (`SESS_SUCC_RATIO`, static ratio `0`). |
 | `amf_active_pdu_sessions` | AMF SBI (`/namf-comm`) | Counter | Empirical count of active PDU sessions across slices. |
 
 ### 2.2 Domain 2: OpenAirInterface Split RAN (VM-4 — `10.102.0.167`)
-Ingested via O-RAN FlexRIC E2 Agent (`E2SM-KPM v2.03` over SCTP `36421`):
+Active telemetry ingestion is performed by `ran_adapter.py`, which tails the real-time MAC scheduler logs (`du1.log` and `du2.log`) from gNB DU-1 (Cell-1, PCI 1, port `4043`) and DU-2 (Cell-2, PCI 2, port `4044`) and posts telemetry to VM-6 `:9100/report` at 1.0 Hz:
 
-| Metric Name | E2 Service Model | Granularity | Role in Thesis Evaluation |
+| Metric Name | Ingestion Source | Unit / Type | Role in Thesis Evaluation |
 |---|---|---|---|
-| `ran_cell_prb_total` | E2SM-KPM (gNB DU) | Percentage (`%`) | Overall radio resource block saturation per cell (Cell-1 :4043 vs Cell-2 :4044). |
-| `ran_slice_prb_ratio` | E2SM-KPM (gNB DU) | Ratio (`0.0 - 1.0`) | Proportion of PRBs consumed by Slice 1 (eMBB) vs Slice 2 (URLLC). |
-| `ran_ue_cqi` | E2SM-KPM (MAC layer) | Discrete (`0 - 15`) | Channel Quality Indicator per connected UE. Detects radio degradation. |
-| `ran_ue_rsrp_dbm` | E2SM-KPM (PHY layer) | Decibel-milliwatt | Radio link strength. Used to contrast standard 3GPP A3 handover with RIC steering. |
-| `ran_rlc_buffer_occupancy` | E2SM-KPM (RLC layer) | Bytes | Radio scheduling queue depth. Spikes during pure RAN bottleneck. |
-| `ran_rlc_packet_delay_ms` | E2SM-KPM (RLC layer) | Milliseconds (`ms`) | Scheduling delay on the radio access link. |
+| `ran_prb_cell1`, `ran_prb_cell2` | OAI DU MAC Scheduler Logs | Percentage (`%`) | Instantaneous PUSCH grant proxy per UE ($\frac{NPRB}{106} \times 100\%$, aligned with TS 38.104 Table 5.3.2-1). |
+| `ran_mcs_cell1`, `ran_mcs_cell2` | OAI DU MAC Scheduler Logs | Discrete (`0 - 28`) | PUSCH Modulation and Coding Scheme index per cell (TS 38.214 Table 5.1.3.1-1). |
+| `ran_bler_cell1`, `ran_bler_cell2` | OAI DU MAC Scheduler Logs | Ratio (`0.0 - 1.0`) | Exponentially filtered first-retransmission block error rate. |
+| `ran_snr_cell1`, `ran_snr_cell2` | OAI DU MAC Scheduler Logs | Decibel (`dB`) | Uplink Sounding/PUSCH Signal-to-Noise Ratio per cell. |
+
+#### 2.2.1 Planned E2SM-KPM Radio Telemetry (Phase B)
+In earlier standalone prototypes, O-RAN FlexRIC E2 Agent (`E2SM-KPM v2.03` over SCTP `36421`) was validated for direct RIC ingestion. For primary 1.000 Hz cross-domain dataset generation, the scheduler log adapter is utilized. The fine-grained E2SM-KPM metrics below remain planned for Phase B closed-loop actuation:
+
+| Metric Name | E2 Service Model | Granularity | Planned Role in Phase B |
+|---|---|---|---|
+| `ran_cell_prb_total` | E2SM-KPM (gNB DU) | Percentage (`%`) | Time–frequency cell-wide PRB integration across all connected UEs. |
+| `ran_slice_prb_ratio` | E2SM-KPM (gNB DU) | Ratio (`0.0 - 1.0`) | Proportion of PRBs allocated to Slice 1 (eMBB) vs Slice 2 (URLLC). |
+| `ran_ue_cqi` | E2SM-KPM (MAC layer) | Discrete (`0 - 15`) | Channel Quality Indicator per connected UE. |
+| `ran_ue_rsrp_dbm` | E2SM-KPM (PHY layer) | Decibel-milliwatt | Radio link strength for standard 3GPP A3 measurement reporting. |
+| `ran_rlc_buffer_occupancy` | E2SM-KPM (RLC layer) | Bytes | Radio scheduling queue depth. |
+| `ran_rlc_packet_delay_ms` | E2SM-KPM (RLC layer) | Milliseconds (`ms`) | Radio interface scheduling latency. |
 
 ### 2.3 Domain 3: O-RAN Near-RT & Non-RT RIC (VM-1 — `10.102.0.168` & VM-2 — `10.102.0.66`)
-Ingested via A1 PMS REST API (`:8081`), xApp internal telemetry, and rApp decision logs:
+Ingested via A1 PMS REST API (`:8081`) and rApp decision logs:
 
-| Metric Name | Source Component | Data Type | Role in Thesis Evaluation |
+| Metric Name | Source Component | Data Type | Implementation Status & Role |
 |---|---|---|---|
-| `rapp_diagnosed_bottleneck` | rApp Classifier (VM-1) | Enum (`0:NORMAL, 1:RAN, 2:CORE, 3:JOINT`) | Diagnostic classification of bottleneck origin. Core novelty metric. |
-| `rapp_classifier_confidence` | rApp Classifier (VM-1) | Float (`0.0 - 1.0`) | AI/heuristic confidence score for root-cause diagnosis. |
-| `a1_policy_threshold` | A1 PMS (VM-1 / VM-2) | Numeric (Type 20008) | Active steering threshold enforced from Non-RT to Near-RT RIC. |
-| `xapp_steering_decision` | xApp (VM-2) | Enum (`KEEP, CELL_1, CELL_2`) | Real-time traffic steering action dispatched via E2SM-RC. |
-| `xapp_action_churn_count` | xApp / rApp | Counter (actions/min) | Handover frequency. Evaluates steering stability and ping-pong avoidance. |
-| `xapp_inference_time_ms` | xApp (VM-2) | Milliseconds (`ms`) | Execution time of the near-RT control loop (fast loop latency). |
+| `rapp_diagnosed_bottleneck` | rApp Classifier (VM-1) | Enum (`0:NORMAL, 1:RAN, 2:CORE, 3:JOINT`) | Diagnostic classification of bottleneck origin. Evaluated in offline/shadow mode. |
+| `rapp_classifier_confidence` | rApp Classifier (VM-1) | Float (`0.0 - 1.0`) | Confidence score for root-cause diagnosis. |
+| `a1_policy_threshold` | A1 PMS (VM-1 / VM-2) | Numeric (Type 20008) | **Validated:** Active steering threshold enforced from Non-RT to Near-RT RIC. |
+| `xapp_steering_decision` | xApp (VM-2) | Enum (`KEEP, CELL_1, CELL_2`) | **Planned (Phase B):** Real-time traffic steering action via E2SM-RC. |
+| `xapp_action_churn_count` | xApp / rApp | Counter (actions/min) | **Planned (Phase B):** Evaluates steering stability and ping-pong avoidance. |
+| `xapp_inference_time_ms` | xApp (VM-2) | Milliseconds (`ms`) | **Planned (Phase B):** Execution time of near-RT control loop. |
 
 ### 2.4 Domain 4: End-to-End User Experience (VM-5 — `10.102.0.165`)
-Ingested directly from the automated multi-slice traffic generator (`trafgen.sh`):
+Ingested directly from the automated multi-slice traffic generator (`trafgen.sh`) via HTTP POST `/report`:
 
 | Metric Name | Workload Generator | Sampling | Role in Thesis Evaluation |
 |---|---|---|---|
-| `e2e_slice1_throughput_mbps` | `iperf3` (Slice 1 eMBB) | 1.0 second | Measured user-plane throughput delivered across Slice 1. |
-| `e2e_slice2_latency_rtt_ms` | Precision Ping (Slice 2 URLLC) | 100 ms | Measured end-to-end RTT latency (min, avg, max, mdev, p95, p99). |
-| `e2e_slice2_packet_loss_pct` | Precision Ping (Slice 2 URLLC) | Cumulative (`%`) | SLA violation indicator for mission-critical slice. Must remain 0%. |
+| `e2e_slice1_throughput_mbps` | `iperf3 -u` (Slice 1 eMBB) | 1.0 second | Measured client-side UDP offered throughput dispatched across Slice 1. |
+| `e2e_slice2_latency_rtt_ms` | Precision Ping (Slice 2 URLLC) | 100 ms | Measured end-to-end ICMP RTT latency (min, avg, max, mdev, p95, p99). |
+| `e2e_slice2_packet_loss_pct` | Precision Ping (Slice 2 URLLC) | Cumulative (`%`) | SLA violation indicator for mission-critical slice. |
+| `e2e_probe_freshness` | Precision Ping (Slice 2 URLLC) | Binary (`0/1`) | Arrival health indicator: 1 if active canary RTT reply received within 3.5s. |
 | `e2e_sla_violation_status` | SLA Monitor | Binary (`0: OK, 1: VIOLATED`) | Evaluates SLA violation rate ($V_s$) and recovery time ($T_{rec}$). |
 
 ---
@@ -104,22 +115,24 @@ Ingested directly from the automated multi-slice traffic generator (`trafgen.sh`
 │                                                                                        │
 │   ┌────────────────────────────────────────────────────────────────────────────────┐   │
 │   │                         Unified Grafana Dashboard (:3000)                      │   │
-│   │   [Panel 1: NWDAF Slice Load]      [Panel 2: RAN PRB Saturation Cell-1 vs 2]   │   │
+│   │   [Panel 1: NWDAF Traffic Vol]     [Panel 2: RAN PUSCH Grant Cell-1 vs 2]      │   │
 │   │   [Panel 3: Bottleneck Diagnosis]  [Panel 4: E2E URLLC Latency vs eMBB Tput]   │   │
-│   │   [Panel 5: A1 Policy & Actions]   [Panel 6: SLA Recovery Time (Trec)]         │   │
+│   │   [Panel 5: A1 Policy & Actions]   [Panel 6: UPF Queue Backlog & Drops]        │   │
 │   └───────────────────────────────────────▲────────────────────────────────────────┘   │
 │                                           │ PromQL Queries                             │
 │   ┌───────────────────────────────────────┴────────────────────────────────────────┐   │
 │   │                       Prometheus Time-Series Database (:9090)                  │   │
 │   │                  Storage: TSDB with 15-day retention (1s scrape)               │   │
 │   └───────────────────────────────────────▲────────────────────────────────────────┘   │
-│                                           │ Scrape Targets (:9100, :9101, :9102, :9103)│
+│                                           │ Scrapes http://10.102.0.67:9100/metrics    │
 │   ┌───────────────────────────────────────┴────────────────────────────────────────┐   │
-│   │                     Multi-Domain Telemetry Collectors & Exporters              │   │
-│   │   - core_nwdaf_exporter.py    -> Polls VM-3 Kong API (:8080) & UPF stats       │   │
-│   │   - ran_e2_exporter.py        -> Reads VM-4 FlexRIC KPM telemetry             │   │
-│   │   - ric_coordinator_exporter  -> Polls VM-1 A1 PMS (:8081) & rApp decisions    │   │
-│   │   - ue_qos_exporter.py        -> Reads VM-5 trafgen logs (iperf3 & ping)       │   │
+│   │           Unified Telemetry Collector Daemon (telemetry_collector.py :9100)    │   │
+│   │   - Ingests HTTP POST /report from:                                            │   │
+│   │       * VM-3: core_adapter.py (Netlink tc qdisc backlog/drops & /proc/net/dev) │   │
+│   │       * VM-4: ran_adapter.py (DU-1 / DU-2 scheduler ASCII log tailing)         │   │
+│   │       * VM-5: trafgen.sh (iperf3 offered load & canary ICMP RTT)               │   │
+│   │   - Directly polls VM-3 Kong Gateway (:8080) for 3GPP NWDAF UE_COMMUNICATION   │   │
+│   │   - Exposes consolidated Prometheus gauges on :9100/metrics                    │   │
 │   └────────────────────────────────────────────────────────────────────────────────┘   │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```

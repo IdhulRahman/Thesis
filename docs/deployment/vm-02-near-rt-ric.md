@@ -26,7 +26,7 @@ VM-2 Near-RT RIC
 VM-4 OAI RAN
 ```
 
-At the current implementation stage, both the **A1 policy path** (from A1 PMS on VM-1 to the Python xApp on VM-2) and the **E2 control path** (from OAI RAN on VM-4 to `ric_e2term` on VM-2 with 8 Service Models) have been **100% validated end-to-end**.
+At the current implementation stage, the **A1 policy distribution path** (from A1 PMS on VM-1 to the Python xApp on VM-2) and the **E2 Setup & Service Model Registration handshake** (from OAI RAN on VM-4 to `ric_e2term` on VM-2 with 8 Service Models) have been **empirically validated**. Closed-loop E2SM-RC control actuation and dynamic serving-cell handover remain **planned research work (Phase B)**.
 
 ---
 
@@ -96,12 +96,22 @@ Pinned A1 Mediator repository commit used during deployment:
 - **Protocol Gap:** A1 PMS v2.6.0 (H-Release on VM-1) uses the standard ONAP/OSC A1 client (`OscA1Client`), which queries `/a1-p/healthcheck` and sends REST requests expecting specific HTTP response semantics. A1 Mediator v3.2.2 on VM-2 exposes endpoints under `/A1-P/v2/...` with strict case sensitivity.
 - **Solution:** The NGINX reverse-proxy shim listening on port `10001` bridges URL prefixes, normalizes headers, and exposes `/a1-p/healthcheck`, allowing complete interoperability between Non-RT RIC and Near-RT RIC.
 
-### 3.4 Global gNB Identity & Service Model Registration
+### 3.4 Global gNB Identity, Service Models, and Implementation Milestones
 - **Identity Formation:** When VM-4 (`oai-ran`) initiates E2 Setup, it sends `Global gNB ID` composed of PLMN `208.95` and gNB ID `0xe00` (`3584`), resulting in identity:
   ```text
   gnb_208_095_00000e00
   ```
-- **Service Models:** E2Mgr registers all 8 Service Models embedded in the RAN context into DBaaS Redis, enabling any xApp to subscribe to E2SM-KPM (ID: 2) or trigger control actions via E2SM-RC (ID: 3).
+- **Service Models:** E2Mgr registers all 8 Service Models embedded in the RAN context into DBaaS Redis, enabling any xApp to interact with E2SM-KPM (ID: 2) and E2SM-RC (ID: 3).
+
+#### Verifiable O-RAN Milestone Status & Demarcation:
+1. **Milestone 1 — E2 Setup Handshake (`Validated`):** SCTP connection over port `36421` and bidirectional E2 Setup Request / Response successfully establish node association with DBaaS.
+2. **Milestone 2 — Service Model Registration (`Validated`):** All 8 Service Models successfully exposed by OAI CU and registered in Near-RT RIC DBaaS Redis.
+3. **Milestone 3 — A1 Policy Delivery & Feedback (`Validated`):** A1 PMS (VM-1) dispatches Policy Type `20008` to A1 Mediator; A1 Mediator forwards via RMR to `a1_policy_xapp.py`; xApp responds with RMR message `20011` (`ENFORCED`).
+4. **Milestone 4 — E2 Subscription & Indication (`Historical / Standalone Prototype`):** Ingested in standalone FlexRIC tests; primary 1.000 Hz logging pipeline for the cross-domain thesis dataset currently ingests MAC scheduler logs via `ran_adapter.py`.
+5. **Milestone 5 — E2SM-RC Control Request & Acknowledgment (`Planned — Phase B`):** Real-time generation and transmission of E2 Control messages from xApp to OAI CU softmodem.
+6. **Milestone 6 — Serving-Cell Handover & Traffic Continuity (`Planned — Phase B`):** Closed-loop handover of the same UE instance between Cell-1 and Cell-2 with continuous PDU session dataflow and SLA evaluation.
+   > [!IMPORTANT]
+   > **RFsim Testbed Demarcation:** In the current baseline testbed, UE-1 (port `4043`) and UE-2 (port `4044`) are statically bound to distinct RFsim DU instances. This validates multi-cell coexistence and RF separation, but does **not** constitute proof of active dynamic inter-cell handover or serving-cell steering. Serving-cell switching remains a Phase B milestone.
 
 ---
 

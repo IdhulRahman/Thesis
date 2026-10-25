@@ -27,13 +27,13 @@ This document formally specifies the capabilities, data provenance, and architec
 
 ## 2. 3GPP NWDAF AnLF Capability & Event ID Audit Matrix
 
-The table below catalogs the audited state of 3GPP TS 23.288 / TS 29.520 analytics services against the deployed upstream OAI NWDAF implementation:
+The table below catalogs the formal mapping between 3GPP Stage-2 / Stage-3 specifications and the deployed upstream OpenAirInterface NWDAF implementation:
 
-| Analytics / Event ID | Real Input Source | Engine Function & File | Mathematical Formula & Semantics | NBI API Output | Active Filtering | Ingestion & Cadence | Live Evidence | Operational Status |
-|---|---|---|---|---|---|---|---|---|
-| **`UE_COMMUNICATION`** (`COMMUNICATION_INFO`) | MongoDB `testing.smf` collection (populated via SMF SBI `/test/smf` from UPF URR) | `ueCommunicationHandler`<br>`components/oai-nwdaf-engine/internal/engine/ue_communication.go` | **Volume Aggregation:**<br>$V_{UL} = \sum \text{UlVolume}$<br>$V_{DL} = \sum \text{DlVolume}$<br>**Standard Deviation:**<br>$\sigma_{UL} = \sqrt{\frac{1}{N} \sum (V_i - \bar{V})^2}$<br>*(computed via `math.Sqrt` into field `ulVolVariance`)*<br>**Duration:**<br>$\Delta t = \sum (\text{stopTime} - \text{startTime})$ | JSON payload:<br>`ueComms[0].trafChar.ulVol`<br>`ueComms[0].trafChar.dlVol`<br>`ueComms[0].trafChar.ulVolVariance`<br>`ueComms[0].commDur` | Temporal window filter:<br>`ana-req={"startTs": ..., "endTs": ...}`.<br>Filters session documents within isolated experiment run. | UPF Usage Report (URR) periodic loop.<br>**Cadence: $\approx 30$ seconds**. | HTTP 200 OK via Kong port 8080.<br>Live UL/DL volume and standard deviation increase dynamically under active traffic. | **VERIFIED & OPERATIONAL (NATIVE)** |
-| **`NETWORK_PERFORMANCE`** (`SESS_SUCC_RATIO`) | MongoDB `testing.smf` collection | `nwPerfNumOfPdu`<br>`components/oai-nwdaf-engine/internal/engine/network_performance.go` | **Control Plane Reliability Metric:**<br>Ratio of successful PDU session establishments to total attempts (TS 29.520 §5.1.6.3.10).<br>**Upstream Implementation:**<br>`absoluteNum = collection.CountDocuments(...)`<br>`relativeRatio = int32(0)` *(hardcoded `//TODO`)*<br>`confidence = int32(0)` *(hardcoded `//TODO`)* | JSON payload:<br>`nwPerfs[0].relativeRatio = 0`<br>`nwPerfs[0].absoluteNum = 0`<br>`nwPerfs[0].confidence = 0` | Supported filter fields:<br>`snssais`, `dnns`, `nwPerfTypes`. | Event-driven (triggered only during PDU Session Establishment). | HTTP 200 OK via Kong port 8080.<br>Emits static `0` values. `relativeRatio` is uncalculated upstream. | **INCOMPLETE UPSTREAM**<br>*(Control Plane only; non-informative for User Plane bottleneck)* |
-| **`LOAD_LEVEL_INFORMATION`** / **`NSI_LOAD_LEVEL`** | None (Requires N4 PFCP URR bandwidth or resource quota integration) | None registered in upstream OAI `oai-nwdaf-engine` | TS 23.288 §6.3 / TS 29.520 §5.1.6.3.4.<br>Stage-3 standard enum for slice/NSI load level. *(Note: `SLICE_LOAD_LEVEL` is not a valid TS 29.520 Release-17 enum).* | None (Endpoint returns HTTP 404 via Kong Gateway). | Not implemented. | None. | HTTP 404 Not Found on Kong Gateway (`/nnwdaf-eventsubscription/v1/slice-load-level`). | **UNSUPPORTED UPSTREAM**<br>*(Requires Option B extension if needed)* |
+| 3GPP Stage-2 Analytics ID (TS 23.288) | 3GPP Stage-3 Tabular Enum (TS 29.520 v17.6.0 §5.1.6.3.4, Table 5.1.6.3.4-1) | 3GPP Stage-3 OpenAPI Enum (TS 29.520 v17.6.0 Annex A) | Upstream OAI Engine Function & Source File | NBI Query Selector & Gateway Route | Ingestion Cadence & Data Source | Live Empirical Evidence | Operational Status in Audited Build |
+|---|---|---|---|---|---|---|---|
+| **Communication performance** (TS 23.288 §6.7) | **`UE_COMM`** | **`UE_COMMUNICATION`** | `ueCommunicationHandler`<br>`components/oai-nwdaf-engine/internal/engine/ue_communication.go` | `event-id=UE_COMMUNICATION`<br>`GET /nnwdaf-analyticsinfo/v1/analytics?event-id=UE_COMMUNICATION&ana-req={...}` | Periodic UPF Usage Reports (URR).<br>**Cadence: $\approx 30$ seconds**. | HTTP 200 OK via Kong port 8080.<br>Payload delivers dynamic `ulVol`, `dlVol`, `ulVolVariance`, and `commDur`. | **VERIFIED & OPERATIONAL (NATIVE)** |
+| **Network performance** (TS 23.288 §6.6) | **`NETWORK_PERFORMANCE`** | **`NETWORK_PERFORMANCE`** | `nwPerfNumOfPdu`<br>`components/oai-nwdaf-engine/internal/engine/network_performance.go` | `event-id=NETWORK_PERFORMANCE`<br>`GET /nnwdaf-analyticsinfo/v1/analytics?event-id=NETWORK_PERFORMANCE` | Event-driven (triggered upon PDU Session Establishment). | HTTP 200 OK via Kong port 8080.<br>`absoluteNum` counted from MongoDB `testing.smf`; `relativeRatio` is an uncalculated upstream stub (`//TODO`, hardcoded 0). | **INCOMPLETE UPSTREAM**<br>*(Control Plane only; non-informative for User Plane bottlenecks)* |
+| **Slice load level** / **Load level information** (TS 23.288 §6.3) | **`SLICE_LOAD_LEVEL`** | **`SLICE_LOAD_LEVEL`** | None registered in upstream OAI engine switch-case (`api_nwdaf_analytics_document_service.go`) | `event-id=SLICE_LOAD_LEVEL`<br>`GET /nnwdaf-analyticsinfo/v1/analytics?event-id=SLICE_LOAD_LEVEL` | None in audited container build. | Query returns **HTTP 400 Bad Request** (`"invalid Event Id param"`) via NBI Analytics API.<br>Unregistered subscription path `/nnwdaf-eventsubscription/v1/slice-load-level` returns **HTTP 404 Not Found** via Kong. | **UNSUPPORTED UPSTREAM**<br>*(Mapped to strict `NaN` in dataset)* |
 
 ---
 
@@ -139,9 +139,9 @@ To guarantee scientific rigor, all telemetry recorded during experiments is stri
 ### Tier 3: Metadata, Annotations, and Quality Indicators
 * `timestamp_utc`, `elapsed_sec`, `run_id`
 * `event_phase_id`, `event_scenario`, `event_domain`, `event_component` (Operator-assigned labels from `record_experiment.py`)
-* `nwdaf_api_status` (HTTP connectivity status to Kong Gateway)
-* `nwdaf_comm_freshness` (Heuristic indicator: 1 if source URR volume changed within 45s, else 0)
-* `e2e_probe_freshness` (Heuristic indicator: 1 if active canary ping received within 3.5s, else 0)
+* `nwdaf_api_status` (HTTP connectivity status to Kong Gateway :8080)
+* `nwdaf_comm_freshness` (NWDAF value-change heuristic indicator: 1 if reported user-plane volume tuple updated within 45s, else 0; operates independently of `nwdaf_api_status`)
+* `e2e_probe_freshness` (Canary reply arrival freshness indicator: 1 if active ICMP echo reply received from UE-2 within 3.5s, else 0; valid measurement indicator even when measured RTT values remain numerically stable)
 
 ---
 

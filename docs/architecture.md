@@ -101,9 +101,9 @@ The diagram below illustrates the complete **proposed multi-timescale closed-loo
    * If `RAN_BOTTLENECK`: Dispatch A1 Policy Type 20008 to steer eligible traffic to the alternate cell (Cell-1 $\to$ Cell-2).
    * If `CORE_BOTTLENECK`: Restrict Core user-plane offered load or apply egress traffic shaping via UPF rate conditioning.
    * If `JOINT_BOTTLENECK`: Execute coordinated, staged mitigation (e.g., Core rate shaping first to stabilize buffers, followed by radio steering).
-4. **Execute (Actuation):**  
-   * **Near-RT RIC:** The xApp consumes A1 Policy Type 20008 and emits E2 Control messages (E2SM-RC) to OAI CU, triggering RRC Reconfiguration.
-   * **Core Adapter:** Applies Linux `tc qdisc` Token Bucket Filter (TBF) constraints on target UPF egress interfaces.
+4. **Execute (Actuation — Proposed / Planned Phase B):**  
+   * **Near-RT RIC (Planned):** The xApp consumes A1 Policy Type 20008 and dispatches E2 Control messages (E2SM-RC) to OAI CU, triggering RRC Reconfiguration.
+   * **Core User-Plane Conditioning (Planned):** A dedicated actuation agent applies Linux `tc qdisc` Token Bucket Filter (TBF) constraints on target UPF egress interfaces. *(Note: `core_adapter.py` remains strictly a read-only telemetry sensor; in current baseline experiments, TBF constraints are applied manually or via testbed orchestration scripts for fault injection).*
 5. **Verify (Closed-Loop SLA Recovery):**  
    The rApp evaluates post-steering SLA compliance ($V_s$, recovery time, and latency percentiles). If SLA is restored, further churn is suppressed; if the bottleneck persists, fallback mitigation is triggered.
 
