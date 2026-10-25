@@ -121,17 +121,19 @@ To prevent conflating disparate units, all errors are computed and reported in t
 2. **Per-Window Policy Recall ($R_{window}$):**
    $$R_{window} = \frac{N_{\text{windows with correct intervention}}}{N_{\text{fault windows requiring intervention}}} \times 100\%$$
    Evaluates the proportion of fault windows requiring intervention that successfully receive a timely, correct-domain control action. A window receiving conflicting actions (e.g., correct radio action plus erroneous core throttling) is scored as non-compliant ($0$) to penalize control ambiguity. A fault window with zero dispatched actions is scored as a missed intervention ($0$). Normal non-fault windows are excluded from the denominator.
-3. **Per-Slice SLA Violation Ratio ($V_{s,i}$):**
-   $$V_{s,\text{eMBB}} = \frac{1}{K} \sum_{k=1}^K \mathbb{I}\left(\text{SLA}_{\text{eMBB}}(k) = \text{Violated}\right) \times 100\%$$
-   $$V_{s,\text{URLLC}} = \frac{1}{K} \sum_{k=1}^K \mathbb{I}\left(\text{SLA}_{\text{URLLC}}(k) = \text{Violated}\right) \times 100\%$$
-   Where URLLC SLA is violated when $RTT > 20.0\text{ ms}$ or loss $> 1.0\%$; eMBB SLA is evaluated relative to workload demand, violated under saturation stress when $T_{\text{eMBB}} < 20.0\text{ Mbps}$ (or $< 85\%$ of offered demand when below capacity).
-4. **Joint SLA Violation Ratio ($V_{s,\text{joint}}$):**
-   $$V_{s,\text{joint}} = \frac{1}{K} \sum_{k=1}^K \mathbb{I}\left(\text{SLA}_{\text{eMBB}}(k) = \text{Violated} \lor \text{SLA}_{\text{URLLC}}(k) = \text{Violated}\right) \times 100\%$$
-   Captures multi-slice system degradation where failure of either slice breaches overall network delivery. Windows with probe timeout / no-reply are logged as Violated; pre-experiment warmup intervals are excluded from denominator $K$. *(Note: $T_{\text{eMBB}}$ is evaluated using sender-side offered throughput from VM-5 client logs; receiver goodput validation from EXT-DN server logs is planned for offline cross-validation).*
-5. **SLA Recovery Time ($T_{rec}$):**
+3. **Window Evaluation States & Coverage:**
+   Offline evaluation classifies each window into **`Compliant`** (healthy scrape and SLA met), **`Violated`** (verified probe delivery failure, loss $> 1.0\%$, or active timeout), or **`Unknown / Unmeasured`** (scrape failed, daemon stalled, or telemetry pipeline unmeasured). Every KPI report must explicitly include **Measurement Coverage**:
+   $$\text{Coverage}_i = \frac{K_{\text{measured},i}}{K_{\text{total}}} \times 100\%, \quad K_{\text{measured},i} = K_{\text{compliant},i} + K_{\text{violated},i}$$
+4. **Per-Slice SLA Violation Ratio ($V_{s,i}$):**
+   $$V_{s,\text{URLLC}} = \frac{K_{\text{violated},\text{URLLC}}}{K_{\text{measured},\text{URLLC}}} \times 100\%$$
+   Where URLLC SLA requires $RTT \le 20.0\text{ ms}$ and loss $\le 1.0\%$. *(Note: `e2e_slice1_tput_mbps` strictly measures sender-side offered rate; eMBB goodput SLA cannot be evaluated on CSV data alone and is reported as Unmeasured pending receiver goodput logs from EXT-DN).*
+5. **Joint SLA Violation Ratio ($V_{s,\text{joint}}$):**
+   $$V_{s,\text{joint}} = \frac{1}{K_{\text{joint\_measured}}} \sum_{k=1}^{K_{\text{joint\_measured}}} \mathbb{I}\left(\text{SLA}_{\text{eMBB}}(k) = \text{Violated} \lor \text{SLA}_{\text{URLLC}}(k) = \text{Violated}\right) \times 100\%$$
+   Evaluated strictly over windows where verified receiver goodput evidence is available for eMBB alongside URLLC probe evidence.
+6. **SLA Recovery Time ($T_{rec}$):**
    $$T_{rec} = t_{\text{restored}} - t_{\text{violation}}$$
-   Elapsed time from first SLA violation onset following fault injection until both slice SLAs return and remain continuously compliant for a **consecutive stability window of $W_{\text{stab}} \ge 10\text{ seconds}$**. Runs where SLA fails to recover within the experiment duration are explicitly recorded and reported as **Unrecovered** ($T_{rec} = \text{Unrecovered} \ (|T_{\text{exp}} - t_{\text{violation}}|)$), rather than omitted.
-6. **Action Churn ($C_{act}$):**
+   Elapsed time from first SLA violation onset following fault injection until slice SLAs return and remain continuously compliant for a **consecutive stability window of $W_{\text{stab}} \ge 10\text{ seconds}$**. Runs where SLA fails to recover within the experiment duration are explicitly recorded and reported as **Unrecovered** ($T_{rec} = \text{Unrecovered} \ (|T_{\text{exp}} - t_{\text{violation}}|)$), rather than omitted. Multi-slice recovery is conditional on receiver goodput availability; when evaluating URLLC only, reported as $T_{rec,\text{URLLC}}$.
+7. **Action Churn ($C_{act}$):**
    The frequency of reversing or oscillating control actions per observation epoch, disaggregated into **Radio Handover Churn** (handovers per minute) and **Core Shaping Churn** (rate policy alterations per minute) to isolate control instability.
 
 ---

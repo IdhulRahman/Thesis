@@ -504,16 +504,16 @@ Or execute automated multi-slice orchestration via `trafgen.sh`:
 
 ### 11.2 Ground-Truth SLA Evaluation Contract
 During each observation window $k$, SLA compliance is evaluated at VM-5:
-- **Slice 1 (eMBB) SLA Contract:** Evaluated relative to offered workload: user goodput $T_{\text{eMBB}} \ge 20.0\text{ Mbps}$ under saturation stress ($\ge 25\text{ Mbps}$ offered load), or $\ge 85\%$ of offered demand when operating below capacity. *(Note: Recorded in CSV via `e2e_slice1_tput_mbps` from sender-side iperf3 client; receiver goodput validation at EXT-DN requires offline extraction from server logs).*
+- **Slice 1 (eMBB) SLA Contract:** Evaluated relative to offered workload: user goodput $T_{\text{eMBB}} \ge 20.0\text{ Mbps}$ under saturation stress ($\ge 25\text{ Mbps}$ offered load), or $\ge 85\%$ of offered demand when operating below capacity. *(Boundary Notice: Recorded in CSV via `e2e_slice1_tput_mbps` from sender-side iperf3 client, measuring offered transmission rate $T_{\text{offered}}$. eMBB goodput SLA cannot be evaluated on CSV data alone and is reported as Unmeasured pending verified receiver goodput logs from EXT-DN).*
 - **Slice 2 (URLLC) SLA Contract:** End-to-End Round-Trip Time $RTT \le 20.0\text{ ms}$ (measured to EXT-DN `192.168.70.145`) and packet loss $\le 1.0\%$.
 
 > [!NOTE]
 > **Scope & Standards Demarcation:**  
-> 3GPP TS 23.501 Table 5.7.4-1 defines standard Packet Delay Budget (PDB) between UE and N6-terminating UPF per standardized 5QI (e.g., 5QI 82 = 10 ms, 5QI 85 = 5 ms). Standard PDB is a single-hop UE–UPF radio/core transit budget, distinct from end-to-end round-trip latency to an external Data Network (DN). In this testbed, the evaluated metric is **End-to-End ICMP RTT** measured between VM-5 namespace `ue2` and EXT-DN `192.168.70.145`. The $20.0\text{ ms}$ threshold is a research evaluation choice accounting for virtualization overhead, Linux network stack transit, and virtual RFsim socket loopbacks.
+> 3GPP TS 23.501 Table 5.7.4-1 defines standard Packet Delay Budget (PDB) between UE and N6-terminating UPF per standardized 5QI (e.g., 5QI 82 = 10 ms, 5QI 85 = 5 ms). Standard PDB defines an endpoint-to-endpoint delay bound across the one-way UE–UPF segment terminating at the N6 reference point, distinct from end-to-end round-trip latency to an external Data Network (DN). In this testbed, the evaluated metric is **End-to-End ICMP RTT** measured between VM-5 namespace `ue2` and EXT-DN `192.168.70.145`. The $20.0\text{ ms}$ threshold is a research evaluation choice accounting for virtualization overhead, Linux network stack transit, and virtual RFsim socket loopbacks.
 
-SLA compliance is evaluated per slice ($V_{s,\text{eMBB}}$, $V_{s,\text{URLLC}}$) and jointly across slices ($V_{s,\text{joint}}$):
-$$V_{s,i} = \frac{\sum_{k=1}^K \mathbb{I}(\text{SLA Violated}_{i,k})}{K} \times 100\%, \quad V_{s,\text{joint}} = \frac{\sum_{k=1}^K \mathbb{I}(\text{SLA}_{\text{eMBB}}(k) \lor \text{SLA}_{\text{URLLC}}(k))}{K} \times 100\%$$
-Windows with active probe timeout / link drops are logged as Violated; pre-experiment warmup intervals are excluded from denominator $K$.
+Evaluation windows are categorized into three mutually exclusive states: **`Compliant`**, **`Violated`**, and **`Unknown / Unmeasured`** (due to scrape failures, process stalls, or probe dropouts). SLA compliance is computed over verified measured windows with explicit reporting of measurement coverage:
+$$V_{s,i} = \frac{K_{\text{violated},i}}{K_{\text{measured},i}} \times 100\%, \quad \text{Coverage}_i = \frac{K_{\text{measured},i}}{K_{\text{total}}} \times 100\%$$
+Joint SLA ($V_{s,\text{joint}}$) is conditional on the availability of verified receiver goodput evidence for eMBB alongside URLLC canary probes.
 
 ---
 
