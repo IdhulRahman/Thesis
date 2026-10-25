@@ -11,7 +11,7 @@ All virtual machines operate within the dedicated inter-VM subnet `10.102.0.0/24
 | VM ID | Hostname | Management IP | Primary Subsystem | Host Hardware Allocation |
 |---|---|---:|---|---|
 | **VM-1** | `nonrt-ric` | `10.102.0.168` | O-RAN Non-RT RIC, A1 PMS v2.6.0, rApp Execution Environment | 4 vCPU, 8 GB RAM |
-| **VM-2** | `near-rt-ric` | `10.102.0.66` | O-RAN Near-RT RIC (O-RAN SC Dawn), A1 Mediator, E2Term, xApp | 4 vCPU, 8 GB RAM |
+| **VM-2** | `near-rt-ric` | `10.102.0.66` | O-RAN Near-RT RIC (O-RAN SC i-release), A1 Mediator, E2Term, xApp | 4 vCPU, 8 GB RAM |
 | **VM-3** | `oai-core` | `10.102.0.164` | OAI 5G Core Multi-Slice, 3GPP NWDAF Stack, Core Adapter v9 | 8 vCPU, 16 GB RAM |
 | **VM-4** | `oai-ran` | `10.102.0.167` | OAI Split RAN (CU + DU-1 + DU-2 + FlexRIC E2 Agent), RAN Adapter | 8 vCPU, 16 GB RAM |
 | **VM-5** | `ue-emulator` | `10.102.0.165` | OAI nrUE Multi-Instance Emulator (`ue1`, `ue2` netns), TrafGen | 4 vCPU, 8 GB RAM |
@@ -60,10 +60,11 @@ All virtual machines operate within the dedicated inter-VM subnet `10.102.0.0/24
 |---|---|---|---|---|
 | **VM-1 (Non-RT)** | **A1 Policy Management Service** | O-RAN SC `nonrtric-plt-a1policymanagementservice` | `2.6.0` (H-Release) | Spring Boot REST API (`:8081`) |
 | **VM-1 (Non-RT)** | **Bottleneck-Aware Coordinator rApp** | In-house Python rApp | Research Prototype | Non-RT RIC Host execution environment |
-| **VM-2 (Near-RT)** | **A1 Mediator** | O-RAN SC `ric-plt-a1` | `3.2.2` (Dawn Release) | HTTP REST API (`:10001` via NGINX shim) |
+| **VM-2 (Near-RT)** | **Minimal Near-RT RIC Platform** | O-RAN SC minimal bundle (`srsRAN`) | `i-release` (commit `621ade26`) | Docker Compose platform bundle |
+| **VM-2 (Near-RT)** | **A1 Mediator** | O-RAN SC `ric-plt-a1` | `3.2.2` (commit `09a757b4`) | HTTP REST API (`:10001` via NGINX shim) |
 | **VM-2 (Near-RT)** | **E2 Termination (E2Term)** | O-RAN SC `ric-plt-e2` | `6.0.4` | SCTP Server (`:36421`), RMR (`:38000`) |
 | **VM-2 (Near-RT)** | **E2 Manager (E2Mgr)** | O-RAN SC `ric-plt-e2mgr` | `6.0.4` | HTTP REST API (`:3801`) |
-| **VM-2 (Near-RT)** | **Subscription Manager (SubMgr)** | O-RAN SC `ric-plt-submgr` | `0.7.3` | RMR (`:4560`) |
+| **VM-2 (Near-RT)** | **Subscription Manager (SubMgr)** | O-RAN SC `ric-plt-submgr` | `0.10.1` | RMR (`:4560`) |
 | **VM-2 (Near-RT)** | **Shared Data Layer (DBaaS)** | O-RAN SC `ric-plt-dbaas` / Redis | `0.5.7` / Redis `5.0.9` | RESP2 Protocol (`:6379`) |
 | **VM-2 (Near-RT)** | **Traffic Steering xApp** | In-house Python xApp | Python `ricxappframe` | RMR (`:4560`), Container IP `10.0.2.20` |
 
@@ -80,8 +81,8 @@ All virtual machines operate within the dedicated inter-VM subnet `10.102.0.0/24
 | Component | Software Framework | Version | Deployment Mode | Primary Port / Resource |
 |---|---|---|---|---|
 | **Telemetry Collector** | In-house Python HTTP server | v2.1.0 | Host process (`scripts/telemetry_collector.py`) | Ingestion endpoint `POST :9100/report`, Prometheus `GET :9100/metrics` |
-| **Prometheus TSDB** | Prometheus | `v2.45.0` (LTS) | Systemd / Host binary | TSDB scraper polling `:9100/metrics` at 1.0 Hz |
-| **Grafana** | Grafana Community | `v10.0.3` | Host service | Visualization dashboards on port `3000` |
+| **Prometheus TSDB** | Prometheus | `v2.47.0` | Docker container (`prom/prometheus:v2.47.0`) | TSDB scraper polling `:9100/metrics` at 1.0 Hz |
+| **Grafana** | Grafana Community | `10.1.0` | Docker container (`grafana/grafana:10.1.0`) | Visualization dashboards on port `3000` |
 | **Telemetry Recorder** | In-house Python script | v2.2.0 | Script (`scripts/record_experiment.py`) | Single-scenario 1.000 Hz 40-column monotonic recorder with manifest metadata |
 
 ---

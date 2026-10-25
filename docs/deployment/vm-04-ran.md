@@ -452,11 +452,29 @@ gNBs =
  }
 );
 
-# [CUSTOMIZABLE] RFsimulator TCP server listening port for Cell-1
+# [CUSTOMIZABLE] RFsimulator TCP server listening port for Cell-1 & Channel Modeling
 rfsimulator :
 {
     serverport = 4043;                    # [CUSTOMIZABLE] VM-5 nrUE connects here
+    options = ("channelmod");             # [MANDATORY FOR IMPAIRMENT] Enables telnet channel modeling
+    modelname = "AWGN";
 };
+
+# Channel modeling descriptors for RFsimulator Telnet control (Model 0: DL, Model 1: UL)
+modellist_rfsimu_1 = (
+    {
+        model_name     = "rfsimu_channel_enB0";
+        type           = "AWGN";
+        ploss_dB       = 20.0;
+        noise_power_dB = -100.0;
+    },
+    {
+        model_name     = "rfsimu_channel_ue0";
+        type           = "AWGN";
+        ploss_dB       = 20.0;
+        noise_power_dB = -100.0;
+    }
+);
 ```
 
 ---
@@ -496,11 +514,11 @@ gNBs =
     # [CUSTOMIZABLE] Physical Cell ID (PCI: 2)
     physCellId = 2;
 
-    # [FIXED / ARCHITECTURE] 3GPP F1 transport configuration
+    # [FIXED / ARCHITECTURE] 3GPP F1 transport configuration (IP alias 127.0.0.5)
     tr_s_preference  = "f1";
-    local_n_address  = "127.0.0.1";       # [FIXED] Local DU F1 IP
-    remote_n_address = "127.0.0.1";       # [FIXED] Remote CU F1 IP
-    local_n_portd    = 2154;              # [FIXED] Port differentiation to avoid collision
+    local_n_address  = "127.0.0.5";       # [FIXED] Local DU-2 F1 IP (loopback alias)
+    remote_n_address = "127.0.0.3";       # [FIXED] Remote CU F1 IP
+    local_n_portd    = 2153;              # [FIXED] Standard F1-U port (differentiated by IP alias)
     remote_n_portd   = 2153;              # [FIXED] Remote CU F1-U UDP port
  }
 );
@@ -516,14 +534,38 @@ rfsimulator :
 
 ## 8. Automated Script to Generate `du_gnb1.conf` and `du_gnb2.conf`
 
-To generate exact configuration files directly from the OAI template:
+To generate exact configuration files directly from the OAI template (commit `29d5fa7d`):
 
 ```bash
 python3 - << 'EOF'
 with open("/opt/oran/ran/openairinterface5g/ci-scripts/conf_files/gnb-du.sa.band78.106prb.rfsim.conf") as f:
     tpl = f.read()
 
-# DU-1 (Cell-1, PCI 1, RFsim port 4043)
+channelmod_block = '''
+rfsimulator :
+{
+    serverport = 4043;
+    options = ("channelmod");
+    modelname = "AWGN";
+};
+
+modellist_rfsimu_1 = (
+    {
+        model_name     = "rfsimu_channel_enB0";
+        type           = "AWGN";
+        ploss_dB       = 20.0;
+        noise_power_dB = -100.0;
+    },
+    {
+        model_name     = "rfsimu_channel_ue0";
+        type           = "AWGN";
+        ploss_dB       = 20.0;
+        noise_power_dB = -100.0;
+    }
+);
+'''
+
+# DU-1 (Cell-1, PCI 1, RFsim port 4043 with channel modeling enabled)
 du1 = tpl.replace('"du-rfsim"', '"du-rfsim1"')
 du1 = du1.replace('gNB_DU_ID = 0xe00;', 'gNB_DU_ID = 0xe01;')
 du1 = du1.replace('physCellId                                                    = 0;', 'physCellId                                                    = 1;')
@@ -534,12 +576,17 @@ du1 = du1.replace('local_n_address = "192.168.71.171";', 'local_n_address = "127
 du1 = du1.replace('remote_n_address = "192.168.71.150";', 'remote_n_address = "127.0.0.3";')
 du1 = du1.replace('local_n_portd   = 2153;', 'local_n_portd   = 2153;')
 du1 = du1.replace('remote_n_portd  = 2153;', 'remote_n_portd  = 2153;')
-du1 = du1.replace('serverport = 4043;', 'serverport = 4043;')
+# Replace default rfsimulator block with channelmod block
+if 'rfsimulator :' in du1:
+    idx = du1.find('rfsimulator :')
+    du1 = du1[:idx] + channelmod_block
+else:
+    du1 = du1 + channelmod_block
 
 with open("/opt/oran/ran/conf/du_gnb1.conf", "w") as f:
     f.write(du1)
 
-# DU-2 (Cell-2, PCI 2, RFsim port 4044)
+# DU-2 (Cell-2, PCI 2, RFsim port 4044 on F1 alias 127.0.0.5)
 du2 = tpl.replace('"du-rfsim"', '"du-rfsim2"')
 du2 = du2.replace('gNB_DU_ID = 0xe00;', 'gNB_DU_ID = 0xe02;')
 du2 = du2.replace('nr_cellid = 12345678L;', 'nr_cellid = 11111111L;')
@@ -555,7 +602,7 @@ du2 = du2.replace('serverport = 4043;', 'serverport = 4044;')
 
 with open("/opt/oran/ran/conf/du_gnb2.conf", "w") as f:
     f.write(du2)
-print("Configuration files du_gnb1.conf and du_gnb2.conf generated successfully.")
+print("Configuration files du_gnb1.conf and du_gnb2.conf generated successfully with unified F1 aliases and channelmod.")
 EOF
 ```
 
@@ -758,30 +805,37 @@ sudo ./nr-softmodem -O /opt/oran/ran/conf/du_gnb2.conf --rfsim 2>&1 | tee /opt/o
 
 VM-4 hosts the dual-cell radio environment (DU-1 on PCI 1 and DU-2 on PCI 2) used to simulate radio congestion and evaluate inter-cell traffic steering.
 
-### 12.1 Radio Bottleneck Injection Procedure
-To simulate a pure RAN radio bottleneck during baseline experiments:
+### 12.1 Radio Workload Injection Procedure
+In the testbed's canonical evaluation flow, traffic load is dispatched from the UE emulator on VM-5 across the Uplink user plane toward the External Data Network (EXT-DN `192.168.70.135` via `12.1.1.1`). To simulate radio offered load on Cell-1:
 
 ```bash
-# Inject 80 Mbps UDP saturation load on Cell-1 (DU-1 port 4043)
-# This forces DU-1 PRB utilization to exceed 90% while Cell-2 remains idle (<15%)
-iperf3 -u -c 12.1.1.2 -b 80M -t 120
+# Execute from VM-5 inside namespace ue1 (Uplink toward EXT-DN server):
+sudo ip netns exec ue1 iperf3 -u -c 192.168.70.135 -b 25M -t 60
+
+# Or execute via the standardized multi-slice workload launcher:
+sudo /opt/oran/ue/scripts/trafgen.sh start 60 25
 ```
 
-*Verification:* In Near-RT RIC telemetry (E2SM-KPM / Prometheus), observe:
-- `cell1_prb_utilization` > 0.90
-- `cell2_prb_utilization` < 0.15
-- Slice 1 packet delay at MAC layer increases significantly.
+> [!NOTE]
+> **Workload Direction Demarcation:**
+> * Dispatching `iperf3 -c 192.168.70.135` from the UE executes the canonical **Uplink (UE $\to$ EXT-DN)** transmission path through gNB DU-1 PUSCH scheduling and UPF-1 GTP-U encapsulation.
+> * Running `iperf3 -c 12.1.1.2` from external nodes tests Downlink (toward-UE) transmission, which requires an active `iperf3 -s` server running inside namespace `ue1` and evaluates Downlink PDSCH scheduling rather than the primary PUSCH grant telemetry recorded by `ran_adapter.py`.
 
-### 12.2 Handover Execution Modes per Baseline
+*Telemetry Verification:* On VM-6 Prometheus `:9100/metrics` or `record_experiment.py`, observe:
+- `ran_prb_cell1` surges reflecting PUSCH scheduling grant saturation ($NPRB = 106$).
+- `ran_mcs_cell1` and `ran_bler_cell1` reflect modulation and block error dynamics.
+- Cell-2 metrics (`ran_prb_cell2`) remain baseline/idle when traffic is isolated to Slice 1.
 
-| Baseline ID | Handover Mechanism | Control Entity | E2SM-RC Involvement |
+### 12.2 Handover Execution Modes per Baseline (Research Design)
+
+| Baseline ID | Handover Mechanism | Control Entity | E2SM-RC Implementation Status |
 |---|---|---|---|
 | **B0** | Standard 3GPP RRC A3 Event | Internal OAI CU RRC logic | Disabled (RIC does not issue E2 control). Handover triggers only if RSRP delta exceeds `handover_margin`. |
-| **B1** | Dynamic Radio Handover | Near-RT RIC xApp | Enabled. xApp issues E2SM-RC Handover to Cell-2 when Cell-1 PRB > 80%. |
+| **B1** | Dynamic Radio Handover | Near-RT RIC xApp | **Planned (Phase B):** xApp issues E2SM-RC Handover to Cell-2 when Cell-1 PRB > 80%. |
 | **B2** | Prohibited | N/A | Disabled. UEs remain anchored on Cell-1. |
-| **B3** | Uncoordinated Handover | Independent xApp | Enabled. Disregards Core congestion state. |
-| **B4** | Fixed Priority Handover | rApp-directed xApp | Enabled. Triggered as primary step regardless of bottleneck origin. |
-| **Proposed** | Bottleneck-Aware Handover | rApp-constrained xApp | **Selectively Enabled.** Executed only when `RAN_BOTTLENECK` is diagnosed. Inhibited during `CORE_BOTTLENECK`. |
+| **B3** | Uncoordinated Handover | Independent xApp | **Planned (Phase B):** Operates without Core state coordination. |
+| **B4** | Fixed Priority Handover | rApp-directed xApp | **Planned (Phase B):** Staged radio trigger executed as primary step. |
+| **Proposed** | Bottleneck-Aware Handover | rApp-constrained xApp | **Planned (Phase B):** Selectively executed when `RAN_BOTTLENECK` is diagnosed; inhibited during `CORE_BOTTLENECK`. |
 
 ---
 

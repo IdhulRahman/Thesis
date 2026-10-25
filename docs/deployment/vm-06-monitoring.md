@@ -42,7 +42,7 @@ Ingested via Core Research Telemetry Adapter (`core_adapter.py` v9) and 3GPP Rel
 > **Core Metrics Validity & Semantic Audit Note:**
 > 1. Physical user-plane buffer queue dynamics and packet drops are sampled directly from the Linux kernel using `core_adapter.py` v9 (adhering to 3GPP PM TS 32.401 & TS 28.552).
 > 2. Native 3GPP TS 29.520 `UE_COMMUNICATION` telemetry is polled dynamically by `telemetry_collector.py` from Kong Gateway port 8080 (`/nnwdaf-analyticsinfo/v1/analytics?event-id=UE_COMMUNICATION`).
-> 3. Upstream OAI Engine semantics: `nwdaf_comm_duration_sec` sums report elapsed durations (`commDur: 2842s`), and `nwdaf_comm_vol_std_bytes` computes sample standard deviation ($\sigma = 588\text{ B}$). In single-slice PoC (Slice 1), volume counters (`ulVol: 1680B`, `dlVol: 1680B`) match live UPF URR reports, and freshness is tracked with a 45s window.
+> 3. Upstream OAI Engine semantics: `nwdaf_comm_duration_sec` sums report elapsed durations (`commDur: 2842s`), and `nwdaf_comm_vol_std_bytes` computes standard deviation with $N$-normalization ($\sigma = 588\text{ B}$ using divisor $N$, rather than sample divisor $N-1$). In single-slice PoC (Slice 1), volume counters (`ulVol: 1680B`, `dlVol: 1680B`) match live UPF URR reports, and freshness is tracked with a 45s window.
 
 | Metric Name | Source NF / Method | Unit / Type | Role in Thesis Evaluation |
 |---|---|---|---|
@@ -246,154 +246,18 @@ providers:
       path: /etc/grafana/provisioning/dashboards
 ```
 
-2. Save Pre-Configured Dashboard JSON (`/opt/oran/monitoring/grafana/provisioning/dashboards/thesis_dashboard.json`):
-```json
-{
-  "annotations": { "list": [] },
-  "editable": true,
-  "fiscalYearStartMonth": 0,
-  "graphTooltip": 1,
-  "id": null,
-  "links": [],
-  "liveNow": true,
-  "panels": [
-    {
-      "id": 1,
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "type": "timeseries",
-      "title": "End-to-End Latency (Slice 2 URLLC)",
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ms",
-          "color": { "mode": "palette-classic" },
-          "custom": { "fillOpacity": 15, "lineWidth": 2 },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 20 }
-            ]
-          }
-        }
-      },
-      "targets": [
-        { "expr": "e2e_slice2_latency_rtt_ms", "legendFormat": "URLLC RTT (ms)", "refId": "A" }
-      ]
-    },
-    {
-      "id": 2,
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "type": "timeseries",
-      "title": "End-to-End Throughput (Slice 1 eMBB)",
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "Mbps",
-          "color": { "fixedColor": "#73BF69", "mode": "fixed" },
-          "custom": { "fillOpacity": 20, "lineWidth": 2 }
-        }
-      },
-      "targets": [
-        { "expr": "e2e_slice1_throughput_mbps", "legendFormat": "eMBB Throughput", "refId": "A" }
-      ]
-    },
-    {
-      "id": 3,
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 8 },
-      "type": "stat",
-      "title": "URLLC Packet Loss Rate",
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 1 }
-            ]
-          }
-        }
-      },
-      "targets": [
-        { "expr": "e2e_slice2_packet_loss_pct", "refId": "A" }
-      ]
-    },
-    {
-      "id": 4,
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 8 },
-      "type": "stat",
-      "title": "Bottleneck Diagnosis (rApp)",
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": { "text": "NORMAL", "color": "green" },
-                "1": { "text": "RAN BOTTLENECK", "color": "yellow" },
-                "2": { "text": "CORE BOTTLENECK", "color": "orange" },
-                "3": { "text": "JOINT BOTTLENECK", "color": "red" }
-              }
-            }
-          ]
-        }
-      },
-      "targets": [
-        { "expr": "rapp_diagnosed_bottleneck", "refId": "A" }
-      ]
-    },
-    {
-      "id": 5,
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 8 },
-      "type": "timeseries",
-      "title": "NWDAF Core Slice Load Level",
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "custom": { "fillOpacity": 15, "lineWidth": 2 }
-        }
-      },
-      "targets": [
-        { "expr": "nwdaf_slice_load_level", "legendFormat": "Slice {{snssai}}", "refId": "A" }
-      ]
-    },
-    {
-      "id": 6,
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
-      "type": "timeseries",
-      "title": "RAN Radio Resource Saturation (Cell-1 vs Cell-2 PRB)",
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "custom": { "fillOpacity": 15, "lineWidth": 2 }
-        }
-      },
-      "targets": [
-        { "expr": "ran_cell_prb_utilization", "legendFormat": "Cell {{cell_id}} PRB", "refId": "A" }
-      ]
-    }
-  ],
-  "refresh": "1s",
-  "schemaVersion": 38,
-  "style": "dark",
-  "tags": ["5g", "oran", "thesis", "ric", "nwdaf"],
-  "time": { "from": "now-5m", "to": "now" },
-  "timezone": "browser",
-  "title": "5G O-RAN RIC-NWDAF Closed-Loop & Bottleneck Telemetry",
-  "uid": "oran-thesis-dashboard",
-  "version": 1
-}
-```
+2. **Deploy Pre-Configured Dashboard JSON:**
+   Copy the official dashboard definition from the repository into the Grafana provisioning directory:
+   ```bash
+   # Copy committed thesis dashboard definition:
+   cp deploy/grafana/dashboards/thesis_dashboard.json /opt/oran/monitoring/grafana/provisioning/dashboards/
+   ```
+   The source dashboard is centrally version-controlled at [`deploy/grafana/dashboards/thesis_dashboard.json`](../../deploy/grafana/dashboards/thesis_dashboard.json).
 
-3. Restart Grafana to load dashboard:
-```bash
-docker compose restart grafana
-```
+3. **Restart Grafana Container to Load Dashboard:**
+   ```bash
+   docker compose restart grafana
+   ```
 
 ---
 

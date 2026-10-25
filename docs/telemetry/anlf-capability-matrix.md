@@ -41,12 +41,12 @@ The verified mathematical formulations executed inside the official OAI NWDAF En
 1. **Cumulative User-Plane Volume Aggregation:**
    $$V_{UL} = \sum_{i=1}^{N} \text{UlVolume}_i, \quad V_{DL} = \sum_{i=1}^{N} \text{DlVolume}_i$$
    *Extracted from MongoDB session documents populated by SMF Event Exposure from UPF Usage Reports (URR).*
-2. **Volume Sample Standard Deviation:**
+2. **Volume Standard Deviation ($N$-Normalized):**
    $$\bar{V}_{UL} = \frac{1}{N} \sum_{i=1}^{N} \text{UlVolume}_i, \quad \sigma_{UL} = \sqrt{\frac{1}{N} \sum_{i=1}^{N} (\text{UlVolume}_i - \bar{V}_{UL})^2}$$
-   *Computed using Go standard library `math.Sqrt` and assigned to JSON output field `ueComms[0].trafChar.ulVolVariance`.*
+   *Computed using Go standard library `math.Sqrt` with divisor $N$ (standard deviation with $N$-normalization, rather than sample standard deviation with divisor $N-1$) and assigned to JSON output field `ueComms[0].trafChar.ulVolVariance`.*
 3. **Cumulative Window Duration Accumulation:**
-   $$\Delta t_{\text{accum}} = \sum_{i=1}^{N} (\text{stopTime}_i - \text{startTime}_i)$$
-   *Sums individual URR report window durations (`commDur`), functioning as a monotonic URR event accumulation counter rather than an exact physical session wall-clock timer.*
+   $$\Delta t_{\text{accum}} = \sum_{i=1}^{N} \text{duration}_i \quad (\text{verified source operation: } \texttt{commDur += duration} \text{ via engine } \texttt{totalDuration += report.Duration})$$
+   *Accumulates individual report duration values directly from URR records (`commDur`). The exact relationship between report `duration` and $(\text{stopTime} - \text{startTime})$ requires additional code tracing, as the audited OAI build sums individual report duration fields directly without calculating differential timestamps; it functions as a monotonic URR event accumulation counter rather than an exact physical session wall-clock timer.*
 4. **Control-Plane Network Performance Stub (`network_performance.go`):**
    $$\text{absoluteNum} = \text{collection.CountDocuments}(\dots), \quad \text{relativeRatio} = 0 \quad (\text{hardcoded //TODO in audited build})$$
 

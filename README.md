@@ -109,7 +109,7 @@ sudo nohup python3 -u /opt/oran/ran/scripts/ran_adapter.py > /dev/null 2>&1 &
 
 # Step 5: Spawn UEs and Traffic on VM-5 (10.102.0.165)
 sudo /opt/oran/ue/scripts/spawn_multi_ue.sh -s1 1 -s2 1
-sudo nohup /opt/oran/ue/scripts/trafgen.sh start 20 > /dev/null 2>&1 &
+sudo nohup /opt/oran/ue/scripts/trafgen.sh start 60 25 > /dev/null 2>&1 &
 
 # Step 6: Launch Collector & Logger on VM-6 (10.102.0.67)
 python3 /opt/oran/monitoring/collector/telemetry_collector.py &

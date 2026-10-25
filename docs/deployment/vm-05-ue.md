@@ -435,31 +435,49 @@ sudo ip netns exec ue1 iperf3 -c 12.1.1.1 -t 10 -i 1
 
 ---
 
-## 10. Interactive Channel Simulation & Handover Trigger
+## 10. Interactive RF Impairment SOP (RFsimulator Channel Modeling)
 
-The OAI RFsimulator provides an interactive telnet server to simulate physical mobility and trigger RRC A3-event handovers between Cell-1 and Cell-2 in real time.
+The OAI RFsimulator provides an interactive Telnet interface (`--telnetsrv` on port `9090`) to dynamically modify channel propagation parameters during experiments without restarting softmodem processes.
 
-### Step 1: Enable Telnet Server on DU-1 and DU-2
-When launching `nr-softmodem` on VM-4, append `--telnetsrv --rfsimulator.options chanmod`.
+> [!CAUTION]
+> **Mathematical Semantics of `path_loss_dB` in OAI RFsimulator:**
+> In upstream OAI `apply_channelmod.c` (commit `29d5fa7d`, lines 218–225):
+> $$\text{amplitude\_multiplier} = 10^{\frac{\text{path\_loss\_dB}}{20.0}}$$
+> The internal `path_loss_dB` parameter functions as a **total path gain (amplification factor)** rather than positive mathematical attenuation:
+> * Baseline value configured in `du_gnb1.conf`: **`20.0 dB`**.
+> * Modifying `ploss` from `20` to `35` **amplifies** the signal by $+15\text{ dB}$, improving channel quality.
+> * To induce signal **degradation / attenuation**, `path_loss_dB` must be **decreased** (e.g., from `20.0` down to `10.0` or `5.0 dB`).
 
-### Step 2: Connect to Telnet Console
-From VM-4 or VM-5:
+> [!IMPORTANT]
+> **Channel Direction Demarcation (Downlink vs. Uplink):**
+> In this testbed's `du_gnb1.conf` model descriptors (see [Troubleshooting Case #51](../troubleshooting/ran-ue.md#case-51)):
+> * **Channel ID 0 (`rfsimu_channel_enB0`):** Downlink channel (gNB TX $\to$ UE RX).
+> * **Channel ID 1 (`rfsimu_channel_ue0`):** Uplink channel (UE TX $\to$ gNB RX).
+> Because `ran_adapter.py` monitors the **Uplink Shared Channel (`ulsch`)** scheduler metrics on gNB, channel impairment aimed at degrading `ran_snr_cell1`, `ran_mcs_cell1`, and elevating `ran_bler_cell1` must explicitly target **Channel 1**.
+
+### Recommended Impairment Procedure (`rfsim_channel_control.py`)
+To prevent syntax errors, Telnet IAC escaping issues, or unverified channel changes, use the validated Python controller script:
+
 ```bash
-telnet 10.102.0.167 9090
+# 1. Query active channel parameters on DU-1 (port 9090)
+python3 /opt/oran/ran/scripts/rfsim_channel_control.py show-current --port 9090
+
+# 2. Inject 10.0 dB attenuation on Uplink (Channel 1)
+# (Reduces path_loss_dB from baseline 20.0 dB down to 10.0 dB)
+python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 10.0 --channel-id 1 --port 9090
+
+# 3. Observe real-time telemetry degradation in ran_adapter / record_experiment.py:
+# - ran_snr_cell1 drops by ~10 dB
+# - ran_mcs_cell1 downshifts
+# - ran_bler_cell1 experiences retransmission bursts
+
+# 4. Restore baseline channel conditions after experiment run
+python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
 ```
 
-### Step 3: Modify Pathloss to Trigger Handover
-Simulate the UE moving away from Cell-1 towards Cell-2:
-```text
-# Show current RF channel status
-channelmod show current
-
-# Increase path loss on Cell-1 (weaken Cell-1 RSRP)
-channelmod modify 0 ploss 35
-
-# In CU log, confirm A3 Measurement Report and Handover trigger:
-# [NR_RRC] UE 1: Received MeasurementReport (event A3: target cell PCI 2 better than source PCI 1)
-```
+> [!NOTE]
+> **Handover Execution Boundary:**
+> In the current baseline testbed, UE-1 (port `4043`) and UE-2 (port `4044`) are statically attached to distinct RFsim DU instances. Channel attenuation on Cell-1 isolates radio bottleneck conditions for classifier evaluation; dynamic inter-cell handover execution via E2SM-RC remains a planned Phase B capability.
 
 ---
 

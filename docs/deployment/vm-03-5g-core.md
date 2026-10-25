@@ -545,9 +545,16 @@ In `docker-compose-slicing-basic-nrf.yaml`, add the `oai_smf_slice3` and `oai_up
 - Add `12.1.3.0/24` subnet routing rule to `oai_ext_dn`.
 
 ### Step 5: Restart Core Services & Verify
+> [!CAUTION]
+> Always include the overlay compose files (`compose.amf-nrf-uri.yaml` and `compose.upf-poc.yaml`) when restarting or recreating core services. Omitting the overlay chain drops the URR-patched UPF image and dynamic NRF URI AMF patch, reverting services to upstream defaults and breaking telemetry collection.
+
 ```bash
 cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
-docker compose -f docker-compose-slicing-basic-nrf.yaml up -d
+sudo docker compose \
+  -f docker-compose-slicing-basic-nrf.yaml \
+  -f compose.amf-nrf-uri.yaml \
+  -f compose.upf-poc.yaml \
+  up -d
 docker logs oai-nssf | grep -i "3"
 docker logs oai-amf | grep -i "SST"
 ```
@@ -750,7 +757,7 @@ curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
 > **Live Empirical Verification & Semantic Audit Notes:**
 > - `commDur: 2842` is the arithmetic sum of duration fields across live URR reports in `qosmonlist` (Report 2: 1406s + Report 3: 1436s = 2842s). In UPF `pfcp_switch.cpp`, `duration` represents elapsed time from measurement start; because `oai-nwdaf-engine/ue_communication.go` sums durations across reports, this double-counts overlapping elapsed time from the start of the session.
 > - `ulVol: 1680` and `dlVol: 1680` are the exact sums of uplink and downlink byte counters (1428 B + 252 B = 1680 B).
-> - `ulVolVariance: 588` and `dlVolVariance: 588` represent the sample standard deviation ($\sigma = 588\text{ B}$), because the upstream engine computes variance via `math.Sqrt(...)`. The true statistical variance is $\sigma^2 = 345,744\text{ B}^2$.
+> - `ulVolVariance: 588` and `dlVolVariance: 588` represent standard deviation with $N$-normalization ($\sigma = 588\text{ B}$ using divisor $N$, rather than sample divisor $N-1$), because the upstream engine computes variance via `math.Sqrt(...)`. The true statistical variance is $\sigma^2 = 345,744\text{ B}^2$.
 > - `oai-nwdaf-engine` log records confirm: `Getting Ue Communication from DB` $\rightarrow$ `Constructing Ue Communication filter for DB search ...` querying `qosmonlist` in MongoDB.
 > - **Temporal Resolution:** UPF `usage_report_loop()` emits reports every 30 seconds (`sleep(30)`); hence NWDAF volume metrics update on a 30s step function rather than continuous per-second telemetry.
 > - **Scope of Claim:** The verified milestone is strictly designated as **"Native telemetry data flow verified on PoC Slice-1"** (*Alur telemetri native terverifikasi pada PoC Slice-1*), acknowledging functioning 5-layer plumbing while noting upstream calculation semantics.
@@ -863,12 +870,12 @@ The source code for the UPF kernel physical adapter v9 is centrally managed at:
 
 > [!NOTE]
 > **User-Plane Shaping Scope & Interface Demarcation:**
-> Applying Linux `tc qdisc add dev eth0 root tbf ...` applies rate constraints across the entire egress interface of the target UPF container. Because the testbed deploys dedicated user-plane containers per slice (`oai-upf-slice1` for eMBB and `oai-upf-slice2` for URLLC), shaping UPF-1 throttles the entire eMBB slice user plane while preserving full line-rate capacity on UPF-2. This enforces slice-level isolation, but does **not** perform selective intra-slice sub-flow classification (which would require explicit `tc filter` classifier rules).
+> Applying Linux `tc qdisc add dev eth0 root tbf ...` applies rate constraints across the egress interface of the target UPF container. In this dual-UPF deployment, qdisc rate constraints are applied specifically to the `eth0` interface of `oai-upf-slice1` and are not configured on `oai-upf-slice2`. Actual throughput capacity, latency impact, and empirical performance isolation on UPF-2 remain research variables requiring measurement rather than assumed guarantees. Furthermore, root interface TBF affects all egress traffic on that container and does **not** perform selective intra-slice sub-flow classification (which would require explicit `tc filter` classifier rules).
 
 | Baseline ID | Mode Name | Implementation Status | Core Host Adapter (`core_adapter.py`) | User-Plane Rate Shaping Mechanism & Scope | Execution Script & Evidence |
 |---|---|---|---|---|---|
 | **B0** | Static Default | **`Operational Baseline`** | Passive telemetry logging at 1.0 Hz. | None. Static FIFO queues on both UPFs; unmitigated overload. | Standard testbed startup without fault or shaping scripts. |
-| **B1** | RAN-Only Control | **`Operational Baseline`** | Passive telemetry logging at 1.0 Hz. | None. Core user plane is unshaped; evaluation focuses on radio contention. | `scripts/record_experiment.py` under offered load; no Core shaping scripts executed. |
+| **B1** | RAN Contention Observation | **`Operational Baseline`** | Passive telemetry logging at 1.0 Hz. | None. Core user plane remains unshaped; serves as an empirical observation baseline under RAN offered load without active Core intervention. *(Active closed-loop RAN steering protocols remain Planned Phase B).* | Recorded telemetry under RAN offered load (`scripts/record_experiment.py`); no Core shaping executed. |
 | **B2** | Core-Only Control | **`Planned Protocol (Phase B)`** | Passive telemetry logging at 1.0 Hz. | **Emulated Slice-Level Rate Shaping:** Scripted `tc tbf` on UPF-1 `eth0` throttles Slice 1 egress without radio steering coordination. | Manual / testbed injection script: `docker exec oai-upf-slice1 tc qdisc add dev eth0 root tbf rate ...` |
 | **B3** | Decoupled Control | **`Planned Protocol (Phase B)`** | Passive telemetry logging at 1.0 Hz. | **Independent Emulated Core Shaping:** Scripted TBF executed concurrently with independent radio xApp (evaluates action churn). | Concurrent orchestration script execution (comparative evaluation protocol). |
 | **B4** | Coordinated Heuristic | **`Planned Protocol (Phase B)`** | Passive telemetry logging at 1.0 Hz. | **Sequential Fallback Mitigation:** Scripted core rate shaping executed after radio steering timeout expires. | Staged orchestration script execution (comparative evaluation protocol). |
