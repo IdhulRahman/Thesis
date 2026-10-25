@@ -115,17 +115,23 @@ To prevent conflating disparate units, all errors are computed and reported in t
 3. **Diagnostic Lead Time / Latency ($T_{det}$):** Time elapsed between physical fault onset and correct state classification.
 
 ### Tier 3: Closed-Loop Network System Metrics
-1. **Wrong-Domain Actuation Ratio ($W_{act}$):**
-   Evaluated under two formal formulations depending on evaluation objective:
-   * *Per-Action Precision:* $W_{act,action} = \frac{N_{\text{wrong}}}{N_{\text{total\_actions}}} \times 100\%$ (evaluates whether dispatched control actions match ground-truth bottleneck domain).
-   * *Per-Window Policy Recall:* $W_{act,window} = \frac{N_{\text{wrong\_actions}} + N_{\text{missed\_interventions}}}{N_{\text{fault\_windows}}} \times 100\%$ (evaluates end-to-end intervention timeliness across all fault windows).
-2. **SLA Violation Rate per Slice ($V_s$):**
-   $$V_s = \frac{1}{K} \sum_{k=1}^{K} \mathbb{I}\left(\text{SLA}_{\text{eMBB}}(k) = \text{Violated} \lor \text{SLA}_{\text{URLLC}}(k) = \text{Violated}\right) \times 100\%$$
-   Evaluated relative to workload demand: URLLC SLA is violated when $RTT > 20.0\text{ ms}$ or loss $> 1.0\%$; eMBB SLA is violated under saturation stress when goodput $T_{\text{eMBB}} < 20.0\text{ Mbps}$ (or $< 85\%$ of offered demand when below capacity).
-3. **SLA Recovery Time ($T_{rec}$):**
+1. **Wrong-Domain Action Ratio ($W_{act}$):**
+   $$W_{act} = \frac{N_{\text{wrong}}}{N_{\text{total\_actions}}} \times 100\%$$
+   Measures the proportion of dispatched control actions targeted at the incorrect domain (action-level domain fidelity).
+2. **Per-Window Policy Recall ($R_{window}$):**
+   $$R_{window} = \frac{N_{\text{windows with correct intervention}}}{N_{\text{fault windows requiring intervention}}} \times 100\%$$
+   Evaluates the proportion of fault windows requiring intervention that successfully receive a timely, correct-domain control action. A window receiving conflicting actions (e.g., correct radio action plus erroneous core throttling) is scored as non-compliant ($0$) to penalize control ambiguity. A fault window with zero dispatched actions is scored as a missed intervention ($0$). Normal non-fault windows are excluded from the denominator.
+3. **Per-Slice SLA Violation Ratio ($V_{s,i}$):**
+   $$V_{s,\text{eMBB}} = \frac{1}{K} \sum_{k=1}^K \mathbb{I}\left(\text{SLA}_{\text{eMBB}}(k) = \text{Violated}\right) \times 100\%$$
+   $$V_{s,\text{URLLC}} = \frac{1}{K} \sum_{k=1}^K \mathbb{I}\left(\text{SLA}_{\text{URLLC}}(k) = \text{Violated}\right) \times 100\%$$
+   Where URLLC SLA is violated when $RTT > 20.0\text{ ms}$ or loss $> 1.0\%$; eMBB SLA is evaluated relative to workload demand, violated under saturation stress when $T_{\text{eMBB}} < 20.0\text{ Mbps}$ (or $< 85\%$ of offered demand when below capacity).
+4. **Joint SLA Violation Ratio ($V_{s,\text{joint}}$):**
+   $$V_{s,\text{joint}} = \frac{1}{K} \sum_{k=1}^K \mathbb{I}\left(\text{SLA}_{\text{eMBB}}(k) = \text{Violated} \lor \text{SLA}_{\text{URLLC}}(k) = \text{Violated}\right) \times 100\%$$
+   Captures multi-slice system degradation where failure of either slice breaches overall network delivery. Windows with probe timeout / no-reply are logged as Violated; pre-experiment warmup intervals are excluded from denominator $K$. *(Note: $T_{\text{eMBB}}$ is evaluated using sender-side offered throughput from VM-5 client logs; receiver goodput validation from EXT-DN server logs is planned for offline cross-validation).*
+5. **SLA Recovery Time ($T_{rec}$):**
    $$T_{rec} = t_{\text{restored}} - t_{\text{violation}}$$
    Elapsed time from first SLA violation onset following fault injection until both slice SLAs return and remain continuously compliant for a **consecutive stability window of $W_{\text{stab}} \ge 10\text{ seconds}$**. Runs where SLA fails to recover within the experiment duration are explicitly recorded and reported as **Unrecovered** ($T_{rec} = \text{Unrecovered} \ (|T_{\text{exp}} - t_{\text{violation}}|)$), rather than omitted.
-4. **Action Churn ($C_{act}$):**
+6. **Action Churn ($C_{act}$):**
    The frequency of reversing or oscillating control actions per observation epoch, disaggregated into **Radio Handover Churn** (handovers per minute) and **Core Shaping Churn** (rate policy alterations per minute) to isolate control instability.
 
 ---

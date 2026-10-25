@@ -62,23 +62,44 @@ To maintain consistency across all analysis and baseline evaluations, SLA satisf
 
 1. **Slice 1 (eMBB) SLA Contract:**
    * **Offered Load Sensitivity:** Measured throughput must be evaluated relative to offered workload demand. Low throughput during low-demand scenarios (e.g., Scenario S1 with offered load of 10 Mbps) is **not** an SLA violation.
-   * **SLA Threshold:** Under saturation stress (offered load $\ge 25\text{ Mbps}$), Slice 1 SLA requires user goodput $T_{\text{eMBB}} \ge 20.0\text{ Mbps}$ (or $\ge 85\%$ of offered demand when below capacity).
+   * **SLA Threshold:** Under saturation stress (offered load $\ge 25\text{ Mbps}$), Slice 1 SLA requires user goodput $T_{\text{eMBB}} \ge 20.0\text{ Mbps}$ (or $\ge 85\%$ of offered demand when operating below capacity).
+   * **Telemetry Data Source Demarcation:** In the recorded 40-column CSV dataset, `e2e_slice1_tput_mbps` represents sender-side offered bitrate logged by the client `iperf3` process in VM-5 namespace `ue1`. Receiver goodput at EXT-DN requires parsing target server daemon logs (`/opt/oran/5gc/ext-dn/iperf_server.log`) time-aligned via NTP; in current datasets, sender-reported throughput serves as the operational proxy, while receiver-side cross-validation is designated as a **Planned External Validation**.
 2. **Slice 2 (URLLC) SLA Contract:**
    * **End-to-End Latency Target:** Canary ICMP round-trip time $RTT \le 20.0\text{ ms}$ and sequence loss percentage $\le 1.0\%$.
-   * **Scope & Standards Demarcation:** 3GPP TS 23.501 Table 5.7.4-1 defines standard Packet Delay Budget (PDB) between UE and N6-terminating UPF (e.g., 5 ms for URLLC QCI). In this testbed, the metric is **End-to-End ICMP RTT** measured between VM-5 namespace `ue2` and EXT-DN `192.168.70.145`. The $20.0\text{ ms}$ threshold is a calibrated end-to-end research SLA accounting for virtualization overhead, Linux network scheduling, and RFsim socket loopback transit.
+   * **Scope & Standards Demarcation:** 3GPP TS 23.501 Table 5.7.4-1 defines standard Packet Delay Budget (PDB) between UE and N6-terminating UPF according to specific standardized 5QI values (e.g., 5QI 82 = 10 ms, 5QI 83 = 10 ms, 5QI 84 = 30 ms, 5QI 85 = 5 ms for delay-critical GBR). Standard PDB is a single-hop UE–UPF radio/core segment budget, distinct from end-to-end round-trip latency to an external Data Network (DN). In this testbed, the metric is **End-to-End ICMP RTT** measured between VM-5 namespace `ue2` and EXT-DN `192.168.70.145`. The $20.0\text{ ms}$ threshold is a research evaluation threshold accounting for virtualization overhead, Linux network scheduling, and virtual RFsim socket loopbacks.
 
 ### 4.2 Quantitative Performance Metrics
-1. **SLA Violation Ratio ($V_s$):**
-   $$V_s = \frac{1}{T} \sum_{t=1}^T \mathbb{I}\left(\text{SLA}_{\text{eMBB}}(t) = \text{Violated} \lor \text{SLA}_{\text{URLLC}}(t) = \text{Violated}\right) \times 100\%$$
-   Where $T$ is total scenario duration and $\mathbb{I}(\cdot)$ is the indicator function.
-2. **SLA Recovery Time ($T_{\text{rec}}$):**
+
+1. **Per-Slice SLA Violation Ratio ($V_{s,i}$):**
+   Evaluates SLA compliance independently per network slice:
+   $$V_{s,\text{eMBB}} = \frac{1}{K} \sum_{k=1}^K \mathbb{I}\left(\text{SLA}_{\text{eMBB}}(k) = \text{Violated}\right) \times 100\%$$
+   $$V_{s,\text{URLLC}} = \frac{1}{K} \sum_{k=1}^K \mathbb{I}\left(\text{SLA}_{\text{URLLC}}(k) = \text{Violated}\right) \times 100\%$$
+   Where $K$ is the total count of active evaluation windows and $\mathbb{I}(\cdot)$ is the indicator function.
+
+2. **Joint SLA Violation Ratio ($V_{s,\text{joint}}$):**
+   Evaluates multi-slice system degradation where failure of either slice breaches overall network delivery:
+   $$V_{s,\text{joint}} = \frac{1}{K} \sum_{k=1}^K \mathbb{I}\left(\text{SLA}_{\text{eMBB}}(k) = \text{Violated} \lor \text{SLA}_{\text{URLLC}}(k) = \text{Violated}\right) \times 100\%$$
+
+   *Handling of Unmeasured Windows:*
+   * If a window produces a probe timeout or link break (`rtt = NaN` or packet loss = 100%) during active workload generation, the window is evaluated as **SLA Violated** (reflecting service outage).
+   * Warmup intervals prior to traffic generation and post-experiment drain intervals are excluded from the denominator $K$.
+
+3. **Wrong-Domain Action Ratio ($W_{\text{act}}$):**
+   $$W_{\text{act}} = \frac{N_{\text{wrong}}}{N_{\text{total\_actions}}} \times 100\%$$
+   Measures the proportion of dispatched control actions targeted at the incorrect domain (e.g., executing radio cell handover when the bottleneck resides in the UPF transport queue, or applying core shaping when the bottleneck is radio attenuation).
+
+4. **Per-Window Policy Recall ($R_{\text{window}}$):**
+   $$R_{\text{window}} = \frac{N_{\text{windows with correct intervention}}}{N_{\text{fault windows requiring intervention}}} \times 100\%$$
+   Measures the proportion of fault windows requiring intervention that successfully receive a timely, correct-domain control action.
+   * *Multi-Action Windows:* If a fault window receives multiple conflicting actions (e.g., a correct radio action accompanied by an erroneous core throttling action, or rapid oscillating commands), the window is scored as **failed / non-compliant ($0$)** to penalize control ambiguity.
+   * *No-Action Windows:* A fault window with zero dispatched actions ($N_{\text{actions}} = 0$) is scored as a **missed intervention ($0$)**.
+   * *Normal Windows:* Windows under normal operating conditions where no fault is injected are excluded from the denominator.
+
+5. **SLA Recovery Time ($T_{\text{rec}}$):**
    $$T_{\text{rec}} = t_{\text{restored}} - t_{\text{violation}}$$
    Measured from the timestamp of first SLA violation onset ($t_{\text{violation}}$) following fault injection until both slice SLAs return to compliance and remain continuously compliant for a **consecutive stability window of $W_{\text{stab}} \ge 10\text{ seconds}$**. Runs where SLA fails to recover within the experiment duration are explicitly recorded and reported as **Unrecovered** ($T_{\text{rec}} = \text{Unrecovered} \ (|T_{\text{exp}} - t_{\text{violation}}|)$), rather than omitted.
-3. **Wrong-Domain Actuation Ratio ($W_{\text{act}}$):**
-   Evaluated under two formal denominators depending on evaluation objective:
-   * *Per-Action Precision:* $W_{\text{act,action}} = \frac{N_{\text{wrong}}}{N_{\text{total\_actions}}}$ (evaluates whether dispatched actions match ground-truth bottleneck domain).
-   * *Per-Window Policy Recall:* $W_{\text{act,window}} = \frac{N_{\text{wrong\_actions}} + N_{\text{missed\_interventions}}}{N_{\text{fault\_windows}}}$ (evaluates end-to-end intervention timeliness across all fault windows).
-4. **Action Churn Rate ($C_{\text{act}}$):**
+
+6. **Action Churn Rate ($C_{\text{act}}$):**
    The frequency of reversing or oscillating control actions (e.g., Cell-1 $\to$ Cell-2 $\to$ Cell-1) per observation epoch, disaggregated into Radio Handover Churn and Core Shaping Churn.
 
 ### 4.3 Statistical Significance Testing
