@@ -464,24 +464,27 @@ rfsimulator :
 channelmod = {
     max_chan = 10;
     modellist = "modellist_rfsimu_1";
+    modellist_rfsimu_1 = (
+        {
+            model_name     = "rfsimu_channel_enB0";
+            type           = "AWGN";
+            ploss_dB       = 20.0;
+            noise_power_dB = -2.0;
+            forgetfact     = 0;
+            offset         = 0;
+            ds_tdl         = 0;
+        },
+        {
+            model_name     = "rfsimu_channel_ue0";
+            type           = "AWGN";
+            ploss_dB       = 20.0;
+            noise_power_dB = -2.0;
+            forgetfact     = 0;
+            offset         = 0;
+            ds_tdl         = 0;
+        }
+    );
 };
-
-modellist_rfsimu_1 = (
-    {
-        model_name     = "rfsimu_channel_enB0";
-        type           = "AWGN";
-        ploss_dB       = 20.0;
-        noise_power_dB = -2.0;
-        forgetting_factor = 0.0;
-    },
-    {
-        model_name     = "rfsimu_channel_ue0";
-        type           = "AWGN";
-        ploss_dB       = 20.0;
-        noise_power_dB = -2.0;
-        forgetting_factor = 0.0;
-    }
-);
 ```
 
 ---
@@ -550,31 +553,6 @@ import re
 with open("/opt/oran/ran/openairinterface5g/ci-scripts/conf_files/gnb-du.sa.band78.106prb.rfsim.conf") as f:
     tpl = f.read()
 
-channelmod_block = '''
-# Channel modeling descriptors for RFsimulator Telnet control (Model 0: DL, Model 1: UL)
-channelmod = {
-    max_chan = 10;
-    modellist = "modellist_rfsimu_1";
-};
-
-modellist_rfsimu_1 = (
-    {
-        model_name     = "rfsimu_channel_enB0";
-        type           = "AWGN";
-        ploss_dB       = 20.0;
-        noise_power_dB = -2.0;
-        forgetting_factor = 0.0;
-    },
-    {
-        model_name     = "rfsimu_channel_ue0";
-        type           = "AWGN";
-        ploss_dB       = 20.0;
-        noise_power_dB = -2.0;
-        forgetting_factor = 0.0;
-    }
-);
-'''
-
 # DU-1 (Cell-1, PCI 1, RFsim port 4043 with channel modeling enabled)
 du1 = tpl.replace('"du-rfsim"', '"du-rfsim1"')
 du1 = du1.replace('gNB_DU_ID = 0xe00;', 'gNB_DU_ID = 0xe01;')
@@ -589,7 +567,9 @@ du1 = du1.replace('remote_n_portd  = 2153;', 'remote_n_portd  = 2153;')
 
 # Enable chanmod in existing rfsimulator configuration element
 du1 = re.sub(r'options\s*=\s*\(\s*\);', 'options = ("chanmod");', du1)
-du1 = du1 + channelmod_block
+
+# Ensure noise_power_dB is aligned with the calibrated -2.0 dB testbed profile in existing channelmod
+du1 = re.sub(r'noise_power_dB\s*=\s*[-0-9.]+;', 'noise_power_dB = -2.0;', du1)
 
 with open("/opt/oran/ran/conf/du_gnb1.conf", "w") as f:
     f.write(du1)
