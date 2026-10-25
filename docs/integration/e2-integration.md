@@ -276,11 +276,12 @@ curl -s http://10.0.2.11:3800/v1/nodeb/gnb_208_095_00000e00 | jq .
 
 ---
 
-## 7. Next Stage: xApp E2 Subscriptions
+## 7. Status Demarcation & Next Stage: xApp E2 Subscriptions
 
-With the E2 connection established, the next stage of the research connects the **Traffic Steering xApp** via the Subscription Manager (`ric_submgr`):
-1. **KPM Subscription:** xApp sends an E2 Subscription Request for E2SM-KPM (ID: 2) specifying a reporting period of $100\text{ ms}$ for PRB utilization per slice.
-2. **RC Control Execution:** When an A1 policy condition is violated (e.g. Slice 2 latency threshold exceeded), the xApp formats an E2 Control Request (E2SM-RC, ID: 3) instructing the CU to execute an F1 UE Context Modification or Handover to Cell-2.
+To maintain strict scientific and evidence-based boundaries across the O-RAN E2 control plane:
+1. **E2 Setup Handshake (`Validated`):** CU FlexRIC Agent association, SCTP transport (`:36421`), and RNIB registration (`gnb_208_095_00000e00`) are fully verified on the testbed.
+2. **Telemetry Ingestion Architecture Decision:** In earlier standalone prototypes, direct `E2SM-KPM` indications were tested. However, for primary 40-column cross-domain experiment logging at 1.000 Hz, `ran_adapter.py` directly ingests OAI DU MAC scheduler logs. This architectural decision guarantees deterministic synchronization with UPF kernel queues and NWDAF URR telemetry on VM-6 without introducing RMR message-queue drops under heavy traffic stress.
+3. **E2SM-RC Control Actuation (`Planned Phase B`):** Autonomous traffic steering via E2 Control requests (E2SM-RC, Service Model ID: 3) instructing OAI CU to trigger RRC Reconfiguration / Handover to Cell-2 is designed and currently under Phase B implementation. In the present baseline evaluation, handover commands are executed under controlled comparison baselines.
 
 ---
 

@@ -233,7 +233,7 @@ These 5 columns provide wall-clock synchronization, monotonic elapsed timing, ex
 | Col | CSV Column Name | Prometheus Identifier | Source & Host | Ingestion Channel | Unit & Type | Extraction Logic & Mathematical Formulation | Missing / Stale Rule | Operational Role |
 |:---:|---|---|---|---|---|---|---|---|
 | **1** | `timestamp_utc` | *(Row Metadata)* | VM-6 Host Clock | Internal | ISO-8601 String | `datetime.datetime.now(timezone.utc).isoformat()` | Microsecond precision | Clock Timestamp |
-| **2** | `elapsed_sec` | *(Row Metadata)* | VM-6 Kernel Clock| Internal | Float (s) | `time.monotonic() - start_monotonic` | Zero wall-clock drift | Experiment Time |
+| **2** | `elapsed_sec` | *(Row Metadata)* | VM-6 Kernel Clock| Internal | Float (s) | `time.monotonic() - start_monotonic` | Immune to wall-clock step adjustments | Experiment Time |
 | **3** | `run_id` | *(Row Metadata)* | Script Argument | CLI Input | String | Session identifier (e.g., `EXP_S1_20261017_153000`) | Auto-generated if unset | Session ID |
 | **4** | `scrape_ok` | *(Internal Monitor)* | VM-6 HTTP Client | Internal | Boolean (0/1) | Evaluates whether HTTP GET `:9100/metrics` returned HTTP 200 | Set to `0` on scrape error | Scrape Health |
 | **5** | `scrape_latency_ms` | *(Internal Monitor)* | VM-6 HTTP Client | Internal | Float (ms) | Wall-clock elapsed duration of the Prometheus scrape request | Set to `-1.0` on failure | Scrape Latency |

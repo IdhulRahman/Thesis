@@ -819,7 +819,7 @@ To bridge this user-plane observability requirement non-invasively, a Python dae
 The source code for the UPF kernel physical adapter v9 is centrally managed at:
 * **Source:** [`scripts/core_adapter.py`](../../scripts/core_adapter.py)
 * **Path on VM-3:** `/opt/oran/5gc/scripts/core_adapter.py`
-* **Architecture:** Pure Python 3 (Standard Library), zero-drift monotonic timing, per-slice qdisc selection (`01000001` & `de00007b`), dual disk JSONL/CSV archiving + asynchronous bounded HTTP push to VM-6 (`:9100/report`).
+* **Architecture:** Pure Python 3 (Standard Library), local monotonic elapsed timing (1.0 Hz target cadence), per-slice qdisc selection (`01000001` & `de00007b`), dual disk JSONL/CSV archiving + asynchronous bounded HTTP push to VM-6 (`:9100/report`).
 
 #### Service Management & CLI Operational Commands
 

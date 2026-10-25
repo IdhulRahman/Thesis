@@ -77,7 +77,7 @@ The diagram below reflects the **empirically validated state** of the testbed cu
 #### D. Telemetry Ingestion & Monitoring Subsystem (VM-6)
 * **Telemetry Collector (`telemetry_collector.py`):** Ingests asynchronous HTTP POST reports from `trafgen.sh`, `ran_adapter.py`, and `core_adapter.py`, while concurrently polling the NWDAF NBI API (`:8080`) over HTTP GET. Exposes consolidated gauges over Prometheus `:9100/metrics`.
 * **Prometheus TSDB & Grafana:** Scrapes `:9100/metrics` at 1.0 Hz for live operator visualization.
-* **Monotonic Telemetry Recorder (`record_experiment.py`):** Scrapes `:9100/metrics` at exactly 1.000 Hz using monotonic time, exporting the 40-column CSV dataset directly to `data/raw/<RUN_ID>/telemetry_<RUN_ID>.csv` with `manifest.json`.
+* **Monotonic Telemetry Recorder (`record_experiment.py`):** Scrapes `:9100/metrics` at a target cadence of 1.000 Hz using local monotonic elapsed timing, exporting the 40-column CSV dataset directly to `data/raw/<RUN_ID>/telemetry_<RUN_ID>.csv` with `manifest.json`.
 
 ---
 
