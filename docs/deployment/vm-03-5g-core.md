@@ -861,14 +861,18 @@ The source code for the UPF kernel physical adapter v9 is centrally managed at:
 
 ## 13. VM-3 Baseline Configuration Modes
 
-| Baseline ID | Mode Name | Core Host Adapter (`core_adapter.py`) | User-Plane Adaptation / Emulation Mechanism |
-|---|---|---|---|
-| **B0** | Static Default | Inactive / Passive logging. Static queues on both UPFs. | None. Unmitigated congestion under overload. |
-| **B1** | RAN-Only Control | Passive telemetry logging at 1.0 Hz. No Core actuation. | None. UPF bottleneck is unmitigated; xApp steers based on radio state. |
-| **B2** | Core-Only Control | Passive telemetry logging at 1.0 Hz. | **Emulated Core Mitigation:** Scripted rate shaping (`tc tbf`) applied to non-priority flows without radio coordination. |
-| **B3** | Decoupled | Passive telemetry logging at 1.0 Hz. | **Independent Core Mitigation:** Scripted rate shaping applied concurrently with independent radio xApp (evaluates action churn). |
-| **B4** | Coordinated (Fixed Heuristic) | Passive telemetry logging at 1.0 Hz. | **Sequential Fallback Mitigation:** Scripted core rate shaping executed after radio steering timeout. |
-| **Proposed** | Bottleneck-Aware Closed-Loop | Passive telemetry logging at 1.0 Hz. | **Planned Autonomous Core Actuator (Phase B):** Targeted rate conditioning dispatched upon rApp `CORE_BOTTLENECK` / `JOINT_BOTTLENECK` classification. |
+> [!NOTE]
+> **User-Plane Shaping Scope & Interface Demarcation:**
+> Applying Linux `tc qdisc add dev eth0 root tbf ...` applies rate constraints across the entire egress interface of the target UPF container. Because the testbed deploys dedicated user-plane containers per slice (`oai-upf-slice1` for eMBB and `oai-upf-slice2` for URLLC), shaping UPF-1 throttles the entire eMBB slice user plane while preserving full line-rate capacity on UPF-2. This enforces slice-level isolation, but does **not** perform selective intra-slice sub-flow classification (which would require explicit `tc filter` classifier rules).
+
+| Baseline ID | Mode Name | Implementation Status | Core Host Adapter (`core_adapter.py`) | User-Plane Rate Shaping Mechanism & Scope | Execution Script & Evidence |
+|---|---|---|---|---|---|
+| **B0** | Static Default | **`Operational Baseline`** | Passive telemetry logging at 1.0 Hz. | None. Static FIFO queues on both UPFs; unmitigated overload. | Standard testbed startup without fault or shaping scripts. |
+| **B1** | RAN-Only Control | **`Operational Baseline`** | Passive telemetry logging at 1.0 Hz. | None. Core user plane is unshaped; evaluation focuses on radio contention. | `scripts/record_experiment.py` under offered load; no Core shaping scripts executed. |
+| **B2** | Core-Only Control | **`Planned Protocol (Phase B)`** | Passive telemetry logging at 1.0 Hz. | **Emulated Slice-Level Rate Shaping:** Scripted `tc tbf` on UPF-1 `eth0` throttles Slice 1 egress without radio steering coordination. | Manual / testbed injection script: `docker exec oai-upf-slice1 tc qdisc add dev eth0 root tbf rate ...` |
+| **B3** | Decoupled Control | **`Planned Protocol (Phase B)`** | Passive telemetry logging at 1.0 Hz. | **Independent Emulated Core Shaping:** Scripted TBF executed concurrently with independent radio xApp (evaluates action churn). | Concurrent orchestration script execution (comparative evaluation protocol). |
+| **B4** | Coordinated Heuristic | **`Planned Protocol (Phase B)`** | Passive telemetry logging at 1.0 Hz. | **Sequential Fallback Mitigation:** Scripted core rate shaping executed after radio steering timeout expires. | Staged orchestration script execution (comparative evaluation protocol). |
+| **Proposed** | Bottleneck-Aware Closed-Loop | **`Planned Architecture (Phase B)`** | Passive telemetry logging at 1.0 Hz. | **Autonomous Targeted Actuation:** Real-time rate conditioning dispatched automatically by rApp coordinator upon `CORE_BOTTLENECK` / `JOINT_BOTTLENECK` classification. | Fully autonomous MAPE-K closed-loop execution (specified in [`architecture.md`](../architecture.md)). |
 
 ---
 

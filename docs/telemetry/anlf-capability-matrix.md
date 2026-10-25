@@ -35,6 +35,21 @@ The table below catalogs the formal mapping between 3GPP Stage-2 / Stage-3 speci
 | **Network performance** (TS 23.288 §6.6) | **`NETWORK_PERFORMANCE`** | **`NETWORK_PERFORMANCE`** | `nwPerfNumOfPdu`<br>`components/oai-nwdaf-engine/internal/engine/network_performance.go` | `event-id=NETWORK_PERFORMANCE`<br>`GET /nnwdaf-analyticsinfo/v1/analytics?event-id=NETWORK_PERFORMANCE` | Event-driven (triggered upon PDU Session Establishment). | HTTP 200 OK via Kong port 8080.<br>`absoluteNum` counted from MongoDB `testing.smf`; `relativeRatio` is an uncalculated upstream stub (`//TODO`, hardcoded 0). | **INCOMPLETE UPSTREAM**<br>*(Control Plane only; non-informative for User Plane bottlenecks)* |
 | **Slice load level** / **Load level information** (TS 23.288 §6.3) | **`SLICE_LOAD_LEVEL`** | **`SLICE_LOAD_LEVEL`** | None registered in upstream OAI engine switch-case (`api_nwdaf_analytics_document_service.go`) | `event-id=SLICE_LOAD_LEVEL`<br>`GET /nnwdaf-analyticsinfo/v1/analytics?event-id=SLICE_LOAD_LEVEL` | None in audited container build. | Query returns **HTTP 400 Bad Request** (`"invalid Event Id param"`) via NBI Analytics API.<br>Unregistered subscription path `/nnwdaf-eventsubscription/v1/slice-load-level` returns **HTTP 404 Not Found** via Kong. | **UNSUPPORTED UPSTREAM**<br>*(Mapped to strict `NaN` in dataset)* |
 
+### 2.1 Upstream Mathematical Computation Semantics & Verified Formulas
+The verified mathematical formulations executed inside the official OAI NWDAF Engine (`components/oai-nwdaf-engine/internal/engine/ue_communication.go`, audited on commit `9d82b75`) are defined as follows:
+
+1. **Cumulative User-Plane Volume Aggregation:**
+   $$V_{UL} = \sum_{i=1}^{N} \text{UlVolume}_i, \quad V_{DL} = \sum_{i=1}^{N} \text{DlVolume}_i$$
+   *Extracted from MongoDB session documents populated by SMF Event Exposure from UPF Usage Reports (URR).*
+2. **Volume Sample Standard Deviation:**
+   $$\bar{V}_{UL} = \frac{1}{N} \sum_{i=1}^{N} \text{UlVolume}_i, \quad \sigma_{UL} = \sqrt{\frac{1}{N} \sum_{i=1}^{N} (\text{UlVolume}_i - \bar{V}_{UL})^2}$$
+   *Computed using Go standard library `math.Sqrt` and assigned to JSON output field `ueComms[0].trafChar.ulVolVariance`.*
+3. **Cumulative Window Duration Accumulation:**
+   $$\Delta t_{\text{accum}} = \sum_{i=1}^{N} (\text{stopTime}_i - \text{startTime}_i)$$
+   *Sums individual URR report window durations (`commDur`), functioning as a monotonic URR event accumulation counter rather than an exact physical session wall-clock timer.*
+4. **Control-Plane Network Performance Stub (`network_performance.go`):**
+   $$\text{absoluteNum} = \text{collection.CountDocuments}(\dots), \quad \text{relativeRatio} = 0 \quad (\text{hardcoded //TODO in audited build})$$
+
 ---
 
 ## 3. End-to-End Telemetry Provenance Chains

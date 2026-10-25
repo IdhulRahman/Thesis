@@ -42,7 +42,7 @@ Ingested via Core Research Telemetry Adapter (`core_adapter.py` v9) and 3GPP Rel
 > **Core Metrics Validity & Semantic Audit Note:**
 > 1. Physical user-plane buffer queue dynamics and packet drops are sampled directly from the Linux kernel using `core_adapter.py` v9 (adhering to 3GPP PM TS 32.401 & TS 28.552).
 > 2. Native 3GPP TS 29.520 `UE_COMMUNICATION` telemetry is polled dynamically by `telemetry_collector.py` from Kong Gateway port 8080 (`/nnwdaf-analyticsinfo/v1/analytics?event-id=UE_COMMUNICATION`).
-> 3. Upstream OAI Engine semantics: `nwdaf_comm_duration_sec` sums report elapsed durations (`commDur: 2842s`), and `nwdaf_comm_vol_std_bytes` computes sample standard deviation ($\sigma = 588\text{ B}$). In single-slice PoC (Slice 1), volume counters (`ulVol: 1680B`, `dlVol: 1680B`) match live UPF URR reports, and freshness is tracked with a 35s window.
+> 3. Upstream OAI Engine semantics: `nwdaf_comm_duration_sec` sums report elapsed durations (`commDur: 2842s`), and `nwdaf_comm_vol_std_bytes` computes sample standard deviation ($\sigma = 588\text{ B}$). In single-slice PoC (Slice 1), volume counters (`ulVol: 1680B`, `dlVol: 1680B`) match live UPF URR reports, and freshness is tracked with a 45s window.
 
 | Metric Name | Source NF / Method | Unit / Type | Role in Thesis Evaluation |
 |---|---|---|---|
@@ -57,8 +57,11 @@ Ingested via Core Research Telemetry Adapter (`core_adapter.py` v9) and 3GPP Rel
 | `nwdaf_comm_dl_bytes` | OAI NWDAF NBI (`UE_COMMUNICATION`) | Bytes (`B`) | Cumulative downlink user-plane volume reported by NWDAF. |
 | `nwdaf_comm_vol_std_bytes`| OAI NWDAF NBI (`UE_COMMUNICATION`) | Bytes (`B`) | Volume variation metric (computed as standard deviation $\sigma$ upstream). |
 | `nwdaf_comm_freshness` | Collector Poller (`telemetry_collector.py`)| Binary (`1/0`) | Value-change heuristic for NWDAF NBI telemetry ($1$ if reported volume updated within 45s, else $0$). |
-| `nwdaf_network_performance` | OAI NWDAF NBI (`Nnwdaf_AnalyticsInfo`) | JSON 3GPP TS 29.520 | PDU session control analytics (`SESS_SUCC_RATIO`, static ratio `0`). |
-| `amf_active_pdu_sessions` | AMF SBI (`/namf-comm`) | Counter | Empirical count of active PDU sessions across slices. |
+
+#### 2.1.1 Control-Plane & SBI Diagnostic Verification (Non-Exported)
+The following interfaces are inspected during deployment health checks, but are not exported to Prometheus TSDB by `telemetry_collector.py`:
+* **AMF PDU Sessions:** Queried directly via AMF SBI (`GET /namf-comm/v1/...`) to verify active PDU session context counts.
+* **NWDAF Network Performance:** Queried via NBI (`GET /nnwdaf-analyticsinfo/v1/analytics?event-id=NETWORK_PERFORMANCE`), returning `absoluteNum` from MongoDB and an uncalculated stub (`relativeRatio = 0`).
 
 ### 2.2 Domain 2: OpenAirInterface Split RAN (VM-4 — `10.102.0.167`)
 Active telemetry ingestion is performed by `ran_adapter.py`, which tails the real-time MAC scheduler logs (`du1.log` and `du2.log`) from gNB DU-1 (Cell-1, PCI 1, port `4043`) and DU-2 (Cell-2, PCI 2, port `4044`) and posts telemetry to VM-6 `:9100/report` at 1.0 Hz:
@@ -83,13 +86,13 @@ In earlier standalone prototypes, O-RAN FlexRIC E2 Agent (`E2SM-KPM v2.03` over 
 | `ran_rlc_packet_delay_ms` | E2SM-KPM (RLC layer) | Milliseconds (`ms`) | Radio interface scheduling latency. |
 
 ### 2.3 Domain 3: O-RAN Near-RT & Non-RT RIC (VM-1 — `10.102.0.168` & VM-2 — `10.102.0.66`)
-Ingested via A1 PMS REST API (`:8081`) and rApp decision logs:
+Collector gauge endpoints in `telemetry_collector.py` allocate telemetry interface placeholders for RIC intelligence:
 
 | Metric Name | Source Component | Data Type | Implementation Status & Role |
 |---|---|---|---|
-| `rapp_diagnosed_bottleneck` | rApp Classifier (VM-1) | Enum (`0:NORMAL, 1:RAN, 2:CORE, 3:JOINT`) | Diagnostic classification of bottleneck origin. Evaluated in offline/shadow mode. |
-| `rapp_classifier_confidence` | rApp Classifier (VM-1) | Float (`0.0 - 1.0`) | Confidence score for root-cause diagnosis. |
-| `a1_policy_threshold` | A1 PMS (VM-1 / VM-2) | Numeric (Type 20008) | **Validated:** Active steering threshold enforced from Non-RT to Near-RT RIC. |
+| `rapp_diagnosed_bottleneck` | Collector Gauge (`telemetry_collector.py`) | Enum (`-1:UNINIT, 0:NORMAL, 1:RAN, 2:CORE, 3:JOINT`) | **Interface Available / Default `-1`:** Telemetry placeholder in collector; accepts classification updates when external rApp posts to `:9100/report`. Autonomous shadow/live evaluation is Planned (Phase B). |
+| `rapp_confidence` | Collector Gauge (`telemetry_collector.py`) | Float (`0.0 - 1.0`) | **Interface Available / Default `0.0`:** Confidence score placeholder in collector. |
+| `a1_policy_threshold` | Collector Gauge (`telemetry_collector.py`) | Numeric (`ms`) | **Interface Available / Default `20.0`:** URLLC latency threshold placeholder; accepts external policy updates via `:9100/report`. |
 | `xapp_steering_decision` | xApp (VM-2) | Enum (`KEEP, CELL_1, CELL_2`) | **Planned (Phase B):** Real-time traffic steering action via E2SM-RC. |
 | `xapp_action_churn_count` | xApp / rApp | Counter (actions/min) | **Planned (Phase B):** Evaluates steering stability and ping-pong avoidance. |
 | `xapp_inference_time_ms` | xApp (VM-2) | Milliseconds (`ms`) | **Planned (Phase B):** Execution time of near-RT control loop. |
@@ -100,10 +103,14 @@ Ingested directly from the automated multi-slice traffic generator (`trafgen.sh`
 | Metric Name | Workload Generator | Sampling | Role in Thesis Evaluation |
 |---|---|---|---|
 | `e2e_slice1_throughput_mbps` | `iperf3 -u` (Slice 1 eMBB) | 1.0 second | Measured client-side UDP offered throughput dispatched across Slice 1. |
-| `e2e_slice2_latency_rtt_ms` | Precision Ping (Slice 2 URLLC) | 100 ms | Measured end-to-end ICMP RTT latency (min, avg, max, mdev, p95, p99). |
-| `e2e_slice2_packet_loss_pct` | Precision Ping (Slice 2 URLLC) | Cumulative (`%`) | SLA violation indicator for mission-critical slice. |
+| `e2e_slice2_latency_rtt_ms` | Precision Ping (Slice 2 URLLC) | 100 ms (reported 1.0s) | Last observed ICMP round-trip latency from the most recent reply report. |
+| `e2e_slice2_packet_loss_pct` | Precision Ping (Slice 2 URLLC) | Sliding Window | Sequence-window packet loss percentage computed by trafgen parser. |
 | `e2e_probe_freshness` | Precision Ping (Slice 2 URLLC) | Binary (`0/1`) | Arrival health indicator: 1 if active canary RTT reply received within 3.5s. |
-| `e2e_sla_violation_status` | SLA Monitor | Binary (`0: OK, 1: VIOLATED`) | Evaluates SLA violation rate ($V_s$) and recovery time ($T_{rec}$). |
+
+> [!NOTE]
+> **Offline Analysis vs Active Metrics:**
+> * Distribution summary statistics for latency (min, avg, max, mdev, p95, p99) and receiver delivered goodput / packet loss at EXT-DN are logged to dedicated log files (`ping_slice2.log`, `iperf_server.json`) and calculated during offline post-processing.
+> * `e2e_sla_violation_status`, SLA Violation Rate ($V_s$), and Recovery Time ($T_{rec}$) are mathematical evaluation metrics computed in offline analysis (see Section 4), not active gauges emitted by `telemetry_collector.py`.
 
 ---
 
