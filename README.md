@@ -55,7 +55,7 @@ All capabilities are classified under strict empirical evidence standards: **`Va
 | **5GC Multi-Slice Control Plane** | AMF N2 (:38412), SMF-1/2 N4 PFCP | **`Validated`** | Tested with dynamic NRF registration ([Case #51](docs/troubleshooting/5g-core.md#case-51)) |
 | **5GC Native User-Plane URR** | UPF simpleswitch URR $\to$ SMF $\to$ NWDAF | **`Validated`** | Verified periodic N4 Session Reports (msg 56) & live `qosmonlist` ([Doc](docs/integration/nwdaf-integration.md)) |
 | **3GPP NWDAF NBI Analytics** | `UE_COMMUNICATION` over Kong :8080 | **`Validated`** | HTTP 200 with dynamic volume/duration ([Doc](docs/integration/nwdaf-integration.md)) |
-| **NWDAF Slice Load Level** | Upstream code `relativeRatio` //TODO | **`Unsupported`** | Mapped to `NaN` in dataset to avoid false data ([Doc](docs/integration/nwdaf-integration.md)) |
+| **NWDAF Slice Load Level** | Unhandled in upstream OAI NBI switch-case (returns HTTP 400) | **`Unsupported`** | Mapped to `NaN` in dataset; `relativeRatio //TODO` belongs separately to `NETWORK_PERFORMANCE` ([Doc](docs/telemetry/anlf-capability-matrix.md)) |
 | **Core Host Telemetry Adapter** | UPF container kernel `tc qdisc` & drops | **`Validated`** | Daemon `core_adapter.py` streaming at 1.0 Hz to VM-6 ([Doc](docs/deployment/vm-03-5g-core.md)) |
 | **Split RAN (CU + Dual DU)** | CU-CP/UP, DU-1 (:4043), DU-2 (:4044) | **`Validated`** | Both cells in service, F1-C/F1-U active ([Doc](docs/deployment/vm-04-ran.md)) |
 | **RAN Telemetry Extraction** | Physical MAC scheduler log parsing | **`Validated`** | Daemon `ran_adapter.py` streaming PRB%, SNR, MCS, BLER ([Doc](docs/deployment/vm-04-ran.md)) |

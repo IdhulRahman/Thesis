@@ -23,18 +23,18 @@ To evaluate these hypotheses, the experimental testbed defines **five comparativ
 | Paradigm Tier | Baseline ID | Control Approach | Domain Awareness | Coordination Model |
 |---|---|---|---|---|
 | **Static Default** | **B0** | Standard 3GPP A3 Handover | Local Radio RSRP only | No RIC coordination |
-| **Single-Domain** | **B1** & **B2** | Standalone xApp / Core Shaper | Isolated to RAN or Core | Blind to cross-domain congestion |
-| **Decoupled** | **B3** | Uncoordinated Dual Controllers | Both domains active | Independent / Conflicting actuation |
-| **Naive Coordination** | **B4** | Fixed Priority Heuristic | Cross-domain aggregated | Static action sequence (No root diagnosis) |
+| **Single-Domain** | **B1** & **B2** | Standalone xApp / Core Shaper | Isolated to RAN or Core | Single-domain visibility (RAN or Core only) |
+| **Decoupled** | **B3** | Uncoordinated Dual Controllers | Both domains active | Independent uncoordinated actuation |
+| **Fixed-Sequence Coordination** | **B4** | Fixed Priority Heuristic | Cross-domain aggregated | Static action sequence without root-cause diagnosis |
 | **Proposed System** | **PROPOSED** | Closed-Loop MAPE-K Coordination | Cross-domain correlated | Root-cause matched steering & verification |
 
-| Baseline ID | Control Paradigm | Decision Inputs | Actuation Mechanisms | Expected Failure Mode / Behavioral Limitation |
+| Baseline ID | Control Paradigm | Decision Inputs | Actuation Mechanisms | Hypothesized Limitation / Evaluation Risk |
 |---|---|---|---|---|
-| **B0** | **Static 3GPP Baseline** | RSRP only (Standard A3 Event) | Autonomous gNB Handover | Completely blind to Core congestion; no dynamic slice traffic steering. |
-| **B1** | **RAN-Only Control** | Radio scheduler metrics (PRB, SNR, MCS) | Inter-cell steering via Near-RT xApp | **Core-Blind:** When Core UPF is congested, triggers futile inter-cell handovers and ping-pong churn. |
-| **B2** | **Core-Only Control** | Core telemetry (UPF queue, packet drops) | Linux `tc qdisc` rate shaping | **Radio-Blind:** Cannot leverage alternative radio cells when radio channel collapses. |
-| **B3** | **Decoupled Controllers** | Both domains monitored independently | Independent xApp & Core adapters | **Conflicting Actions:** Both controllers act simultaneously without cross-domain coordination, destabilizing SLAs. |
-| **B4** | **Coordinated (Fixed Heuristic)**| Aggregated cross-domain telemetry | Fixed action sequence (e.g., Handover $\to$ Shape) | **Suboptimal Recovery:** Executes wrong action first when bottleneck cause does not match fixed priority. |
+| **B0** | **Static 3GPP Baseline** | RSRP only (Standard A3 Event) | Autonomous gNB Handover | Operates without Core congestion visibility; does not provide dynamic slice traffic steering. |
+| **B1** | **RAN-Only Control** | Radio scheduler metrics (PRB, SNR, MCS) | Inter-cell steering via Near-RT xApp | **Evaluated for Core-Blind Steering Risk:** Under Core UPF bottlenecks, risks executing unneeded inter-cell handovers or triggering handover churn without mitigating core queue saturation. |
+| **B2** | **Core-Only Control** | Core telemetry (UPF queue, packet drops) | Linux `tc qdisc` rate shaping | **Evaluated for Radio-Blind Risk:** Cannot leverage alternative radio cells or radio scheduling adaptations when bottleneck originates in radio channel degradation. |
+| **B3** | **Decoupled Controllers** | Both domains monitored independently | Independent xApp & Core adapters | **Evaluated for Actuation Conflict Risk:** Independent controllers risk issuing simultaneous, unaligned control actions without cross-domain arbitration, evaluated for potential SLA instability. |
+| **B4** | **Fixed-Sequence Coordination** | Aggregated cross-domain telemetry | Fixed action sequence (e.g., Handover $\to$ Shape) | **Evaluated for Sequence Mismatch Risk:** Executes a predefined action sequence regardless of diagnosed root cause, evaluated for recovery delays when the initial action does not target the active bottleneck domain. |
 | **PROPOSED** | **Bottleneck-Aware Closed-Loop** | Correlated RAN + Core Telemetry | Matched Action (RAN / Core / Joint) + SLA Verify | **Targeted Domain Matching & Stability Verification:** Selects actions matched to the diagnosed bottleneck domain (inter-cell radio steering for RAN, egress shaping for Core, or staged mitigation for Joint) and verifies SLA restoration over stability window $W_{\text{stab}}$ before admitting new actions. |
 
 ---

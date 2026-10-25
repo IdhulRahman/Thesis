@@ -693,22 +693,24 @@ VM-3 (5GC / NWDAF)             VM-6 (Prometheus TSDB / RAN KPM)
                       xApp
 ```
 
-VM-1 serves as the central coordination hub: ingesting Core analytics (NWDAF) and RAN telemetry, classifying the bottleneck location, and enforcing long-timescale policy guidance via A1 PMS.
+In the research architecture design, VM-1 is designated as the Non-RT RIC coordination hub: hosting the A1 Policy Management Service (PMS) container (`:8081`) for policy lifecycle management, with autonomous rApp analytics ingestion, bottleneck classification, and policy dispatch designed as Phase B closed-loop evaluation specifications.
 
 ---
 
-## 23. VM-1 Baseline Configuration & Operational Modes
+## 23. Planned Phase B Evaluation Modes (Research Design Specification)
 
-To execute the five thesis evaluation baselines and the Proposed System, configure the rApp on VM-1 as follows:
+> [!NOTE]
+> **Operational Testbed Status vs. Phase B Evaluation Design:**  
+> On the currently operational testbed, VM-1 operates the validated A1 Policy Management Service container (`:8081`) and interface shim. Autonomous rApp classification loops and programmatic policy dispatch are defined as **Planned Phase B research specifications**. In baseline telemetry recording runs (B0 through B3), no automated rApp closed loop operates in the background. The matrix below defines the planned operational modes and A1 policy payloads designed for subsequent Phase B comparative evaluation.
 
-| Baseline ID | Mode Name | rApp Operational State & Behavior | A1 Policy Payload Dispatched |
+| Baseline ID | Evaluation Mode | Planned rApp Operational State & Behavior | Planned A1 Policy Payload Dispatched |
 |---|---|---|---|
-| **B0** | Static Default | **Disabled / Inactive.** No active policy instances created in PMS. | None (`DELETE` all policy instances via PMS `:8081`). |
-| **B1** | RAN-Only Control | **Static Thresholds.** Ingests only RAN metrics; NWDAF consumer is disabled. | Dispatches static dummy threshold (`{"threshold": 80}`) without bottleneck metadata. |
-| **B2** | Core-Only Control | **Disabled / Inactive.** Core adaptation is handled strictly within VM-3. | None. |
-| **B3** | Decoupled | **Disabled / Inactive.** Near-RT xApp and Core adapter act uncoordinated. | None. |
-| **B4** | Coordinated (Fixed Heuristic) | **Fixed Action Sequence.** Ingests both NWDAF and RAN metrics, but bypasses the classifier. Always prioritizes handover first, then Core shaping after timeout. | Dispatches unclassified handover authorization regardless of where the congestion originated. |
-| **Proposed** | Bottleneck-Aware Closed-Loop | **Full Classification & Matched Action.** Evaluates Rule-Based / Decision Tree classifier; dispatches targeted A1 policy + verifies SLA recovery in next window. | Dispatches targeted policy: `{"bottleneck_location": "RAN"|"CORE"|"JOINT", "target_cell": 2, "handover_allowed": true/false}`. |
+| **B0** | Static Default | **Inactive.** No active policy instances created in PMS. | None (`DELETE` all policy instances via PMS `:8081`). |
+| **B1** | RAN-Only Control | **Planned Static Threshold.** Ingests only RAN metrics; NWDAF consumer inactive. | Planned static dummy threshold (`{"threshold": 80}`) without bottleneck metadata. |
+| **B2** | Core-Only Control | **Inactive.** Core adaptation is handled strictly within VM-3. | None. |
+| **B3** | Decoupled | **Inactive.** Near-RT xApp and Core adapter act without Non-RT RIC coordination. | None. |
+| **B4** | Fixed-Sequence Coordination | **Planned Fixed Action Sequence.** Designed to ingest both NWDAF and RAN metrics but bypass classifier; planned to dispatch static handover authorization regardless of bottleneck origin. | Planned unclassified handover authorization payload. |
+| **Proposed** | Bottleneck-Aware Closed-Loop | **Planned Closed-Loop Coordination.** Designed to evaluate Rule-Based / Decision Tree classifier on synchronized telemetry, dispatch targeted A1 policy guidance, and verify SLA restoration across subsequent stability window. | Planned targeted policy: `{"bottleneck_location": "RAN"|"CORE"|"JOINT", "target_cell": 2, "handover_allowed": true/false}`. |
 
 ---
 
