@@ -115,16 +115,18 @@ To prevent conflating disparate units, all errors are computed and reported in t
 3. **Diagnostic Lead Time / Latency ($T_{det}$):** Time elapsed between physical fault onset and correct state classification.
 
 ### Tier 3: Closed-Loop Network System Metrics
-1. **Wrong-Domain Action Rate ($W_{act}$):**
-   Incorporates both incorrect actuations (e.g., dispatching radio handover during pure Core congestion) and unhandled fault incidents (missed interventions):
-   $$W_{act} = \frac{N_{\text{wrong-domain actions}} + N_{\text{unhandled fault windows}}}{N_{\text{total required intervention windows}}} \times 100\%$$
+1. **Wrong-Domain Actuation Ratio ($W_{act}$):**
+   Evaluated under two formal formulations depending on evaluation objective:
+   * *Per-Action Precision:* $W_{act,action} = \frac{N_{\text{wrong}}}{N_{\text{total\_actions}}} \times 100\%$ (evaluates whether dispatched control actions match ground-truth bottleneck domain).
+   * *Per-Window Policy Recall:* $W_{act,window} = \frac{N_{\text{wrong\_actions}} + N_{\text{missed\_interventions}}}{N_{\text{fault\_windows}}} \times 100\%$ (evaluates end-to-end intervention timeliness across all fault windows).
 2. **SLA Violation Rate per Slice ($V_s$):**
-   Evaluates percentage of time windows where slice SLA is violated ($RTT > 20\text{ ms}$ for URLLC or $Tput < 10\text{ Mbps}$ for eMBB):
-   $$V_s = \frac{\sum_{k=1}^{K} \mathbb{I}(\text{SLA violated in window } k)}{K} \times 100\%$$
+   $$V_s = \frac{1}{K} \sum_{k=1}^{K} \mathbb{I}\left(\text{SLA}_{\text{eMBB}}(k) = \text{Violated} \lor \text{SLA}_{\text{URLLC}}(k) = \text{Violated}\right) \times 100\%$$
+   Evaluated relative to workload demand: URLLC SLA is violated when $RTT > 20.0\text{ ms}$ or loss $> 1.0\%$; eMBB SLA is violated under saturation stress when goodput $T_{\text{eMBB}} < 20.0\text{ Mbps}$ (or $< 85\%$ of offered demand when below capacity).
 3. **SLA Recovery Time ($T_{rec}$):**
-   Elapsed time from the first observed SLA violation until all slice SLAs are restored continuously for a sustained stability window ($T_{stab} \ge 5\text{ s}$). Cases where SLA fails to recover are explicitly reported as non-recoveries ($T_{rec} = \infty$).
+   $$T_{rec} = t_{\text{restored}} - t_{\text{violation}}$$
+   Elapsed time from first SLA violation onset following fault injection until both slice SLAs return and remain continuously compliant for a **consecutive stability window of $W_{\text{stab}} \ge 10\text{ seconds}$**. Runs where SLA fails to recover within the experiment duration are explicitly recorded and reported as **Unrecovered** ($T_{rec} = \text{Unrecovered} \ (|T_{\text{exp}} - t_{\text{violation}}|)$), rather than omitted.
 4. **Action Churn ($C_{act}$):**
-   Disaggregated into **Radio Handover Churn** (handovers per minute) and **Core Shaping Churn** (rate policy alterations per minute) to isolate control instability.
+   The frequency of reversing or oscillating control actions per observation epoch, disaggregated into **Radio Handover Churn** (handovers per minute) and **Core Shaping Churn** (rate policy alterations per minute) to isolate control instability.
 
 ---
 

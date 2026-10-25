@@ -50,24 +50,36 @@ Experimental datasets recorded via `record_experiment.py` are partitioned tempor
 ### 3.2 Data Processing & Feature Engineering Rules
 1. **Zero Artificial Imputation:** Unsupported metrics (such as `nwdaf_load_embb`) or unmeasured values emit strict **`NaN`**. They must **not** be filled with synthetic constants (e.g., $0$ or $-42\text{ dBm}$) during training.
 2. **Monotonic Elapsed Timing:** Temporal feature alignment strictly uses `elapsed_sec` derived from `time.monotonic()` to eliminate leap-second or NTP wall-clock adjustments.
-3. **Derivative vs. Cumulative Features:** Cumulative counters (`nwdaf_comm_ul_bytes`, `upf_tx_bytes_total`) are converted to first-order derivatives ($\Delta \text{bytes} / \Delta t$) before inference.
-4. **Decoupling Freshness from Values:** Telemetry freshness flags (`e2e_probe_freshness`, `nwdaf_comm_freshness`) are evaluated as validity masks: when freshness is `0`, dependent telemetry is marked stale.
+3. **Derivative vs. Cumulative Features:** Cumulative counters (`nwdaf_comm_ul_bytes`, `nwdaf_comm_dl_bytes`) update in step functions every $\approx 30\text{ s}$ governed by UPF periodic URR reports. Direct 1 Hz differentiation ($\Delta V / \Delta t$) yields zero-delta plateaus with 30-second burst spikes. For model evaluation, cumulative counters are either ingested directly as monotonic volume totals, or transformed using causal windowed averaging ($\frac{V_t - V_{t-W}}{W}$ where $W \ge 30\text{ s}$) with declared reset/epoch boundaries. Instantaneous 1 Hz differentiation must not be conflated with physical real-time line rate.
+4. **Quality & Freshness Indicators (Not Deletion Filters):** Telemetry freshness indicators (`nwdaf_comm_freshness` at 45s and `e2e_probe_freshness` at 3.5s) function as telemetry health diagnostics, NOT blanket raw data validity masks. A value of `nwdaf_comm_freshness = 0` occurs legitimately during periods of stable zero-traffic or reporting stalls; recorder daemons strictly record all observations without row deletion. Downstream filtering, imputation, or masking policies are explicit analyst decisions that must be declared and tested for sensitivity during offline evaluation.
 
 ---
 
 ## 4. Evaluation Metrics & Statistical Validation
 
-### 4.1 Quantitative Performance Metrics
-1. **SLA Violation Ratio ($V_s$):**
-   $$V_s = \frac{1}{T} \sum_{t=1}^T \mathbb{I}\left(R_t > R_{\text{thresh}} \lor L_t > L_{\text{thresh}}\right)$$
-   Where $R_t$ is canary RTT, $L_t$ is packet loss, and $\mathbb{I}(\cdot)$ is the indicator function.
-2. **Mean Time to Recovery ($T_{\text{rec}}$):**
-   The elapsed time from fault injection ($t_{\text{fault}}$) until SLA metrics return and remain within acceptable bounds for $\ge 10$ consecutive seconds.
-3. **Action Churn Rate ($C_{\text{act}}$):**
-   The frequency of conflicting or reversing actuations (e.g., Cell-1 $\to$ Cell-2 followed immediately by Cell-2 $\to$ Cell-1) within an observation window.
-4. **Wrong-Domain Actuation Ratio ($W_{\text{act}}$):**
-   $$W_{\text{act}} = \frac{N_{\text{wrong}}}{N_{\text{total\_actions}}}$$
-   Evaluates how frequently a RAN handover is triggered during a Core bottleneck, or vice versa.
+### 4.1 Unified SLA Evaluation Contract
+To maintain consistency across all analysis and baseline evaluations, SLA satisfaction is defined per slice relative to workload demand:
 
-### 4.2 Statistical Significance Testing
+1. **Slice 1 (eMBB) SLA Contract:**
+   * **Offered Load Sensitivity:** Measured throughput must be evaluated relative to offered workload demand. Low throughput during low-demand scenarios (e.g., Scenario S1 with offered load of 10 Mbps) is **not** an SLA violation.
+   * **SLA Threshold:** Under saturation stress (offered load $\ge 25\text{ Mbps}$), Slice 1 SLA requires user goodput $T_{\text{eMBB}} \ge 20.0\text{ Mbps}$ (or $\ge 85\%$ of offered demand when below capacity).
+2. **Slice 2 (URLLC) SLA Contract:**
+   * **End-to-End Latency Target:** Canary ICMP round-trip time $RTT \le 20.0\text{ ms}$ and sequence loss percentage $\le 1.0\%$.
+   * **Scope & Standards Demarcation:** 3GPP TS 23.501 Table 5.7.4-1 defines standard Packet Delay Budget (PDB) between UE and N6-terminating UPF (e.g., 5 ms for URLLC QCI). In this testbed, the metric is **End-to-End ICMP RTT** measured between VM-5 namespace `ue2` and EXT-DN `192.168.70.145`. The $20.0\text{ ms}$ threshold is a calibrated end-to-end research SLA accounting for virtualization overhead, Linux network scheduling, and RFsim socket loopback transit.
+
+### 4.2 Quantitative Performance Metrics
+1. **SLA Violation Ratio ($V_s$):**
+   $$V_s = \frac{1}{T} \sum_{t=1}^T \mathbb{I}\left(\text{SLA}_{\text{eMBB}}(t) = \text{Violated} \lor \text{SLA}_{\text{URLLC}}(t) = \text{Violated}\right) \times 100\%$$
+   Where $T$ is total scenario duration and $\mathbb{I}(\cdot)$ is the indicator function.
+2. **SLA Recovery Time ($T_{\text{rec}}$):**
+   $$T_{\text{rec}} = t_{\text{restored}} - t_{\text{violation}}$$
+   Measured from the timestamp of first SLA violation onset ($t_{\text{violation}}$) following fault injection until both slice SLAs return to compliance and remain continuously compliant for a **consecutive stability window of $W_{\text{stab}} \ge 10\text{ seconds}$**. Runs where SLA fails to recover within the experiment duration are explicitly recorded and reported as **Unrecovered** ($T_{\text{rec}} = \text{Unrecovered} \ (|T_{\text{exp}} - t_{\text{violation}}|)$), rather than omitted.
+3. **Wrong-Domain Actuation Ratio ($W_{\text{act}}$):**
+   Evaluated under two formal denominators depending on evaluation objective:
+   * *Per-Action Precision:* $W_{\text{act,action}} = \frac{N_{\text{wrong}}}{N_{\text{total\_actions}}}$ (evaluates whether dispatched actions match ground-truth bottleneck domain).
+   * *Per-Window Policy Recall:* $W_{\text{act,window}} = \frac{N_{\text{wrong\_actions}} + N_{\text{missed\_interventions}}}{N_{\text{fault\_windows}}}$ (evaluates end-to-end intervention timeliness across all fault windows).
+4. **Action Churn Rate ($C_{\text{act}}$):**
+   The frequency of reversing or oscillating control actions (e.g., Cell-1 $\to$ Cell-2 $\to$ Cell-1) per observation epoch, disaggregated into Radio Handover Churn and Core Shaping Churn.
+
+### 4.3 Statistical Significance Testing
 All baseline comparisons are executed across a minimum of $N \ge 10$ independent random-seeded runs per scenario. Performance differences are evaluated using the non-parametric **Wilcoxon Signed-Rank Test** (paired) or **Mann-Whitney U Test** (independent) with a significance threshold of $\alpha = 0.05$.

@@ -32,7 +32,7 @@ d:\Idhul\Program\Thesis\docs
 │   └── nwdaf-integration.md            ◄── Native 3GPP NWDAF Pipeline & Scope Delimitation
 │
 ├── telemetry/                          ◄── Telemetry Dataflows & Dictionaries
-│   └── metric-catalog.md               ◄── Single Authoritative 37-Column Dataset Dictionary
+│   └── metric-catalog.md               ◄── Single Authoritative 40-Column Dataset Dictionary
 │
 ├── experiments/                        ◄── Evaluation Framework & Scenario Registries
 │   ├── methodology.md                  ◄── Baselines (B0 to B4 vs Proposed), Metrics, Rules
@@ -72,7 +72,7 @@ d:\Idhul\Program\Thesis\docs
 2. **[Implementation Status](implementation-status.md):** Verify the empirical evidence supporting each system capability.
 3. **[Normative Standards Claims](references/standards.md):** Review the mapping of research claims to official 3GPP and ETSI specifications.
 4. **[Experimental Methodology](experiments/methodology.md):** Examine the baseline control paradigms (B0 to B4 vs. Proposed) and evaluation criteria.
-5. **[Telemetry Metric Catalog](telemetry/metric-catalog.md):** Review the 37-column dataset schema and measurement semantics.
+5. **[Telemetry Metric Catalog](telemetry/metric-catalog.md):** Review the 40-column dataset schema and measurement semantics.
 
 ### 2.2 For Testbed Operators & Reproducibility Engineers
 1. **[Software Manifest](software-manifest.md):** Verify host allocations, pinned Git commits, container images, and custom patches.

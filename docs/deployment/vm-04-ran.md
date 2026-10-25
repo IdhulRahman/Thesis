@@ -268,7 +268,7 @@ cd /opt/oran/ran/openairinterface5g/cmake_targets
 > [!WARNING]
 > **GCC 11 Internal Compiler Error with FlexRIC `kpm_sm`:**  
 > The default `gcc-11` on Ubuntu 22.04 crashes with a segmentation fault (`internal compiler error: Segmentation fault in kpm_dec_generic.h`) when compiling the KPM Service Model due to an RTL expansion bug with C11 `_Generic`.  
-> Upgrade to `gcc-12` before building the Service Models (see [Troubleshooting Case 27](../troubleshooting/ran-ue.md#case-27-gcc-11-internal-compiler-error-segmentation-fault-on-flexric-kpm_sm-_generic-macro)):
+> Upgrade to `gcc-12` before building the Service Models (see [Troubleshooting Case 27](../troubleshooting/ran-ue.md#case-27)):
 > ```bash
 > sudo apt update && sudo apt install -y gcc-12 g++-12
 > sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 --slave /usr/bin/g++ g++ /usr/bin/g++-12

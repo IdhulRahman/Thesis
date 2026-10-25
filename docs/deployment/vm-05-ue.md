@@ -483,22 +483,33 @@ python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
 
 ## 11. Multi-Slice SLA Evaluation Workloads
 
-To measure end-to-end SLA satisfaction and evaluate baseline recovery times from the actual user perspective, VM-5 runs synchronized traffic generators across the distinct slice network namespaces.
+To measure end-to-end SLA satisfaction and evaluate baseline recovery times from the actual user perspective, VM-5 runs synchronized traffic generators across the distinct slice network namespaces using `scripts/trafgen.sh` (or standalone invocations per namespace).
 
 ### 11.1 Workload Generator Profiles
 
 ```bash
-# Terminal 1: Slice 1 (Throughput / eMBB) - Heavy background UDP traffic
-sudo ip netns exec ue1 iperf3 -c 192.168.70.145 -u -b 40M -t 300 -i 1
+# Terminal 1: Slice 1 (Throughput / eMBB) - Goodput saturation and 5 Hz canary probe
+sudo ip netns exec ue1 iperf3 -c 192.168.70.145 -u -b 25M -t 60 -i 1
+sudo ip netns exec ue1 ping -D -O -I oaitun_ue1 -i 0.2 -c 325 192.168.70.145
 
-# Terminal 2: Slice 2 (Low Latency / URLLC) - High-frequency latency probe (every 50ms)
-sudo ip netns exec ue2 ping -c 6000 -i 0.05 192.168.70.145 | tee /opt/oran/nrue/slice2_latency.log
+# Terminal 2: Slice 2 (Low Latency / URLLC) - High-frequency 10 Hz canary latency probe
+sudo ip netns exec ue2 ping -D -O -I oaitun_ue1 -i 0.1 -c 650 192.168.70.145
 ```
 
-### 11.2 Ground-Truth SLA Violation Logging
-During each 30-second observation window $k$, SLA compliance is evaluated at VM-5:
-- **Slice 1 SLA Bound:** Throughput $\ge 30\text{ Mbps}$, Packet loss $\le 2\%$.
-- **Slice 2 SLA Bound:** One-way latency $\le 15\text{ ms}$, RTT $\le 25\text{ ms}$.
+Or execute automated multi-slice orchestration via `trafgen.sh`:
+```bash
+# Syntax: ./trafgen.sh start <duration_sec> <embb_mbps>
+./trafgen.sh start 60 25
+```
+
+### 11.2 Ground-Truth SLA Evaluation Contract
+During each observation window $k$, SLA compliance is evaluated at VM-5:
+- **Slice 1 (eMBB) SLA Contract:** Evaluated relative to offered workload: user goodput $T_{\text{eMBB}} \ge 20.0\text{ Mbps}$ under saturation stress ($\ge 25\text{ Mbps}$ offered load), or $\ge 85\%$ of offered demand when operating below capacity.
+- **Slice 2 (URLLC) SLA Contract:** End-to-End Round-Trip Time $RTT \le 20.0\text{ ms}$ (measured to EXT-DN `192.168.70.145`) and packet loss $\le 1.0\%$.
+
+> [!NOTE]
+> **Scope & Standards Demarcation:**  
+> 3GPP TS 23.501 Table 5.7.4-1 defines standard Packet Delay Budget (PDB) between UE and N6-terminating UPF (e.g., 5 ms for URLLC QCI). In this testbed, the evaluated metric is **End-to-End ICMP RTT** measured between VM-5 namespace `ue2` and EXT-DN `192.168.70.145`. The $20.0\text{ ms}$ threshold is a calibrated end-to-end research SLA accounting for virtualization overhead, Linux network stack transit, and virtual RFsim socket loopbacks.
 
 If the observed metric breaches either bound within window $k$, window $k$ is logged as an SLA violation for computing the SLA Violation Rate ($V_s$):
 $$V_s = \frac{\sum_{k=1}^K \mathbb{I}(\text{SLA Violated}_k)}{K} \times 100\%$$

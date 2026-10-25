@@ -97,6 +97,10 @@ The diagram below illustrates the complete **proposed multi-timescale closed-loo
    * **`RAN_BOTTLENECK`:** Radio resource exhaustion (high PRB utilization, collapsed SNR/MCS, or elevated BLER), while Core queues remain empty.
    * **`CORE_BOTTLENECK`:** Transport queue accumulation (`upf_queue_backlog_bytes > 0`), surging packet drops, or elevated GTP delay, while radio PRBs remain available.
    * **`JOINT_BOTTLENECK`:** Simultaneous radio exhaustion and core transport queuing.
+
+   > [!NOTE]
+   > **Observability Demarcation (Standard AnLF vs. Host OAM):**  
+   > Direct host queue backlog (`upf_queue_backlog_bytes`) and packet drop sensors are provided by the host Linux kernel adapter (`core_adapter.py` / Model C Multi-Domain OAM Reference), whereas standard 3GPP Rel-17 NWDAF AnLF provides periodic cumulative volume metrics (`nwdaf_comm_ul_bytes`, `nwdaf_comm_dl_bytes` / Model B). The comparative ablation protocol explicitly evaluates diagnostic accuracy under both standard 3GPP AnLF visibility and kernel-augmented OAM visibility.
 3. **Plan (Action Selection):**  
    * If `RAN_BOTTLENECK`: Dispatch A1 Policy Type 20008 to steer eligible traffic to the alternate cell (Cell-1 $\to$ Cell-2).
    * If `CORE_BOTTLENECK`: Restrict Core user-plane offered load or apply egress traffic shaping via UPF rate conditioning.

@@ -177,6 +177,7 @@ ls -d /usr/include/simde
 
 ---
 
+<a id="case-27"></a>
 ## Case 27 — GCC 11 Internal Compiler Error (Segmentation fault) on FlexRIC `kpm_sm` `_Generic` Macro
 
 ### Symptom

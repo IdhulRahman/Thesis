@@ -139,7 +139,7 @@ To guarantee scientific rigor, all telemetry recorded during experiments is stri
   * `nwdaf_comm_dl_bytes` (Cumulative downlink user-plane volume)
   * `nwdaf_comm_duration_sec` (Cumulative URR report window duration)
   * `nwdaf_comm_vol_std_bytes` (Volume standard deviation across session records)
-  * *Note on Rate Derivatives:* Throughput rate estimation from gauge volume metrics (`rate()`) is deferred pending verification of volume report interval semantics and source timestamps.
+  * *Note on Volume Rate Derivatives:* Upstream NWDAF cumulative volume counters (`nwdaf_comm_ul_bytes`, `nwdaf_comm_dl_bytes`) update in step functions every $\approx 30\text{ s}$ governed by periodic UPF URR reports. Direct 1 Hz differentiation ($\Delta V / \Delta t$) produces intermittent zero-delta plateaus with 30-second burst spikes. If rate derivatives are computed for inference, they require causal windowed aggregation ($\frac{V_t - V_{t-W}}{W}$ where $W \ge 30\text{ s}$) with explicit reset/epoch boundaries; raw 1 Hz instantaneous differentiation does not represent physical instantaneous line-rate throughput.
 
 ### Tier 2: Ground-Truth Validation & Reference Data (Excluded from Model Input)
 * **Core Kernel Validation:**
@@ -155,8 +155,8 @@ To guarantee scientific rigor, all telemetry recorded during experiments is stri
 * `timestamp_utc`, `elapsed_sec`, `run_id`
 * `event_phase_id`, `event_scenario`, `event_domain`, `event_component` (Operator-assigned labels from `record_experiment.py`)
 * `nwdaf_api_status` (HTTP connectivity status to Kong Gateway :8080)
-* `nwdaf_comm_freshness` (NWDAF value-change heuristic indicator: 1 if reported user-plane volume tuple updated within 45s, else 0; operates independently of `nwdaf_api_status`)
-* `e2e_probe_freshness` (Canary reply arrival freshness indicator: 1 if active ICMP echo reply received from UE-2 within 3.5s, else 0; valid measurement indicator even when measured RTT values remain numerically stable)
+* `nwdaf_comm_freshness` (NWDAF value-change heuristic indicator: 1 if reported user-plane volume tuple updated within 45s, else 0. Operates as a reporting-cadence heuristic, NOT a raw data validity mask; unchanged values occur legitimately during stable zero-traffic periods and must not trigger automatic row deletion)
+* `e2e_probe_freshness` (Canary reply arrival indicator: 1 if active ICMP echo reply received from UE-2 within 3.5s, else 0; drops to 0 during link collapse, severe buffer drops, or radio link failure)
 
 ---
 
@@ -192,10 +192,10 @@ The current testbed implementation establishes the following slice boundaries:
 
 ## 7. Comparative Ablation Study Protocol
 
-To evaluate the true contribution of NWDAF AnLF analytics, the research protocol enforces identical conditions across two primary experimental models:
+To evaluate the true contribution of NWDAF AnLF analytics, the research protocol enforces identical conditions across three defined experimental models:
 
 | Study Configuration | Input Feature Vector | Evaluation Objective |
 |---|---|---|
-| **Model A: RAN-Only Baseline** | $\mathbf{x}_{\text{RAN}} = [\text{PRB}_1, \text{PRB}_2, \text{MCS}_1, \text{MCS}_2, \text{BLER}_1, \text{BLER}_2, \text{SNR}_1, \text{SNR}_2]$ | Establish diagnostic accuracy baseline without Core visibility. |
-| **Model B: RAN + NWDAF AnLF** | $\mathbf{x}_{\text{FUSED}} = [\mathbf{x}_{\text{RAN}}, V_{UL}, V_{DL}, \Delta t, \sigma_{UL}, \Delta V_{UL}/\Delta t]$ | Measure the quantifiable diagnostic gain (F1-score, localization latency) provided by standard 3GPP AnLF analytics. |
-| **Model C: RAN + Kernel Telemetry (Optional Reference)** | $\mathbf{x}_{\text{KERNEL}} = [\mathbf{x}_{\text{RAN}}, \text{Backlog}_{\text{UPF}}, \text{Drops}_{\text{UPF}}]$ | Serve as an upper-bound observability reference using host kernel sensors (reported separately, never conflated with 3GPP AnLF). |
+| **Model A: RAN-Only Baseline** | $\mathbf{x}_{\text{RAN}} = [\text{PRB}_1, \text{PRB}_2, \text{MCS}_1, \text{MCS}_2, \text{BLER}_1, \text{BLER}_2, \text{SNR}_1, \text{SNR}_2]$ | Establish diagnostic accuracy baseline without Core visibility (O-RAN Near-RT RIC radio visibility only). |
+| **Model B: RAN + Standard NWDAF AnLF** | $\mathbf{x}_{\text{NWDAF}} = [\mathbf{x}_{\text{RAN}}, V_{UL}, V_{DL}, \Delta t_{\text{accum}}, \sigma_{UL}]$ *(with optional causal windowed derivative $\frac{V_t - V_{t-W}}{W}, W \ge 30\text{s}$ evaluated separately)* | Measure the quantifiable diagnostic gain (F1-score, localization latency) provided strictly by standardized 3GPP Rel-17 NWDAF AnLF analytics. |
+| **Model C: Multi-Domain OAM Reference** | $\mathbf{x}_{\text{OAM}} = [\mathbf{x}_{\text{NWDAF}}, \text{Backlog}_{\text{UPF}}, \text{Drops}_{\text{UPF}}, \text{TxMbps}_{\text{UPF}}, \text{RxMbps}_{\text{UPF}}]$ | Serve as an upper-bound diagnostic reference utilizing host Linux kernel sensors via `core_adapter.py` (strictly reported as an OAM diagnostic baseline, separated from standard 3GPP AnLF claims). |

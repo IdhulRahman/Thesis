@@ -38,7 +38,7 @@ The core contribution of this thesis is the **cross-domain closed-loop coordinat
    - **Core Myopia:** When the Core user plane (UPF / transport) is congested, allocating additional PRBs in the RAN or triggering blind radio handovers is futile and can exacerbate ping-pong instability.
    - **Uncoordinated Decoupled Controllers:** When both domains experience simultaneous congestion, independent uncoordinated controllers make conflicting decisions that destabilize slice SLAs.
 2. **Closed-Loop MAPE-K Lifecycle:**
-   - **Monitor:** Ingests synchronized 37-column telemetry from the RAN (MAC scheduler logs), 5G Core (UPF kernel `tc qdisc` & 3GPP NWDAF `UE_COMMUNICATION`), and UE canaries.
+   - **Monitor:** Ingests synchronized 40-column telemetry from the RAN (MAC scheduler logs), 5G Core (UPF kernel `tc qdisc` & 3GPP NWDAF `UE_COMMUNICATION`), and UE canaries.
    - **Analyze (Bottleneck Diagnosis):** The rApp runs an explainable classification engine to categorize system state into: `NORMAL`, `RAN_BOTTLENECK`, `CORE_BOTTLENECK`, or `JOINT_BOTTLENECK`.
    - **Plan (Action Selection):** Dispatches targeted A1 policy constraints (Policy Type `20008`) to the Near-RT RIC xApp and/or user-plane rate-limiting constraints to the Core adapter.
    - **Execute (Actuation):** The xApp executes inter-cell traffic steering (Cell-1 $\leftrightarrow$ Cell-2) via E2SM-RC, while the Core adapter enforces user-plane conditioning.
@@ -52,7 +52,7 @@ All capabilities are classified under strict empirical evidence standards: **`Va
 
 | System Capability | Implementation Scope | Status | Validation Evidence |
 |---|---|:---:|---|
-| **5GC Multi-Slice Control Plane** | AMF N2 (:38412), SMF-1/2 N4 PFCP | **`Validated`** | Tested with dynamic NRF registration ([Case #51](docs/troubleshooting/5g-core.md#51-oai-amf-automated-nrf-registration-failure-missing-nfinstanceid-in-dynamic-resource-uri)) |
+| **5GC Multi-Slice Control Plane** | AMF N2 (:38412), SMF-1/2 N4 PFCP | **`Validated`** | Tested with dynamic NRF registration ([Case #51](docs/troubleshooting/5g-core.md#case-51)) |
 | **5GC Native User-Plane URR** | UPF simpleswitch URR $\to$ SMF $\to$ NWDAF | **`Validated`** | Verified periodic N4 Session Reports (msg 56) & live `qosmonlist` ([Doc](docs/integration/nwdaf-integration.md)) |
 | **3GPP NWDAF NBI Analytics** | `UE_COMMUNICATION` over Kong :8080 | **`Validated`** | HTTP 200 with dynamic volume/duration ([Doc](docs/integration/nwdaf-integration.md)) |
 | **NWDAF Slice Load Level** | Upstream code `relativeRatio` //TODO | **`Unsupported`** | Mapped to `NaN` in dataset to avoid false data ([Doc](docs/integration/nwdaf-integration.md)) |
@@ -78,7 +78,7 @@ The repository documentation is modularized into discrete functional categories:
 | **[docs/](docs/README.md)** | Master documentation sitemap, reading order, and architecture guides. |
 | **[docs/deployment/](docs/deployment/README.md)** | Step-by-step installation, bring-up, and operational guides for all 6 VMs. |
 | **[docs/integration/](docs/integration/README.md)** | Cross-VM protocol contracts: A1 interface, E2 interface, and native 3GPP NWDAF pipeline. |
-| **[docs/telemetry/](docs/telemetry/metric-catalog.md)** | Single authoritative metric dictionary for the 37-column dataset and Prometheus metrics. |
+| **[docs/telemetry/](docs/telemetry/metric-catalog.md)** | Single authoritative metric dictionary for the 40-column dataset and Prometheus metrics. |
 | **[docs/experiments/](docs/experiments/methodology.md)** | Comparative baseline methodology (B0–B4 vs Proposed) and scenario registry (S1–S10). |
 | **[docs/references/](docs/references/standards.md)** | Standards claim mapping table (3GPP/ETSI/O-RAN) and bottleneck taxonomy. |
 | **[docs/troubleshooting/](docs/troubleshooting/README.md)** | Domain-separated troubleshooting guides with complete historical case mapping. |
