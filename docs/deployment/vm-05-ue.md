@@ -460,16 +460,16 @@ To prevent syntax errors, Telnet IAC escaping issues, or unverified channel chan
 
 ```bash
 # 1. Query active channel parameters on DU-1 (port 9090)
-python3 /opt/oran/ran/scripts/rfsim_channel_control.py show-current --port 9090
+python3 /opt/oran/ran/scripts/rfsim_channel_control.py show --port 9090
 
 # 2. Inject 10.0 dB attenuation on Uplink (Channel 1)
 # (Reduces path_loss_dB from baseline 20.0 dB down to 10.0 dB)
 python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 10.0 --channel-id 1 --port 9090
 
-# 3. Observe real-time telemetry degradation in ran_adapter / record_experiment.py:
-# - ran_snr_cell1 drops by ~10 dB
-# - ran_mcs_cell1 downshifts
-# - ran_bler_cell1 experiences retransmission bursts
+# 3. Monitor observed telemetry response in ran_adapter / record_experiment.py:
+# Typical observed response under channel attenuation: downward pressure on ran_snr_cell1,
+# downward link adaptation on ran_mcs_cell1, and potential HARQ retransmission bursts
+# reflected in ran_bler_cell1 (magnitude depends on baseline calibration and link state)
 
 # 4. Restore baseline channel conditions after experiment run
 python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090

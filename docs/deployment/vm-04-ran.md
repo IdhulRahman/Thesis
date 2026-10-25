@@ -456,23 +456,30 @@ gNBs =
 rfsimulator :
 {
     serverport = 4043;                    # [CUSTOMIZABLE] VM-5 nrUE connects here
-    options = ("channelmod");             # [MANDATORY FOR IMPAIRMENT] Enables telnet channel modeling
+    options = ("chanmod");                # [MANDATORY FOR IMPAIRMENT] Enables telnet channel modeling
     modelname = "AWGN";
 };
 
 # Channel modeling descriptors for RFsimulator Telnet control (Model 0: DL, Model 1: UL)
+channelmod = {
+    max_chan = 10;
+    modellist = "modellist_rfsimu_1";
+};
+
 modellist_rfsimu_1 = (
     {
         model_name     = "rfsimu_channel_enB0";
         type           = "AWGN";
         ploss_dB       = 20.0;
-        noise_power_dB = -100.0;
+        noise_power_dB = -2.0;
+        forgetting_factor = 0.0;
     },
     {
         model_name     = "rfsimu_channel_ue0";
         type           = "AWGN";
         ploss_dB       = 20.0;
-        noise_power_dB = -100.0;
+        noise_power_dB = -2.0;
+        forgetting_factor = 0.0;
     }
 );
 ```
@@ -538,15 +545,16 @@ To generate exact configuration files directly from the OAI template (commit `29
 
 ```bash
 python3 - << 'EOF'
+import re
+
 with open("/opt/oran/ran/openairinterface5g/ci-scripts/conf_files/gnb-du.sa.band78.106prb.rfsim.conf") as f:
     tpl = f.read()
 
 channelmod_block = '''
-rfsimulator :
-{
-    serverport = 4043;
-    options = ("channelmod");
-    modelname = "AWGN";
+# Channel modeling descriptors for RFsimulator Telnet control (Model 0: DL, Model 1: UL)
+channelmod = {
+    max_chan = 10;
+    modellist = "modellist_rfsimu_1";
 };
 
 modellist_rfsimu_1 = (
@@ -554,13 +562,15 @@ modellist_rfsimu_1 = (
         model_name     = "rfsimu_channel_enB0";
         type           = "AWGN";
         ploss_dB       = 20.0;
-        noise_power_dB = -100.0;
+        noise_power_dB = -2.0;
+        forgetting_factor = 0.0;
     },
     {
         model_name     = "rfsimu_channel_ue0";
         type           = "AWGN";
         ploss_dB       = 20.0;
-        noise_power_dB = -100.0;
+        noise_power_dB = -2.0;
+        forgetting_factor = 0.0;
     }
 );
 '''
@@ -576,12 +586,10 @@ du1 = du1.replace('local_n_address = "192.168.71.171";', 'local_n_address = "127
 du1 = du1.replace('remote_n_address = "192.168.71.150";', 'remote_n_address = "127.0.0.3";')
 du1 = du1.replace('local_n_portd   = 2153;', 'local_n_portd   = 2153;')
 du1 = du1.replace('remote_n_portd  = 2153;', 'remote_n_portd  = 2153;')
-# Replace default rfsimulator block with channelmod block
-if 'rfsimulator :' in du1:
-    idx = du1.find('rfsimulator :')
-    du1 = du1[:idx] + channelmod_block
-else:
-    du1 = du1 + channelmod_block
+
+# Enable chanmod in existing rfsimulator configuration element
+du1 = re.sub(r'options\s*=\s*\(\s*\);', 'options = ("chanmod");', du1)
+du1 = du1 + channelmod_block
 
 with open("/opt/oran/ran/conf/du_gnb1.conf", "w") as f:
     f.write(du1)
@@ -602,7 +610,7 @@ du2 = du2.replace('serverport = 4043;', 'serverport = 4044;')
 
 with open("/opt/oran/ran/conf/du_gnb2.conf", "w") as f:
     f.write(du2)
-print("Configuration files du_gnb1.conf and du_gnb2.conf generated successfully with unified F1 aliases and channelmod.")
+print("Configuration files du_gnb1.conf and du_gnb2.conf generated successfully with unified F1 aliases and chanmod.")
 EOF
 ```
 
@@ -806,11 +814,11 @@ sudo ./nr-softmodem -O /opt/oran/ran/conf/du_gnb2.conf --rfsim 2>&1 | tee /opt/o
 VM-4 hosts the dual-cell radio environment (DU-1 on PCI 1 and DU-2 on PCI 2) used to simulate radio congestion and evaluate inter-cell traffic steering.
 
 ### 12.1 Radio Workload Injection Procedure
-In the testbed's canonical evaluation flow, traffic load is dispatched from the UE emulator on VM-5 across the Uplink user plane toward the External Data Network (EXT-DN `192.168.70.135` via `12.1.1.1`). To simulate radio offered load on Cell-1:
+In the testbed's canonical evaluation flow, traffic load is dispatched from the UE emulator on VM-5 across the Uplink user plane toward the External Data Network (EXT-DN `192.168.70.145` via `12.1.1.1`). To simulate radio offered load on Cell-1:
 
 ```bash
 # Execute from VM-5 inside namespace ue1 (Uplink toward EXT-DN server):
-sudo ip netns exec ue1 iperf3 -u -c 192.168.70.135 -b 25M -t 60
+sudo ip netns exec ue1 iperf3 -u -c 192.168.70.145 -b 25M -t 60
 
 # Or execute via the standardized multi-slice workload launcher:
 sudo /opt/oran/ue/scripts/trafgen.sh start 60 25
@@ -818,7 +826,7 @@ sudo /opt/oran/ue/scripts/trafgen.sh start 60 25
 
 > [!NOTE]
 > **Workload Direction Demarcation:**
-> * Dispatching `iperf3 -c 192.168.70.135` from the UE executes the canonical **Uplink (UE $\to$ EXT-DN)** transmission path through gNB DU-1 PUSCH scheduling and UPF-1 GTP-U encapsulation.
+> * Dispatching `iperf3 -c 192.168.70.145` from the UE executes the canonical **Uplink (UE $\to$ EXT-DN)** transmission path through gNB DU-1 PUSCH scheduling and UPF-1 GTP-U encapsulation.
 > * Running `iperf3 -c 12.1.1.2` from external nodes tests Downlink (toward-UE) transmission, which requires an active `iperf3 -s` server running inside namespace `ue1` and evaluates Downlink PDSCH scheduling rather than the primary PUSCH grant telemetry recorded by `ran_adapter.py`.
 
 *Telemetry Verification:* On VM-6 Prometheus `:9100/metrics` or `record_experiment.py`, observe:
