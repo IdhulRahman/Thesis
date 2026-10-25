@@ -262,7 +262,7 @@ In earlier pilot revisions, when gNB MAC logs lacked explicit scheduling records
 * When radio transport blocks are unallocated, log fields are absent, or gNB logs lack active scheduling records for $\ge 3.5\text{ s}$, radio metrics decay strictly to **`NaN`**.
 * When the UPF container stops or probes time out ($\ge 3.5\text{ s}$), core queue backlogs, drop rates, and interface load proxies decay strictly to **`NaN`**.
 * When the NWDAF slice load endpoint is unsupported upstream, the metric emits strict **`NaN`**.
-* This strict absence policy guarantees zero synthetic imputation bias during machine learning training.
+* This strict absence policy avoids introducing synthetic imputation bias into datasets prior to machine learning training.
 
 ### 4.2 Disturbance Registry & Hypothesized Nominal Signatures
 

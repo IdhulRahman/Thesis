@@ -23,7 +23,7 @@ This document provides the complete architecture, telemetry inventory, and deplo
 
 ## 2. End-to-End Telemetry & Data Inventory
 
-To prove the thesis hypotheses and evaluate multi-timescale closed-loop coordination, VM-6 ingests telemetric data across all five layers of the 5G O-RAN testbed:
+To support empirical evaluation of cross-domain coordination and record synchronized datasets for baseline comparison, VM-6 ingests telemetric data across the functional layers of the 5G O-RAN testbed:
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────────────────────┐

@@ -9,7 +9,7 @@
 
 ### 1.1 The Core Scientific Question
 > **Research Question (RQ):**  
-> *Does a higher forecasting accuracy (lower per-feature MAE/RMSE) in Non-RT RIC rApp necessarily translate into superior cross-domain bottleneck localization, fewer wrong-domain actuations, and faster SLA recovery in multi-slice 5G networks, or does a lightweight model offer a superior trade-off between inference latency and closed-loop control stability?*
+> *Does a higher forecasting accuracy (lower per-feature MAE/RMSE) in Non-RT RIC rApp necessarily translate into improved cross-domain bottleneck localization, fewer wrong-domain actuations, and faster SLA recovery in multi-slice 5G networks, or does a lightweight model offer a more favorable trade-off between inference latency and closed-loop control stability?*
 
 ### 1.2 Novelty Positioning vs. State of the Art (SOTA) & Standards
 While existing literature and ETSI standards (e.g., ETSI TR 104 037 on Non-RT RIC analytics exchange with 5G Core/NWDAF) discuss architectural interfaces between RIC and Core, they leave open the critical operational trade-off: **how predictive model fidelity directly governs cross-domain closed-loop actuation accuracy and stability**.
@@ -92,7 +92,7 @@ The evaluation is structured into four sequential, hypothesis-driven comparative
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                    STAGE D: CROSS-DOMAIN INFORMATION ABLATION                │
 │   Configurations: RAN-only vs. Core-only vs. Joint RAN+Core (selected model) │
-│   Purpose: Empirically prove the value of cross-domain RIC-NWDAF telemetry   │
+│   Purpose: Empirically evaluate the contribution of cross-domain RIC-NWDAF telemetry │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 

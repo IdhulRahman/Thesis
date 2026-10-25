@@ -29,20 +29,20 @@ For the software versions, Git commits, and container image tags, see [docs/soft
 
 ---
 
-## 2. Research Framework & Closed-Loop Coordination
+## 2. Research Framework & Multi-Domain Coordination Objectives
 
-The core contribution of this thesis is the **cross-domain closed-loop coordination mechanism** that resolves the fundamental blind spot between RAN and Core domains:
+The primary research objective of this thesis is to design and evaluate a **cross-domain closed-loop coordination mechanism** to address domain observability silos between O-RAN and 5G Core user-plane domains:
 
-1. **The Problem of Domain Myopia:**
-   - **RAN Myopia:** When radio resources are constrained, modifying Core user-plane paths is ineffective.
-   - **Core Myopia:** When the Core user plane (UPF / transport) is congested, allocating additional PRBs in the RAN or triggering blind radio handovers is futile and can exacerbate ping-pong instability.
-   - **Uncoordinated Decoupled Controllers:** When both domains experience simultaneous congestion, independent uncoordinated controllers make conflicting decisions that destabilize slice SLAs.
-2. **Closed-Loop MAPE-K Lifecycle:**
-   - **Monitor:** Ingests synchronized 40-column telemetry from the RAN (MAC scheduler logs), 5G Core (UPF kernel `tc qdisc` & 3GPP NWDAF `UE_COMMUNICATION`), and UE canaries.
-   - **Analyze (Bottleneck Diagnosis):** The rApp runs an explainable classification engine to categorize system state into: `NORMAL`, `RAN_BOTTLENECK`, `CORE_BOTTLENECK`, or `JOINT_BOTTLENECK`.
-   - **Plan (Action Selection):** Dispatches targeted A1 policy constraints (Policy Type `20008`) to the Near-RT RIC xApp and/or user-plane rate-limiting constraints to the Core adapter.
-   - **Execute (Actuation):** The xApp executes inter-cell traffic steering (Cell-1 $\leftrightarrow$ Cell-2) via E2SM-RC, while the Core adapter enforces user-plane conditioning.
-   - **Verify (Closed-Loop Recovery):** Compares pre- and post-actuation SLA compliance ($V_s$, latency p95/p99) to confirm service recovery and prevent action churn.
+1. **Domain Observability Silos (Design Motivation):**
+   - **RAN Myopia:** When radio resources are constrained, modifying Core user-plane paths does not address radio resource exhaustion.
+   - **Core Myopia:** When the Core user plane (UPF / transport) is congested, allocating additional PRBs in the RAN or triggering blind radio handovers does not resolve transport queue accumulation and may induce unnecessary handover churn.
+   - **Uncoordinated Decoupled Controllers:** When both domains experience simultaneous congestion, independent uncoordinated controllers risk issuing conflicting decisions that destabilize slice SLAs.
+2. **Target Multi-Timescale MAPE-K Lifecycle:**
+   - **Monitor (`Validated`):** Ingests synchronized 40-column telemetry from the RAN (`ran_adapter.py`), 5G Core (UPF kernel queue counters via `core_adapter.py` and 3GPP NWDAF `UE_COMMUNICATION`), and UE canaries at a target cadence of 1.000 Hz.
+   - **Analyze (`Planned Phase B`):** The Non-RT RIC rApp classifier architecture is designed to categorize system state into: `NORMAL`, `RAN_BOTTLENECK`, `CORE_BOTTLENECK`, or `JOINT_BOTTLENECK` based on predictive or reactive state representations.
+   - **Plan (`Planned Phase B`):** The coordinator is designed to formulate targeted A1 policy constraints (Policy Type `20008`) for the Near-RT RIC xApp and/or user-plane rate constraints for Core rate conditioning.
+   - **Execute (`Planned Phase B`):** In the planned closed-loop actuation stage, the xApp is designed to trigger inter-cell traffic steering (Cell-1 $\leftrightarrow$ Cell-2) via E2SM-RC, while a dedicated core actuation script enforces transport shaping. *(Note: `core_adapter.py` remains strictly a read-only telemetry sensor).*
+   - **Verify (`Planned Phase B`):** Evaluates post-intervention SLA compliance ($V_s$, recovery time $T_{\text{rec}}$, and stability window $W_{\text{stab}}$) to confirm service restoration and quantify control stability.
 
 ---
 

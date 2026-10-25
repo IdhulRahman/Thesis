@@ -5,20 +5,20 @@
 
 ---
 
-## 1. Scientific Framework & Core Hypotheses
+## 1. Scientific Framework & Research Hypotheses
 
-The central scientific premise of this thesis is that **diagnosing the exact architectural domain of a network bottleneck (RAN vs. Core User Plane vs. Joint) prior to triggering control actions significantly reduces SLA violations ($V_s$), minimizes recovery time ($T_{\text{rec}}$), and eliminates action churn ($C_{\text{act}}$)** compared to single-domain or uncoordinated control paradigms.
+The central scientific question investigated in this research is whether **diagnosing the architectural domain of a network bottleneck (RAN vs. Core User Plane vs. Joint) prior to triggering control actions can reduce SLA violations ($V_s$), shorten recovery time ($T_{\text{rec}}$), and mitigate action churn ($C_{\text{act}}$)** compared to single-domain or decoupled control paradigms.
 
-### 1.1 Core Hypotheses
-1. **$H_1$ (Superiority over Static Default):** Closed-loop dynamic steering achieves significantly lower SLA violation rates compared to standard static 3GPP slicing (B0) during both radio degradation and core transport queuing.
-2. **$H_2$ (Mitigation of Domain Myopia):** A bottleneck-aware coordinator achieves a lower wrong-domain actuation rate ($W_{\text{act}} \to 0$) and avoids ping-pong handover instability compared to RAN-only (B1) or Core-only (B2) controllers.
-3. **$H_3$ (Coordination Stability):** Hierarchical multi-timescale coordination (slow loop ~30s on rApp, fast loop on xApp) eliminates actuation thrashing observed in decoupled independent controllers (B3).
+### 1.1 Research Hypotheses & Evaluation Questions
+1. **$H_1$ (Dynamic Steering vs. Static Baseline):** Closed-loop dynamic steering is hypothesized to achieve lower SLA violation rates than static default slicing (B0) during radio degradation and core transport queuing.
+2. **$H_2$ (Domain-Aware Action Selection):** Cross-domain coordination is hypothesized to achieve a lower wrong-domain actuation ratio ($W_{\text{act}}$) and reduce handover oscillation compared to single-domain RAN-only (B1) or Core-only (B2) controllers.
+3. **$H_3$ (Multi-Timescale Coordination Stability):** Hierarchical coordination between a Non-RT RIC rApp (slow loop) and Near-RT RIC xApp (fast loop) is hypothesized to reduce conflicting control actions and action churn compared to uncoordinated, decoupled controllers (B3).
 
 ---
 
 ## 2. Comparative Baseline Matrix (B0 through B4 vs. Proposed)
 
-To validate the hypotheses, the experimental testbed executes **five comparative baselines (B0 to B4)** alongside the **Proposed System**:
+To evaluate these hypotheses, the experimental testbed defines **five comparative baselines (B0 to B4)** alongside the **Proposed System**:
 
 | Paradigm Tier | Baseline ID | Control Approach | Domain Awareness | Coordination Model |
 |---|---|---|---|---|
@@ -35,7 +35,7 @@ To validate the hypotheses, the experimental testbed executes **five comparative
 | **B2** | **Core-Only Control** | Core telemetry (UPF queue, packet drops) | Linux `tc qdisc` rate shaping | **Radio-Blind:** Cannot leverage alternative radio cells when radio channel collapses. |
 | **B3** | **Decoupled Controllers** | Both domains monitored independently | Independent xApp & Core adapters | **Conflicting Actions:** Both controllers act simultaneously without cross-domain coordination, destabilizing SLAs. |
 | **B4** | **Coordinated (Fixed Heuristic)**| Aggregated cross-domain telemetry | Fixed action sequence (e.g., Handover $\to$ Shape) | **Suboptimal Recovery:** Executes wrong action first when bottleneck cause does not match fixed priority. |
-| **PROPOSED** | **Bottleneck-Aware Closed-Loop** | Correlated RAN + Core Telemetry | Matched Action (RAN / Core / Joint) + SLA Verify | **Optimal Recovery:** Acts strictly on diagnosed root-cause domain; suppresses churn via closed-loop verification. |
+| **PROPOSED** | **Bottleneck-Aware Closed-Loop** | Correlated RAN + Core Telemetry | Matched Action (RAN / Core / Joint) + SLA Verify | **Targeted Domain Matching & Stability Verification:** Selects actions matched to the diagnosed bottleneck domain (inter-cell radio steering for RAN, egress shaping for Core, or staged mitigation for Joint) and verifies SLA restoration over stability window $W_{\text{stab}}$ before admitting new actions. |
 
 ---
 
