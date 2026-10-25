@@ -11,7 +11,7 @@ The platform is deployed entirely on virtual machines connected over a dedicated
 
 ## 1. System Architecture Overview
 
-The experimental testbed implements a fully disaggregated, standards-compliant O-RAN and 3GPP Release 16/17 network divided across 6 dedicated virtual machines:
+The experimental testbed implements a disaggregated O-RAN and 3GPP Release 16/17 software architecture across 6 dedicated virtual machines, aligning with normative standard interfaces where supported by open-source implementations and explicitly documenting implementation-defined bounds:
 
 ![Current System Architecture](docs/diagrams/current-system-architecture.png)
 
@@ -62,7 +62,7 @@ All capabilities are classified under strict empirical evidence standards: **`Va
 | **O-RAN E2 Setup Handshake** | CU FlexRIC Agent $\to$ VM-2 E2Term | **`Validated`** | Node `gnb_208_095_00000e00` connected over SCTP :36421 ([Doc](docs/integration/e2-integration.md)) |
 | **O-RAN A1 Policy Interface** | VM-1 A1 PMS $\to$ VM-2 A1 Mediator $\to$ xApp | **`Validated`** | Policy Type 20008 PUT/GET passed, status `ENFORCED` ([Doc](docs/integration/a1-integration.md)) |
 | **Multi-UE Namespaces & Traffic** | `ue1` (eMBB), `ue2` (URLLC), Canary Ping | **`Validated`** | 0% ping loss to EXT-DN, 1 Hz telemetry push ([Doc](docs/deployment/vm-05-ue.md)) |
-| **40-Column Monotonic Recorder** | Single-scenario 1.000 Hz CSV dataset recorder | **`Validated`** | `record_experiment.py` verified with zero drift ([Doc](docs/telemetry/metric-catalog.md)) |
+| **40-Column Monotonic Recorder** | Single-scenario 1.000 Hz CSV dataset recorder | **`Validated`** | `record_experiment.py` verified with local monotonic elapsed logging at 1.000 Hz target cadence ([Doc](docs/telemetry/metric-catalog.md)) |
 | **Closed-Loop Steering Actuation** | E2SM-RC Handover & Core Shaping Loop | **`Planned`** | Research Phase B active implementation ([Doc](docs/architecture.md)) |
 
 For the complete capability matrix, test procedures, and dates, see the [Implementation Status Matrix](docs/implementation-status.md).

@@ -6,6 +6,12 @@
 * **Thesis Title:** *Bottleneck-Aware Closed-Loop Traffic Steering via O-RAN RIC–NWDAF Coordination in Multi-Slice 5G Networks*
 * **Primary Scope:** Telemetry validation, ground-truth dataset integrity, and domain diagnosis (`NORMAL`, `RAN`, `CORE`, `JOINT`). Offline ML/DL training with rApp closed-loop inference.
 
+> [!NOTE]
+> **Archival Notice & Standards Erratum:**  
+> This document is an immutable historical snapshot reflecting the testbed state as of 2026-10-15 (commit `9ce3aee`).  
+> * **Script Lineage:** Historical standalone scripts referenced below (`scripts/record_dual_stream.py`, `scripts/log_event.py`) have been consolidated into [`scripts/record_experiment.py`](../../scripts/record_experiment.py) in the active repository. For historical script contents, refer to commit [`9ce3aee`](https://github.com/IdhulRahman/Thesis/tree/9ce3aee).
+> * **Standards Alignment:** Certain normative standards claims and parameter classifications recorded during preliminary testing (e.g., classifying SST 222 as standard-defined or equating PRB 100% to mandatory congestion) have been formally reconciled in the active [Normative Standards Mapping](../references/standards.md) and [Metric Catalog](../telemetry/metric-catalog.md).
+
 ---
 
 ## 1. Active VM Inventory & Component Verification
@@ -318,9 +324,9 @@ Empirical analysis of the live run (`telemetry_raw_DATASET_EXP_FINAL_297233.csv`
 1. [`scripts/core_adapter.py`](../../scripts/core_adapter.py) — v9 Python adapter running on VM-3.
 2. [`scripts/ran_adapter.py`](../../scripts/ran_adapter.py) — v1 Python adapter running on VM-4.
 3. [`scripts/telemetry_collector.py`](../../scripts/telemetry_collector.py) — v2 Python HTTP ingestion & Prometheus exporter on VM-6.
-4. [`scripts/record_dual_stream.py`](../../scripts/record_dual_stream.py) — v1 Monotonic 1 Hz logger on VM-6.
+4. `scripts/record_dual_stream.py` ([commit 9ce3aee](https://github.com/IdhulRahman/Thesis/blob/9ce3aee/scripts/record_dual_stream.py); superseded by [`scripts/record_experiment.py`](../../scripts/record_experiment.py)) — v1 Monotonic 1 Hz logger on VM-6.
 5. [`scripts/trafgen.sh`](../../scripts/trafgen.sh) — Multi-slice traffic generator on VM-5.
-6. [`scripts/log_event.py`](../../scripts/log_event.py) — Atomic ground-truth scenario annotator on VM-6.
+6. `scripts/log_event.py` ([commit 9ce3aee](https://github.com/IdhulRahman/Thesis/blob/9ce3aee/scripts/log_event.py); integrated into [`scripts/record_experiment.py`](../../scripts/record_experiment.py)) — Atomic ground-truth scenario annotator on VM-6.
 7. [`scripts/analyze_dataset.py`](../../scripts/analyze_dataset.py) — Post-run dataset statistical auditor on VM-6.
 
 ### 8.2 Empirical Data Excerpts from Run `297233`
@@ -358,6 +364,6 @@ Empirical analysis of the live run (`telemetry_raw_DATASET_EXP_FINAL_297233.csv`
 4. **NWDAF Upstream Semantic Gaps & Multi-Slice Isolation:** `commDur` double-counts elapsed time across periodic reports, `ulVolVariance` represents standard deviation rather than variance, and `getFilterUeComm()` lacks SUPI/S-NSSAI partitioning. Furthermore, the 30s UPF reporting loop creates a step-function cadence relative to 1 Hz logging. PoC Slice-1 proves native data flow, but features must be preprocessed appropriately.
 
 ### 9.4 Immediate Next Actions
-1. **Execute Metric Hygiene Patch:** Update [`scripts/telemetry_collector.py`](../../scripts/telemetry_collector.py) and [`scripts/record_dual_stream.py`](../../scripts/record_dual_stream.py) to support `NaN` handling and separate drop counters.
+1. **Execute Metric Hygiene Patch:** Updated in [`scripts/telemetry_collector.py`](../../scripts/telemetry_collector.py) and unified in [`scripts/record_experiment.py`](../../scripts/record_experiment.py) (historical reference: `record_dual_stream.py` on commit `9ce3aee`) to support `NaN` handling and separate drop counters.
 2. **Upgrade RAN Adapter:** Enhance [`scripts/ran_adapter.py`](../../scripts/ran_adapter.py) to parse `ULSCH` PRBs specifically and explore MCS extraction from OAI telnet.
 3. **Multi-Run Dataset Collection:** Execute 5–10 independent runs with overlapping offered loads and group-level train/test partitioning.
