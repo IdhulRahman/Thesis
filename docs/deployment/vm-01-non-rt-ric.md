@@ -701,14 +701,14 @@ In the research architecture design, VM-1 is designated as the Non-RT RIC coordi
 
 > [!NOTE]
 > **Operational Testbed Status vs. Phase B Evaluation Design:**  
-> On the currently operational testbed, VM-1 operates the validated A1 Policy Management Service container (`:8081`) and interface shim. Autonomous rApp classification loops and programmatic policy dispatch are defined as **Planned Phase B research specifications**. In baseline telemetry recording runs (B0 through B3), no automated rApp closed loop operates in the background. The matrix below defines the planned operational modes and A1 policy payloads designed for subsequent Phase B comparative evaluation.
+> On the currently operational testbed, VM-1 operates the validated A1 Policy Management Service container (`:8081`) and accesses the A1 compatibility shim hosted on VM-2 (`10.102.0.66:10001`). Autonomous rApp classification loops and programmatic policy dispatch are defined as **Planned Phase B research specifications**. In current telemetry recording runs, no automated rApp closed loop operates in the background. The matrix below defines the planned operational modes and A1 policy payloads designed for subsequent Phase B comparative evaluation.
 
 | Baseline ID | Evaluation Mode | Planned rApp Operational State & Behavior | Planned A1 Policy Payload Dispatched |
 |---|---|---|---|
 | **B0** | Static Default | **Inactive.** No active policy instances created in PMS. | None (`DELETE` all policy instances via PMS `:8081`). |
 | **B1** | RAN-Only Control | **Planned Static Threshold.** Ingests only RAN metrics; NWDAF consumer inactive. | Planned static dummy threshold (`{"threshold": 80}`) without bottleneck metadata. |
-| **B2** | Core-Only Control | **Inactive.** Core adaptation is handled strictly within VM-3. | None. |
-| **B3** | Decoupled | **Inactive.** Near-RT xApp and Core adapter act without Non-RT RIC coordination. | None. |
+| **B2** | Core-Only Control | **Inactive.** Planned Core rate-shaping is evaluated locally within VM-3 without Non-RT RIC policy. | None. |
+| **B3** | Decoupled | **Inactive.** Near-RT xApp and planned Core actuator/shaper act independently without Non-RT RIC coordination (noting that `core_adapter.py` remains strictly a read-only sensor). | None. |
 | **B4** | Fixed-Sequence Coordination | **Planned Fixed Action Sequence.** Designed to ingest both NWDAF and RAN metrics but bypass classifier; planned to dispatch static handover authorization regardless of bottleneck origin. | Planned unclassified handover authorization payload. |
 | **Proposed** | Bottleneck-Aware Closed-Loop | **Planned Closed-Loop Coordination.** Designed to evaluate Rule-Based / Decision Tree classifier on synchronized telemetry, dispatch targeted A1 policy guidance, and verify SLA restoration across subsequent stability window. | Planned targeted policy: `{"bottleneck_location": "RAN"|"CORE"|"JOINT", "target_cell": 2, "handover_allowed": true/false}`. |
 
