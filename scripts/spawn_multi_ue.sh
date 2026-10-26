@@ -158,6 +158,7 @@ EOF_CONF
     --rfsim \
     --rfsimulator.serveraddr "$RAN_IP" \
     --rfsimulator.serverport "$rf_port" \
+    --ue-timing-correction-disable \
     -O "$conf_file" \
     > "$log_file" 2>&1 &
   local pid=$!
