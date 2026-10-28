@@ -452,15 +452,20 @@ gNBs =
  }
 );
 
-# [CUSTOMIZABLE] RFsimulator TCP server listening port for Cell-1 & Channel Modeling
+# [CALIBRATED BASELINE] RFsimulator TCP server listening port for Cell-1
+# Profile A: Calibrated Operational Baseline (Default - Real-Time Multi-Slice)
+# options = (); disables software channelmod overhead to maintain ~1.0x real-time radio progress at 20 Mbps.
 rfsimulator :
 {
     serverport = 4043;                    # [CUSTOMIZABLE] VM-5 nrUE connects here
-    options = ("chanmod");                # [MANDATORY FOR IMPAIRMENT] Enables telnet channel modeling
+    options = ();                         # [BASELINE] Disables chanmod CPU overhead (see Case 55)
     modelname = "AWGN";
 };
 
 # Channel modeling descriptors for RFsimulator Telnet control (Model 0: DL, Model 1: UL)
+# Note on Gain: OAI apply_channelmod.c calculates amplitude_multiplier = pow(10, ploss_dB / 20.0).
+# ploss_dB = 0.0 corresponds to unity gain (1.0x). Historical configurations with ploss_dB = 20.0 
+# applied 10x (+20 dB) amplification. Baseline unity gain is 0.0 dB.
 channelmod = {
     max_chan = 10;
     modellist = "modellist_rfsimu_1";
@@ -468,8 +473,8 @@ channelmod = {
         {
             model_name     = "rfsimu_channel_enB0";
             type           = "AWGN";
-            ploss_dB       = 20.0;
-            noise_power_dB = -2.0;
+            ploss_dB       = 0.0;          # [CALIBRATED BASELINE] 0.0 dB = 1.0x unity gain
+            noise_power_dB = -100.0;       # [CALIBRATED BASELINE] Simulator noise floor units
             forgetfact     = 0;
             offset         = 0;
             ds_tdl         = 0;
@@ -477,14 +482,20 @@ channelmod = {
         {
             model_name     = "rfsimu_channel_ue0";
             type           = "AWGN";
-            ploss_dB       = 20.0;
-            noise_power_dB = -2.0;
+            ploss_dB       = 0.0;          # [CALIBRATED BASELINE] 0.0 dB = 1.0x unity gain
+            noise_power_dB = -100.0;       # [CALIBRATED BASELINE] Simulator noise floor units
             forgetfact     = 0;
             offset         = 0;
             ds_tdl         = 0;
         }
     );
 };
+
+# --- Optional Profile B: Dynamic Impairment Profile (For Fault Injection / Telnet Control) ---
+# To activate channel modeling for dynamic impairment testing:
+#   rfsimulator.options = ("chanmod");
+#   channelmod.modellist_rfsimu_1[0].noise_power_dB = -2.0; (historical testbed level)
+# See Case 51 for model targeting (Model 0 = DL, Model 1 = UL) and Case 55 for CPU constraints.
 ```
 
 ---
@@ -565,11 +576,11 @@ du1 = du1.replace('remote_n_address = "192.168.71.150";', 'remote_n_address = "1
 du1 = du1.replace('local_n_portd   = 2153;', 'local_n_portd   = 2153;')
 du1 = du1.replace('remote_n_portd  = 2153;', 'remote_n_portd  = 2153;')
 
-# Enable chanmod in existing rfsimulator configuration element
-du1 = re.sub(r'options\s*=\s*\(\s*\);', 'options = ("chanmod");', du1)
-
-# Ensure noise_power_dB is aligned with the calibrated -2.0 dB testbed profile in existing channelmod
-du1 = re.sub(r'noise_power_dB\s*=\s*[-0-9.]+;', 'noise_power_dB = -2.0;', du1)
+# Configure Calibrated Operational Baseline for DU-1 (options = (); ploss_dB = 0.0; noise_power_dB = -100.0)
+# options = (); disables chanmod overhead to maintain real-time radio progress at 20 Mbps (see Case 55)
+du1 = re.sub(r'options\s*=\s*\([^\)]*\);', 'options = ();', du1)
+du1 = re.sub(r'ploss_dB\s*=\s*[-0-9.]+;', 'ploss_dB = 0.0;', du1)
+du1 = re.sub(r'noise_power_dB\s*=\s*[-0-9.]+;', 'noise_power_dB = -100.0;', du1)
 
 with open("/opt/oran/ran/conf/du_gnb1.conf", "w") as f:
     f.write(du1)
@@ -590,7 +601,7 @@ du2 = du2.replace('serverport = 4043;', 'serverport = 4044;')
 
 with open("/opt/oran/ran/conf/du_gnb2.conf", "w") as f:
     f.write(du2)
-print("Configuration files du_gnb1.conf and du_gnb2.conf generated successfully with unified F1 aliases and chanmod.")
+print("Configuration files du_gnb1.conf and du_gnb2.conf generated successfully with unified F1 aliases and calibrated baseline.")
 EOF
 ```
 
