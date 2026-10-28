@@ -17,7 +17,7 @@ import urllib.request
 COLLECTOR_URL = "http://10.102.0.67:9100/report"
 DU1_LOG = "/opt/oran/ran/du1.log"
 DU2_LOG = "/opt/oran/ran/du2.log"
-MAX_PRB = 106.0
+DEFAULT_MAX_PRB = 106.0
 
 STALE_THRESHOLD_SEC = 3.5
 
@@ -31,6 +31,27 @@ RADIO_STATS_PATTERN = re.compile(
     r'RSSI\s+(?P<rssi>[-0-9.]+)'
 )
 NPRB_FALLBACK = re.compile(r'NPRB\s+(\d+)')
+
+
+def detect_max_prb(cell_id):
+    """Auto-detect configured carrier bandwidth (PRB) from DU config file if present, else fallback."""
+    conf_path = f"/opt/oran/ran/conf/du_gnb{cell_id}.conf"
+    if os.path.exists(conf_path):
+        try:
+            with open(conf_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            m = re.search(r'dl_carrierBandwidth\s*=\s*(\d+);', content)
+            if m:
+                return float(m.group(1))
+        except Exception:
+            pass
+    # Fallback to environment variable or cell-specific defaults (Cell 1: 51.0, Cell 2: 106.0)
+    default_prb = "51.0" if str(cell_id) == "1" else "106.0"
+    env_key = f"MAX_PRB_CELL{cell_id}"
+    try:
+        return float(os.environ.get(env_key, default_prb))
+    except ValueError:
+        return float(default_prb)
 
 
 def read_last_lines(file_path, num_lines=30, chunk_size=8192):
@@ -53,9 +74,10 @@ def read_last_lines(file_path, num_lines=30, chunk_size=8192):
 class DuLogTracker:
     """Tracks DU log file byte offset, incremental lines, and measurement staleness."""
 
-    def __init__(self, log_path, cell_id, stale_threshold=STALE_THRESHOLD_SEC):
+    def __init__(self, log_path, cell_id, max_prb=None, stale_threshold=STALE_THRESHOLD_SEC):
         self.log_path = log_path
         self.cell_id = cell_id
+        self.max_prb = float(max_prb) if max_prb is not None else detect_max_prb(cell_id)
         self.stale_threshold = stale_threshold
         self.last_offset = 0
         self.last_meas_time = 0.0
@@ -108,7 +130,7 @@ class DuLogTracker:
             self.cached_stats["bler"] = float(last[1])
             self.cached_stats["mcs"] = int(last[2])
             self.cached_stats["nprb"] = nprb_val
-            self.cached_stats["prb_pct"] = round((nprb_val / MAX_PRB) * 100.0, 2)
+            self.cached_stats["prb_pct"] = round((nprb_val / self.max_prb) * 100.0, 2)
             self.cached_stats["snr_db"] = float(last[4])
             self.cached_stats["rssi_dbm"] = float(last[5])
             self.cached_stats["valid"] = True
@@ -120,7 +142,7 @@ class DuLogTracker:
         if nprb_matches:
             nprb_val = int(nprb_matches[-1])
             self.cached_stats["nprb"] = nprb_val
-            self.cached_stats["prb_pct"] = round((nprb_val / MAX_PRB) * 100.0, 2)
+            self.cached_stats["prb_pct"] = round((nprb_val / self.max_prb) * 100.0, 2)
             # Crucial: Explicitly reset metrics not present in fallback format
             self.cached_stats["ulsch_errors"] = None
             self.cached_stats["bler"] = None
@@ -214,13 +236,13 @@ def send_to_collector(stats1, stats2):
 
 
 def main():
-    print("[RAN-Adapter v3] Starting OAI gNB DU radio link telemetry adapter with staleness tracking...", flush=True)
-    print(f"Tracking DU-1: {DU1_LOG} | DU-2: {DU2_LOG} (Stale threshold: {STALE_THRESHOLD_SEC}s)")
-    print(f"{'Time':<8} | {'C1 PRB%':<9} | {'C1 MCS':<6} | {'C1 BLER':<8} | {'C1 SNR':<7} | {'C2 PRB%':<9} | {'Status'}", flush=True)
-    print("-" * 68, flush=True)
-
     tracker1 = DuLogTracker(DU1_LOG, cell_id="1")
     tracker2 = DuLogTracker(DU2_LOG, cell_id="2")
+
+    print("[RAN-Adapter v3] Starting OAI gNB DU radio link telemetry adapter with staleness tracking...", flush=True)
+    print(f"Tracking DU-1: {DU1_LOG} (Max PRB: {tracker1.max_prb}) | DU-2: {DU2_LOG} (Max PRB: {tracker2.max_prb}) (Stale threshold: {STALE_THRESHOLD_SEC}s)")
+    print(f"{'Time':<8} | {'C1 PRB%':<9} | {'C1 MCS':<6} | {'C1 BLER':<8} | {'C1 SNR':<7} | {'C2 PRB%':<9} | {'Status'}", flush=True)
+    print("-" * 68, flush=True)
 
     while True:
         try:
