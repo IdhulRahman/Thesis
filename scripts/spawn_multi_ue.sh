@@ -150,17 +150,21 @@ EOF_CONF
 
   # 3. Launch nr-uesoftmodem inside namespace
   local -a sampling_args=()
+  local prb_val="106"
+  local freq_val="3619200000"
   if [[ "$slice_num" -eq 1 ]]; then
     sampling_args=(-E)
+    prb_val="51"
+    freq_val="3609120000"
   fi
 
-  echo "Menjalankan softmodem UE #$ue_idx di namespace $ns mengarah ke port $rf_port..."
+  echo "Menjalankan softmodem UE #$ue_idx di namespace $ns mengarah ke port $rf_port (PRB $prb_val, Freq $freq_val)..."
   sudo ip netns exec "$ns" nohup "$BUILD_DIR/nr-uesoftmodem" \
     "${sampling_args[@]}" \
-    -r 106 \
+    -r "$prb_val" \
     --numerology 1 \
     --band 78 \
-    -C 3619200000 \
+    -C "$freq_val" \
     --rfsim \
     --rfsimulator.serveraddr "$RAN_IP" \
     --rfsimulator.serverport "$rf_port" \
