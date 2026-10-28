@@ -73,7 +73,7 @@ All parameter selections on VM-5 strictly comply with 3GPP Release 16/17 and off
     - Transmission Bandwidth: **51 PRBs** ($20\text{ MHz}$ nominal channel bandwidth per 3GPP TS 38.104 Table 5.3.2-1), corresponding to `-r 51`.
     - Downlink Carrier Frequency: **$3609120000\text{ Hz}$ ($3.60912\text{ GHz}$)**, corresponding to `-C 3609120000`.
     - Transform Optimization: Three-quarter sampling (`-E`), yielding 768-point FFT ($23.04\text{ Msps}$).
-    - Initial Synchronization: `--ue-scan-carrier` to scan GSCN 7923 ($3610.56\text{ MHz}$, SSB offset 6).
+    - Initial Synchronization: `--ue-scan-carrier` to dynamically scan GSCN raster candidates (identifying GSCN 7923 at $3610.56\text{ MHz}$ and calculating `ssbFirstSC = 234` subcarriers from Point A).
     *(Note: If rolled back to Profile 2 baseline, UE 1 operates at 106 PRBs, $3619.20\text{ MHz}$, no `-E`).*
   - **UE 2 / Slice 2 (DU-2 / Cell 2 :4044) — Baseline:**
     - Transmission Bandwidth: **106 PRBs** ($40\text{ MHz}$ nominal channel bandwidth), corresponding to `-r 106`.

@@ -138,19 +138,30 @@ def validate_finite(name: str, value: float) -> float:
 
 
 def detect_configured_baseline_ploss(channel_id: int) -> float:
-    """Read configured ploss_dB from du_gnb1.conf if available, else default to calibrated 0.0 dB."""
+    """
+    Read configured ploss_dB for channel_id (0: enB0 DL, 1: ue0 UL) from du_gnb1.conf.
+    Selects the targeted channel model block to correctly distinguish per-channel baselines.
+    Falls back to Calibrated Profile 1 baseline (0.0 dB unity gain) if unparsed.
+    """
     conf_path = "/opt/oran/ran/conf/du_gnb1.conf"
     if os.path.exists(conf_path):
         try:
             with open(conf_path, "r", encoding="utf-8") as f:
                 content = f.read()
-            m = re.search(r'ploss_dB\s*=\s*([-0-9.]+);', content)
+            # Map channel_id to OAI model descriptor name (0: enB0 DL, 1: ue0 UL)
+            model_target = "rfsimu_channel_enB0" if channel_id == 0 else "rfsimu_channel_ue0"
+            pattern = rf'model_name\s*=\s*"{model_target}".*?ploss_dB\s*=\s*([-0-9.]+);'
+            m = re.search(pattern, content, re.DOTALL)
             if m:
                 return float(m.group(1))
+            # Fallback: if model names differ, index into all ploss_dB occurrences
+            all_ploss = re.findall(r'ploss_dB\s*=\s*([-0-9.]+);', content)
+            if all_ploss and channel_id < len(all_ploss):
+                return float(all_ploss[channel_id])
         except Exception:
             pass
     # Default to Calibrated Profile 1 baseline (0.0 dB unity gain)
-    return float(os.environ.get("RFSIM_BASELINE_PLOSS", "0.0"))
+    return float(os.environ.get(f"RFSIM_BASELINE_PLOSS_CH{channel_id}", os.environ.get("RFSIM_BASELINE_PLOSS", "0.0")))
 
 
 # Calibrated baseline path_loss_dB for this testbed (Profile 1: ploss_dB = 0.0 dB unity gain):

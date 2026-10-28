@@ -200,7 +200,7 @@ To provide an authoritative decision matrix for testbed operators and researcher
 | **SFN Radio Clock Ratio**| $\mathbf{0.42\times - 0.44\times}$ (Severe Dilation) | $\mathbf{0.57\times - 0.58\times}$ (Partial Dilation) | $\mathbf{1.02\times}$ (Near Real-Time) | $\mathbf{1.05\times - 1.09\times}$ (**Near Real-Time**) |
 | **Computational Dilation Relief**| Severe Dilation Constraint | Partial Relief ($+31.8\%$ speedup) | Dilation Free | Substantially Relieved (No large lag) |
 | **Receiver Throughput @ 20M**| $\approx 12.9 - 13.1\text{ Mbps}$ (Dilation Absorption Cap)| $\approx 17.1\text{ Mbps}$ ($+31.5\%$) | **$20.0\text{ Mbps}$** (Line-Rate Delivery)| **$16.6\text{ Mbps}$** (Session Average Measured)|
-| **Queue Backlog (Delta)**| $\mathbf{+10.54\text{ s}}$ (Simulator Bufferbloat)| $\mathbf{+3.37\text{ s}}$ (Reduced Backlog) | $\mathbf{+0.03\text{ s}}$ (Zero Queue) | $\mathbf{+0.05\text{ s}}$ ($\le 15\text{M}$); $\mathbf{+12.45\text{ s}}$ (@ 20M session)|
+| **Receiver–Sender Duration Difference ($\Delta t$)**| $\mathbf{+10.54\text{ s}}$ (Simulator Bufferbloat)| $\mathbf{+3.37\text{ s}}$ (Reduced Backlog) | $\mathbf{+0.03\text{ s}}$ (Nominal difference) | $\mathbf{+0.05\text{ s}}$ ($\le 15\text{M}$); $\mathbf{+12.45\text{ s}}$ (@ 20M session)|
 | **Telemetry Dynamics** | Link adaptation active under RF test | Link adaptation active under RF test | **Unperturbed** (MCS near 28, BLER ~0%)| Link adaptation active under RF test |
 | **Empirical Case Link** | [Case 55 (Gejala)](../troubleshooting/ran-ue.md#case-55) | [Case 56 (Phase 1)](../troubleshooting/ran-ue.md#case-56) | [Case 55 (Solusi)](../troubleshooting/ran-ue.md#case-55) & [Case 53](../troubleshooting/ran-ue.md#case-53) | [Case 56 (Phase 2)](../troubleshooting/ran-ue.md#case-56) |
 
@@ -213,7 +213,7 @@ Based on empirical characterization, researchers can select the operational prof
 
 1. **Choose 51 PRBs with `-E` and Active `chanmod` (Configuration 4 — Recommended Default):**
    * **Target Use Case:** Machine Learning model training, NWDAF AnLF bottleneck detection, Near-RT RIC xApp closed-loop steering, and cross-domain root-cause analysis (RCA).
-   * **Expected Behavior:** Radio progress runs near real-time ($1.05\times - 1.09\times$). Offered loads at 5, 10, and 15 Mbps complete with zero duration delta ($+0.05\text{ s}$). Offered load at 20 Mbps results in an average measured receiver throughput of $16.6\text{ Mbps}$ with a post-traffic receiver drainage duration of $12.45\text{ s}$. Radio link adaptation mechanisms remain available for dynamic RF impairment sweeps.
+   * **Expected Behavior:** Radio progress runs near real-time ($1.05\times - 1.09\times$). Offered loads at 5, 10, and 15 Mbps complete with zero duration delta ($+0.05\text{ s}$). Offered load at 20 Mbps results in an average measured receiver throughput of $16.6\text{ Mbps}$ with a receiver–sender duration difference ($\Delta t$) of $12.45\text{ s}$. Radio link adaptation mechanisms remain available for dynamic RF impairment sweeps.
 2. **Choose 106 PRBs without `chanmod` (Configuration 3 — Wire-Speed Baseline):**
    * **Target Use Case:** Core network user-plane benchmarking, UPF queue queuing/drop characterization under extreme throughput, or evaluating maximum line-rate saturation (20.0+ Mbps).
    * **Expected Behavior:** Line-rate delivery ($20.0\text{ Mbps}$, $20.03\text{ s}$ duration, 0% packet loss) and near real-time execution ($1.02\times$). Radio link metrics remain unperturbed.
@@ -230,11 +230,11 @@ Based on empirical characterization, researchers can select the operational prof
 | **5.0 Mbps** | $1.09\times$ (Near Real-time) | **$5.00\text{ Mbps}$** | **0.0%** (0/25,897) | $+0.05\text{ s}$ | $18.9\text{ ms}$ | Healthy Normal |
 | **10.0 Mbps** | $1.08\times$ (Near Real-time) | **$9.99\text{ Mbps}$** | **0.0%** (0/51,795) | $+0.05\text{ s}$ | $17.4\text{ ms}$ | Healthy Normal |
 | **15.0 Mbps** | $1.06\times$ (Near Real-time) | **$15.0\text{ Mbps}$** | **0.0%** (0/77,694) | $+0.05\text{ s}$ | $15.1\text{ ms}$ | Healthy Normal |
-| **20.0 Mbps** | $1.05\times$ (Near Real-time) | **$16.6\text{ Mbps}$** (Measured Avg)| **0.0%** (0/103,592)| $+12.45\text{ s}$ (Drainage) | $20.2\text{ ms}$ | High Load Session |
+| **20.0 Mbps** | $1.05\times$ (Near Real-time) | **$16.6\text{ Mbps}$** (Measured Avg)| **0.0%** (0/103,592)| $+12.45\text{ s}$ ($\Delta t$) | $20.2\text{ ms}$ | High Load Session |
 
 ---
 
-#### 4.4.6 Analysis of 20 Mbps Session Timing and Queue Drainage
+#### 4.4.6 Analysis of 20 Mbps Session Timing and Duration Difference ($\Delta t$)
 Under Profile 1 (51 PRBs + `-E`), transmitting 20.0 Mbps UDP load over 60 seconds resulted in an average receiver throughput of $16.56\text{ Mbps}$ ($16.6\text{ Mbps}$ rounded) over an active receiver duration of $72.45\text{ s}$ (a duration delta of $+12.45\text{ s}$ relative to sender).
 
 **Algebraic Relation vs. Queue Validation:**

@@ -916,8 +916,13 @@ Inspection of OAI codebase (full reference commit [`29d5fa7d38bb1ee8935ef7ae30a3
   `chanmod` (*Channel Modeling*) is the wireless propagation emulation module within OAI RFSimulator.
   * **Default State without `chanmod` (`options = ();`):** RFSimulator acts as an ideal lossless channel ("pure pipe") with zero attenuation, noise floor, multipath delay spread, or fading.
   * **Active Channel Modeling (`options = ("chanmod");`):** Injects realistic wireless channel physics, dynamically computing large-scale path loss (`ploss_dB`), thermal noise floor (`noise_power_dB`), and multipath Rayleigh/Rician fading matrices.
-* **Research Necessity for ML / NWDAF Telemetry:**
-  This module is vital for training machine learning algorithms in NWDAF and Near-RT RIC. Without active channel modeling, radio metrics are sterile and static: BLER (*Block Error Rate*) is permanently $0\%$, MCS (*Modulation and Coding Scheme*) is permanently locked at the maximum index ($28$), and CQI is pinned at $15$. To train an ML classifier capable of differentiating between **Radio Resource Saturation (high PRB utilization under clean radio conditions)** and **Channel Coverage Degradation (declining SNR $\to$ MCS drop $\to$ BLER surge $\to$ RLC retransmissions)**, dynamic radio channel metrics are mandatory.
+* **Research Considerations for ML / NWDAF Telemetry:**
+  Dynamic channel modeling is investigated to provide realistic radio link adaptation behavior for training explainable Machine Learning classifiers (NWDAF AnLF and Near-RT RIC xApps):
+  * **Experimental Risk of Shortcut Learning:** Operating under an ideal channel presents an experimental risk: link adaptation operates near its theoretical optimum (MCS adapting minimally, BLER remaining near $0\%$). When evaluated for bottleneck classification, an absence of radio channel variance creates a risk of shortcut learning, where an ML model might disproportionately rely on Core UPF queue metrics while under-utilizing radio features. This represents a research hypothesis to be evaluated during offline ML training.
+  * **Differentiating Bottleneck Domains:** Realistic multi-slice bottleneck identification requires distinguishing between:
+    1. **Radio Resource Saturation (Congestion Bottleneck):** High PRB demand under clean radio conditions (high SNR, high MCS, minimal BLER).
+    2. **Channel Coverage Degradation (Radio Impairment Bottleneck):** Moderate PRB demand accompanied by degrading link conditions (falling SNR $\to$ link adaptation drops MCS $\to$ BLER escalates $\to$ RLC retransmissions surge).
+    *(Note: `ran_adapter.py` actively exports NPRB, MCS, BLER, SNR, and RSSI, and does not currently export CQI. Furthermore, during unattenuated calibration tests under Profile 1, radio conditions remained near-ideal with minimal BLER).*
 * **Algorithmic Root Cause of the CPU Bottleneck:**
   In `radio/rfsimulator/apply_channelmod.c` (`rxAddInput()`):
   ```c
@@ -1005,6 +1010,7 @@ Passing `--ue-scan-carrier` instructs the UE to invoke `get_scan_ssb_first_sc()`
   `[PHY] Setting symbol size: 768, samples per subframe: 23040`
 * **UE-1 Initialization Verification:**
   `[NR_PHY] Scanning GSCN: 7923, with SSB offset: 6, SSB Freq: 3610.560000`
+  *(Note on Log Field: In OAI `nr_initial_sync.c`, the logged field `with SSB offset: 6` represents the GSCN raster search candidate offset index relative to the search window, whereas the true subcarrier position of the SSB is calculated by `get_scan_ssb_first_sc()` as `ssbFirstSC = 234` subcarriers from Point A).*
   `[NR_PHY] Initializing UE threads (threequarter_fs=1, ofdm_symbol_size=768, samples_per_subframe=23040)`
 * **Multi-Step Load Characterization (60-second test runs):**
 
@@ -1012,33 +1018,28 @@ Passing `--ue-scan-carrier` instructs the UE to invoke `get_scan_ssb_first_sc()`
 |---|---|---|---|---|---|
 | **5.0 Mbps** | $1.09\times$ (Real-time) | **$5.00\text{ Mbps}$** | **0.0%** (0/25,897) | $+0.05\text{ s}$ | $18.9\text{ ms}$ (Healthy) |
 | **10.0 Mbps** | $1.08\times$ (Real-time) | **$9.99\text{ Mbps}$** | **0.0%** (0/51,795) | $+0.05\text{ s}$ | $17.4\text{ ms}$ (Healthy) |
-| **15.0 Mbps** | $1.06\times$ (Real-time) | **$15.0\text{ Mbps}$** | **0.0%** (0/77,694) | $+0.05\text{ s}$ | $15.1\text{ ms}$ (Healthy, drained) |
-| **20.0 Mbps** | $1.05\times$ (Real-time) | **$16.6\text{ Mbps}$** (Capacity)| **0.0%** (0/103,592)| $+12.45\text{ s}$ (Drainage) | $20.2\text{ ms}$ (Slight transient) |
+| **15.0 Mbps** | $1.06\times$ (Real-time) | **$15.0\text{ Mbps}$** | **0.0%** (0/77,694) | $+0.05\text{ s}$ | $15.1\text{ ms}$ (Healthy, nominal delta) |
+| **20.0 Mbps** | $1.05\times$ (Real-time) | **$16.6\text{ Mbps}$** (Measured Avg)| **0.0%** (0/103,592)| $+12.45\text{ s}$ ($\Delta t$) | $20.2\text{ ms}$ (Slight transient) |
 
 ---
 
-### Disaggregation of Bottleneck Domains: Computational vs Physical
+### Analysis of 20 Mbps Session Timing and Duration Difference ($\Delta t$)
 
-This empirical resolution yields a vital distinction for this research thesis:
+This empirical calibration yields a vital distinction for this research thesis:
 
 $$\text{Total Observed Latency/Backlog} = \Delta t_{\text{sim\_dilation}} + \Delta t_{\text{phy\_backlog}}$$
 
-1. **Simulator Computational Dilation (Eliminated):**
+1. **Simulator Computational Dilation Relief:**
    Under 106 PRB full-sampling `chanmod`, the SFN clock moved at $0.44\times$. The apparent $\approx 13\text{ Mbps}$ throughput ceiling was an artifact of the simulation engine falling behind real-world wall-clock time.
-   Under 51 PRB + `-E`, SFN clock progress is strictly **$1.05\times - 1.09\times$ real-time** across all offered loads. **The simulator computational bottleneck is 100% eliminated.**
+   Under 51 PRB + `-E`, SFN clock progress advances at **$1.05\times - 1.09\times$ near real-time** across all offered loads, indicating that the severe software dilation constraint observed at 106 PRBs was substantially relieved.
 
-2. **Physical TDD Channel Capacity Ceiling (Empirically Isolated):**
-   With simulator dilation removed, throughput caps at **$16.6\text{ Mbps}$** under 20 Mbps load. This is the **true physical capacity** of 51 PRBs under 3GPP Band 78 TDD frame structure:
-   * Periodicity: $5\text{ ms}$ ($10\text{ slots}$ at $\mu = 1$).
-   * TDD Pattern: 7 DL slots, 2 UL slots, 1 Mixed slot $\implies 20\%$ to $25\%$ UL transmission time.
-   * At 51 PRBs with 64-QAM / 256-QAM modulation, maximum theoretical PUSCH data rate is $\approx 16.6\text{ Mbps}$.
+2. **Average Measured Receiver Throughput:**
+   Under 20 Mbps offered load, the measured receiver throughput averaged **$16.6\text{ Mbps}$** ($16.56\text{ Mbps}$ unrounded). Under 3GPP Band 78 TDD frame structure with $\mu = 1$ ($30\text{ kHz}$ SCS) and $5\text{ ms}$ periodicity (10 slots: 7 DL, 2 UL, 1 Mixed $\implies 20\%$ to $25\%$ UL transmission time), achievable PUSCH rate depends on slot allocation, modulation order (e.g. 64QAM), target code rate, and DM-RS overhead per 3GPP TS 38.214. Here, 16.6 Mbps represents the **empirically measured average receiver throughput under 20 Mbps offered load**, providing a stable operating reference.
 
-3. **Mathematical Queue Backlog Verification:**
-   * Excess offered load: $\Delta R = 20.0\text{ Mbps} - 16.6\text{ Mbps} = 3.4\text{ Mbps}$.
-   * Total excess data generated during 60s: $3.4\text{ Mbps} \times 60\text{ s} = 204\text{ Mbit}$.
-   * Required buffer drainage time: $\frac{204\text{ Mbit}}{16.6\text{ Mbps}} = \mathbf{12.28\text{ seconds}}$.
-   * Measured receiver duration delta: $72.45\text{ s} - 60.00\text{ s} = \mathbf{12.45\text{ seconds}}$.
-   * **Calculated vs. measured drainage error is less than $1.4\%$**, confirming that the post-traffic delay is purely physical RLC/socket buffer drainage, not CPU simulator stalling.
+3. **Algebraic Consistency of Duration Difference:**
+   The relationship between sender offered rate $R_{\text{tx}}$, sender duration $T_{\text{tx}}$, receiver throughput $G_{\text{rx}}$, and receiver duration delta $\Delta t = T_{\text{rx}} - T_{\text{tx}}$ is expressed algebraically as:
+   $$\Delta t = \frac{(R_{\text{tx}} - G_{\text{rx}}) \times T_{\text{tx}}}{G_{\text{rx}}} = \frac{(20.0 - 16.563) \times 60.0}{16.563} \approx 12.45\text{ seconds}$$
+   This formulation confirms algebraic consistency between the total volume of delivered bits and the reported reporting duration across the session. It serves as an accounting check for delivered data rather than an independent validation of exact queue location (e.g. socket send buffer vs. RLC entity vs. receiver socket).
 
 ---
 
@@ -1046,12 +1047,12 @@ $$\text{Total Observed Latency/Backlog} = \Delta t_{\text{sim\_dilation}} + \Del
 
 The table below provides a comprehensive comparison of what occurs under each configuration based on our empirical campaign:
 
-| Configuration Profile | Bandwidth & Sampling | Channel Modeling | SFN Progress | Throughput @ 20M | Queue Backlog Delta | Telemetry Richness | Recommended Use Case |
+| Configuration Profile | Bandwidth & Sampling | Channel Modeling | SFN Progress | Throughput @ 20M | Receiver–Sender Duration Difference ($\Delta t$) | Telemetry Richness | Recommended Use Case |
 |---|---|---|---|---|---|---|---|
 | **1. Historical Impairment (106 PRB, no `-E`)** | 106 PRB / 61.44 Msps (FFT 2048) | Active (`chanmod`) | **0.44x (Dilated)** | ~13.0 Mbps (Artificial) | +10.54s (Severe bloat) | Dynamic | Benchmark for dilation (see [Case 55](#case-55)) |
 | **2. Transition Option A (106 PRB, `-E`)** | 106 PRB / 46.08 Msps (FFT 1536) | Active (`chanmod`) | **0.58x (Dilated)** | ~17.1 Mbps (+31.5%) | +3.37s (Reduced bloat) | Dynamic | Transitional testing (see [Case 56](#case-56)) |
-| **3. Clean Pipe Baseline (106 PRB, no `-E`)** | 106 PRB / 61.44 Msps (FFT 2048) | Disabled (`options = ();`) | **1.02x (Real-time)**| **20.0 Mbps (Wire-speed)**| +0.03s (Zero queue) | Static (BLER 0%, MCS 28)| Line-rate transport benchmark (see [Case 55](#case-55)) |
-| **4. Calibrated Profile 1 (51 PRB, `-E`)** | 51 PRB / 23.04 Msps (FFT 768) | Active (`chanmod`) | **1.05x - 1.09x (Real-time)**| **16.6 Mbps (TDD Cap)** | +0.05s (<=15M), +12.45s (20M)| Dynamic (BLER, MCS, SNR)| **Default for ML / NWDAF Telemetry** |
+| **3. Clean Pipe Baseline (106 PRB, no `-E`)** | 106 PRB / 61.44 Msps (FFT 2048) | Disabled (`options = ();`) | **1.02x (Real-time)**| **20.0 Mbps (Wire-speed)**| +0.03s (Nominal difference) | Static (BLER 0%, MCS 28)| Line-rate transport benchmark (see [Case 55](#case-55)) |
+| **4. Calibrated Profile 1 (51 PRB, `-E`)** | 51 PRB / 23.04 Msps (FFT 768) | Active (`chanmod`) | **1.05x - 1.09x (Real-time)**| **16.6 Mbps (Session Avg Measured)** | +0.05s (<=15M), +12.45s (@ 20M session)| Dynamic (BLER, MCS, SNR)| **Default for ML / NWDAF Telemetry** |
 
 ---
 
