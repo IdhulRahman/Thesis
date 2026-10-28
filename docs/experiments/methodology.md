@@ -109,3 +109,29 @@ To maintain consistency across all analysis and baseline evaluations, SLA satisf
 
 ### 4.3 Statistical Significance Testing
 All baseline comparisons are executed across a minimum of $N \ge 10$ independent random-seeded runs per scenario. Performance differences are evaluated using the non-parametric **Wilcoxon Signed-Rank Test** (paired) or **Mann-Whitney U Test** (independent) with a significance threshold of $\alpha = 0.05$.
+
+---
+
+### 4.4 Testbed Execution Timing & RFSimulator Channel Modeling Calibration
+
+#### 4.4.1 Radio Clock Progress vs. Wall-Clock Alignment
+In virtualized OAI RFSimulator testbeds, radio frame scheduling adheres strictly to 3GPP TS 38.211 ($10\text{ ms}$ per radio frame). However, software simulator execution speed varies relative to host wall-clock time depending on PHY-layer computational intensity:
+* **Computational Dilation Under Active Channel Modeling:** When full channel modeling (`options = ("chanmod");`) is enabled at 106 PRBs (Band 78, Numerology 1), per-sample Gaussian noise generation (`gaussZiggurat()` in `apply_channelmod.c`) and channel matrix convolution reduce radio progress to $\approx 0.42\times - 0.44\times$ real-time. This artificial dilation limits the rate at which wall-clock application packets can be consumed by the radio stack to $\approx 13\text{ Mbps}$, inducing secondary bufferbloat ($10.5\text{ s}$ delay) and cross-instance CPU starvation (URLLC spikes up to $64\text{ ms}$).
+* **Real-Time Baseline Alignment:** Deactivating `chanmod` on DU-1 (`options = ();`) eliminates software simulation bottlenecks, aligning radio progress to $\approx 0.91\times - 1.08\times$ (averaging $\approx 1.0\times$ real-time during load) and permitting dual-slice 20 Mbps offered load delivery with $0\%$ receiver packet loss (see [Case 55](../troubleshooting/ran-ue.md#case-55)).
+
+#### 4.4.2 RAN Telemetry Metric Richness for Machine Learning (Bottleneck Localization)
+A primary evaluation goal of this thesis is benchmarking machine learning algorithms (e.g., NWDAF AnLF and Near-RT RIC xApps) for **Root Cause Analysis (RCA) and Bottleneck Domain Localization** (RAN vs. Core vs. Joint):
+* **Feature Asymmetry & Shortcut Learning Risks:** Operating without channel modeling renders the radio medium an ideal, lossless pipe where $\text{BLER} = 0\%$, MCS remains clamped at index 28, and $\text{CQI} = 15$. Under this condition, PRB utilization is the sole dynamic RAN metric. When paired with rich Core telemetry (UPF CPU, memory, buffer backlog, packet drops), ML models risk developing shortcut decision heuristics that over-fit to Core indicators while remaining blind to radio state nuances.
+* **Disaggregating Saturation from Coverage Degradation:** Realistic bottleneck detection requires distinguishing between:
+  1. **Radio Resource Saturation:** High PRB demand under clean channel conditions (high MCS, zero BLER).
+  2. **Channel Coverage Degradation:** Low/moderate PRB demand accompanied by poor radio channel conditions (declining SNR $\to$ link adaptation drops MCS $\to$ BLER escalates $\to$ RLC retransmissions surge).
+  Dynamic channel metrics (BLER, MCS, CQI, SNR) are strictly required to represent coverage degradation states in the training dataset.
+
+#### 4.4.3 Operational Baseline & Future Scaling Roadmap
+To balance computational stability with metric richness for machine learning:
+1. **Calibrated Operational Baseline:** Dual-slice operation without `chanmod` (`options = ();`) is maintained as the current calibrated baseline to guarantee real-time multi-slice traffic delivery without simulator-induced queue distortion.
+2. **Planned Dynamic Metric Enrichment Paths:** Subsequent experimental phases will re-evaluate dynamic channel variation via:
+   * **Bandwidth / PRB Downscaling:** Lowering carrier bandwidth from 106 PRBs (40 MHz) to 51 PRBs (20 MHz) or 25 PRBs to reduce I/Q sample calculation volume by 50–75%, enabling `chanmod` to execute at real-time speeds ($\ge 1.0\times$).
+   * **Three-Quarter Sampling:** Evaluating the `-E` flag on `nr-softmodem` and `nr-uesoftmodem` to decrease FFT sampling overhead per OAI RFSimulator guidelines.
+   * **Profiling and Targeted Code Optimization:** Investigating explicit noise configuration guards in `apply_channelmod.c` to prevent redundant Gaussian generation when noise is unutilized.
+

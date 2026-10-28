@@ -812,3 +812,79 @@ sudo systemctl restart docker
 > [!WARNING]
 > **Avoid Manual `truncate` of Container Log Files:**  
 > Directly truncating active container log files (`*-json.log`) can corrupt internal logging file descriptor tracking and permanently erases diagnostic evidence across all containers. Always use Docker's native log rotation (`max-size` / `max-file`) or Docker Compose logging options as described above.
+
+---
+
+<a id="case-55"></a>
+## Case 55 — OAI RFSimulator 'chanmod' Computational Bottleneck, Clock Dilation, and Bufferbloat Under High Offered Load (20 Mbps)
+
+### Symptom
+Under the dual-slice baseline configuration with channel modeling active (`options = ("chanmod");`), injecting an offered load of 20 Mbps UDP via `iperf3 -u` on eMBB (Slice 1) exhibits:
+1. Application receiver throughput throttled to $\approx 12.9 - 13.1\text{ Mbps}$ despite an offered demand of $20.0\text{ Mbps}$.
+2. In the 1-second monitoring window of `trafgen.sh`, eMBB RTT reports `NaN` (`-`) with `Loss: 100.0%` continuously from second 2 through second 20.
+3. Total receiver duration extends to $\approx 30.54\text{ seconds}$ for a 20.00-second transmission interval ($10.54\text{ seconds}$ duration reporting delta).
+4. Concurrent URLLC (Slice 2) canary ping displays severe latency degradation, spiking up to $64.0\text{ ms}$ with multiple local SLA ($20\text{ ms}$) violations.
+5. Post-test ping confirms 0% packet loss and recovery on both slices, revealing that packets were delayed in queues rather than dropped over the air interface.
+
+### Diagnostic Evidence & Root Cause Analysis
+A systematic multi-stage experimental audit identified that the throughput ceiling and latency degradation were caused by **RFSimulator software computation overhead in the channel modeling module (`chanmod`)**, rather than physical radio interface limitations, memory exhaustion, or cross-instance interference:
+
+1. **System Frame Number (SFN) Radio Clock Dilation Measurement:**
+   Tracking frame progression in `/opt/oran/ran/du1.log` against monotonic wall-clock time revealed that when `chanmod` is active, 128 radio frames ($1.28\text{ s}$ 3GPP radio time per TS 38.211 §4.3.1) required $2.87 - 3.06\text{ s}$ of wall-clock time, yielding a progress ratio of $\approx 0.42\times - 0.44\times$. This artificial time dilation limits the rate at which wall-clock application packets can be consumed by the radio stack to $\approx 13\text{ Mbps}$ wall-clock.
+2. **CPU Pressure Stall Information (PSI) & Per-Thread Profiling:**
+   During 20 Mbps load with `chanmod` active:
+   * **VM-4 (`oai-ran`):** CPU pressure reached `some avg10 = 40.43%` with load average $5.17$ on 4 vCPUs. Thread `ru_thread` (PID `435491`, DU-1) consumed $88.2\%$ of a core, and DU-2 `ru_thread` consumed $47.1\%$.
+   * **VM-5 (`nrue`):** CPU pressure reached `some avg10 = 24.04%` with thread `UEthread_0` (PID `494942`) consuming $93.3\%$ of a core.
+   * Swap and memory pressure remained strictly zero (`si = 0, so = 0`, memory PSI $0.00\% - 0.09\%$), completely ruling out RAM exhaustion or paging thrashing.
+3. **Single-Slice Isolation Test (Deactivating DU-2 & UE-2):**
+   Deactivating the second instance pair yielded only marginal gains: SFN ratio slightly improved from $0.44\times$ to $0.47\times$, and receiver throughput marginally rose from $13.1\text{ Mbps}$ to $13.9\text{ Mbps}$ (receiver interval $28.78\text{ s}$). This weakened the hypothesis that cross-instance contention was the primary bottleneck, isolating the dominant constraint to the remaining single radio path.
+4. **Channel Modeling (`chanmod`) Deactivation Test:**
+   Deactivating `chanmod` on DU-1 (`options = ();`) produced a clear performance breakthrough:
+   * **Single-Slice without `chanmod`:** SFN ratio jumped to $1.29\times - 1.42\times$, receiver throughput reached $20.0\text{ Mbps}$ wire-speed in $20.05\text{ seconds}$ ($0.05\text{ s}$ duration delta), and table loss dropped to $0.0\%$.
+   * **Dual-Slice without `chanmod` (Target Architecture):** SFN ratio sustained $\approx 0.91\times - 1.08\times$ (averaging $\approx 1.0\times$ real-time under full load), receiver achieved $20.0\text{ Mbps}$ in $20.03\text{ seconds}$ ($0.03\text{ s}$ duration delta) with 0% loss reported, and the extreme $64\text{ ms}$ URLLC spike was eliminated (URLLC latency stabilized between $12.0 - 33.0\text{ ms}$, mean $23.38\text{ ms}$).
+5. **Code-Level Root Cause Candidate:**
+   Inspection of OAI source code in `radio/rfsimulator/apply_channelmod.c` (`rxAddInput()`) revealed that two calls to `gaussZiggurat(0.0, 1.0)` are executed for real and imaginary I/Q components per sample across all 106 PRBs, even when noise is configured to $-100\text{ dBm}$ (which remains non-zero floating point). This per-sample pseudorandom generation imposes millions of instructions per second on a single thread.
+
+### Experimental Matrix Comparison (20 Mbps Offered Load, 20s Duration)
+
+The systematic diagnostic progression across all four evaluated configurations is summarized below:
+
+| Evaluation Parameter | Condition 1: Dual-Slice (`chanmod` ON, Gain 0) | Condition 2: Single-Slice (`chanmod` ON, Gain 0) | Condition 3: Single-Slice (`chanmod` OFF) | Condition 4: Dual-Slice Complete (`chanmod` OFF) | Methodological Notes & Bounds |
+|---|---|---|---|---|---|
+| **Radio Time Progress (*SFN*) during Load** | $0.42\times - 0.43\times$ | $0.44\times - 0.47\times$ | $1.29\times - 1.42\times$ | **$0.91\times - 1.08\times$** (Near real-time, load avg $\approx 1.0\times$) | Min sample $0.91\times$ at 22:14:09; overall session average $1.14\times$. |
+| **iPerf Receiver Reported Throughput** | $12.9 - 13.1\text{ Mbps}$ | $13.9\text{ Mbps}$ | $20.0\text{ Mbps}$ | **$20.0\text{ Mbps}$** | Application-layer average over receiver window. |
+| **iPerf Receiver Reported Duration** | $30.54\text{ s}$ | $28.78\text{ s}$ | $20.05\text{ s}$ | **$20.03\text{ s}$** | Internal endpoint reporting duration. |
+| **Duration Delta ($T_{\text{recv}} - T_{\text{send}}$)** | $10.54\text{ s}$ | $8.78\text{ s}$ | $0.05\text{ s}$ | **$0.03\text{ s}$** | iPerf endpoint duration delta, not direct buffer queue depth. |
+| **UDP Jitter at Receiver** | $1.264\text{ ms}$ | $0.807\text{ ms}$ | $0.620\text{ ms}$ | **$0.937\text{ ms}$** | Stable across all conditions. |
+| **eMBB RTT during Active Load** | Unanswered in 1s window (`Loss: 100%`) | Unanswered in 1s window (`Loss: 100%`) | $7.1 - 26.5\text{ ms}$ (after sec 2) | **Initial transient:** $513\text{ ms}$, $845\text{ ms}$, $229\text{ ms}$<br>**After sec 3:** $10.1 - 29.1\text{ ms}$ | Exhibits transient startup delay during initial 1–3 seconds in Condition 4. |
+| **URLLC RTT during 20M eMBB Load** | Spikes up to **$64.0\text{ ms}$** | *(Inactive / UE-2 stopped)* | *(Inactive / UE-2 stopped)* | **$12.0 - 33.0\text{ ms}$** (Mean: **$23.38\text{ ms}$**) | **14 of 20 samples exceed local 20 ms threshold.** Local SLA not yet fully satisfied. |
+| **Receiver Reported UDP Loss** | $0\%$ (34,529 datagrams counted) | $0\%$ (34,529 datagrams counted) | $0\%$ (34,529 datagrams counted) | **$0\%$ (34,526 of 34,529 datagrams)** | 3 datagrams uncounted at receiver in Condition 4. |
+| **Post-Test Ping (Both Slices)** | eMBB $52.3\text{ ms}$ / URLLC $25.4\text{ ms}$ | eMBB $48.2\text{ ms}$ / URLLC `DOWN` | eMBB $18.2\text{ ms}$ / URLLC `DOWN` | **eMBB $30.3\text{ ms}$ / URLLC $28.8\text{ ms}$** | 0% loss on active slices. |
+
+
+### Solution & Operational Baseline
+1. **Operational Calibration Baseline Configuration:**
+   Maintain `du_gnb1.conf` with `options = ();`:
+   ```text
+   RFSIMULATOR = {
+     serveraddr = "server";
+     serverport = "4043";
+     options = ();
+     modelname = "AWGN";
+     ploss_dB = 0.0;
+   };
+   ```
+   Restart Split-RAN on VM-4:
+   ```bash
+   sudo /opt/oran/ran/start_ran.sh
+   ```
+2. **Strategy for Dynamic Channel Emulation (ML Metric Enrichment):**
+   To generate rich dynamic metrics (varying BLER, MCS, CQI, and SNR) for machine learning bottleneck classification without triggering CPU starvation:
+   * **Bandwidth / PRB Downscaling (Recommended):** Lower bandwidth from 106 PRBs (40 MHz) to 51 PRBs (20 MHz) or 25 PRBs to reduce I/Q sample processing volume by 50–75%.
+   * **Three-Quarter Sampling:** Evaluate the `-E` command-line flag on gNB and nrUE to decrease the sampling rate per official OAI documentation.
+   * **Explicit Bypass Guard in Source:** If modifying `apply_channelmod.c`, implement an explicit configuration guard (e.g., bypassing `gaussZiggurat` only when a documented zero-noise flag is set), recognizing that $-100\text{ dBm}$ noise remains computationally non-zero.
+3. **Academic Reporting & Terminology Constraints:**
+   * Avoid characterizing 13 Mbps as physical PUSCH capacity; it is an application-layer throughput ceiling caused by simulator clock dilation.
+   * Avoid claiming "zero bufferbloat" or "SLA fully protected"; report transient startup latency (513–845 ms) and note that 14 of 20 URLLC samples exceed the 20 ms threshold under full 20 Mbps load.
+   * Report 0.03s duration difference as iPerf endpoint duration delta rather than direct queue drainage measurement.
+
