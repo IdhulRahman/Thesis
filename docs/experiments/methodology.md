@@ -189,33 +189,40 @@ OFDM signals are processed in the frequency domain via Fast Fourier Transform (F
 
 ---
 
-#### 4.4.3 Calibrated Operational Profiles & Performance Matrix
-The testbed formally defines three operational profiles to support distinct evaluation objectives:
+#### 4.4.3 Comprehensive Comparison: 106 PRBs vs. 51 PRBs Across Evaluated Profiles
+To provide an authoritative decision matrix for testbed operators and researchers, the table below consolidates the empirical findings across all four evaluated testbed configurations:
 
-```
-+---------------------------------------------------------------------------------------------------------+
-| Profile 1: Calibrated Real-Time Slicing Profile (Default Recommendation for ML / NWDAF Telemetry)       |
-| DU-1: 51 PRB, SCS 30 kHz, -E (23.04 Msps), chanmod ACTIVE, unity gain (0.0 dB), noise -100.0 dB        |
-| UE-1: -r 51, -C 3609120000, -E, --ue-scan-carrier                                                      |
-| DU-2 / UE-2: 106 PRB Baseline (Port 4044, 61.44 Msps)                                                   |
-| Verified Behavior: SFN progress 1.05x - 1.09x real-time; physical PUSCH capacity 16.6 Mbps             |
-| Documentation: Case 56 in docs/troubleshooting/ran-ue.md#case-56                                        |
-+---------------------------------------------------------------------------------------------------------+
-| Profile 2: High-Throughput Wire-Speed Baseline (Pure Clean Pipe, No Channel Variation)                  |
-| DU-1: 106 PRB, SCS 30 kHz, no -E (61.44 Msps), options = (); (chanmod DISABLED)                        |
-| UE-1: -r 106, -C 3619200000, timing-correction-disable                                                 |
-| DU-2 / UE-2: 106 PRB Baseline (Port 4044)                                                               |
-| Verified Behavior: 20.0 Mbps wire-speed (20.03s duration), SFN progress 1.02x real-time                 |
-| Documentation: Case 55 (Resolution) in docs/troubleshooting/ran-ue.md#case-55                           |
-+---------------------------------------------------------------------------------------------------------+
-| Profile 3: Historical Full-Bandwidth Impairment Profile (Reference Benchmark - Dilation Mode)           |
-| DU-1: 106 PRB, SCS 30 kHz, no -E (61.44 Msps), options = ("chanmod"); noise_power_dB = -2.0 dB       |
-| Verified Behavior: Clock progress dilates to 0.44x, throughput capped at ~13 Mbps (artificial queue)   |
-| Documentation: Case 55 (Symptom) in docs/troubleshooting/ran-ue.md#case-55                              |
-+---------------------------------------------------------------------------------------------------------+
-```
+| Evaluation Metric | Configuration 1: Historical Baseline (106 PRB + `chanmod`, no `-E`) | Configuration 2: Transition Option A (106 PRB + `-E` + `chanmod`) | Configuration 3: Wire-Speed Baseline (106 PRB, no `chanmod`, no `-E`) | Configuration 4: Calibrated Profile 1 (51 PRB + `-E` + `chanmod` — Recommended) |
+|---|---|---|---|---|
+| **Nominal Bandwidth** | $40\text{ MHz}$ (Band n78, SCS $30\text{ kHz}$) | $40\text{ MHz}$ (Band n78, SCS $30\text{ kHz}$) | $40\text{ MHz}$ (Band n78, SCS $30\text{ kHz}$) | **$20\text{ MHz}$** (Band n78, SCS $30\text{ kHz}$) |
+| **Allocated PRBs** | $106\text{ PRBs}$ ($1272\text{ subcarriers}$) | $106\text{ PRBs}$ ($1272\text{ subcarriers}$) | $106\text{ PRBs}$ ($1272\text{ subcarriers}$) | **$51\text{ PRBs}$** ($612\text{ subcarriers}$) |
+| **Sampling Rate & FFT**| $61.44\text{ Msps}$ (FFT 2048) | $46.08\text{ Msps}$ (FFT 1536) | $61.44\text{ Msps}$ (FFT 2048) | **$23.04\text{ Msps}$ (FFT 768)** |
+| **Channel Simulation** | Active (`options = ("chanmod");`) | Active (`options = ("chanmod");`) | **Disabled (`options = ();`)** | **Active (`options = ("chanmod");`)** |
+| **SFN Radio Clock Ratio**| $\mathbf{0.42\times - 0.44\times}$ (Severe Dilation) | $\mathbf{0.57\times - 0.58\times}$ (Partial Dilation) | $\mathbf{1.02\times}$ (Real-Time) | $\mathbf{1.05\times - 1.09\times}$ (**Strictly Real-Time**) |
+| **Real-Time Execution?**| **NO** (Software Throttled) | **NO** (Software Throttled) | **YES** | **YES** ($100\%$ Dilation Free) |
+| **Throughput @ 20M Load**| $\approx 12.9 - 13.1\text{ Mbps}$ (Artificial Cap) | $\approx 17.1\text{ Mbps}$ ($+31.5\%$) | **$20.0\text{ Mbps}$** (Full Line-Rate) | **$16.6\text{ Mbps}$** (True Physical TDD Cap) |
+| **Queue Backlog (Delta)**| $\mathbf{+10.54\text{ s}}$ (Simulator Bufferbloat)| $\mathbf{+3.37\text{ s}}$ (Reduced Backlog) | $\mathbf{+0.03\text{ s}}$ (Zero Queue) | $\mathbf{+0.05\text{ s}}$ ($\le 15\text{M}$); $\mathbf{+12.45\text{ s}}$ (Physical @ 20M) |
+| **Channel Telemetry** | Dynamic (BLER, MCS, CQI, SNR) | Dynamic (BLER, MCS, CQI, SNR) | **Static** (BLER 0%, MCS 28, CQI 15) | **Dynamic** (BLER, adaptive MCS, SNR) |
+| **Empirical Case Link** | [Case 55 (Symptom)](../troubleshooting/ran-ue.md#case-55) | [Case 56 (Option A)](../troubleshooting/ran-ue.md#case-56) | [Case 55 (Resolution)](../troubleshooting/ran-ue.md#case-55) & [Case 53](../troubleshooting/ran-ue.md#case-53) | [Case 56 (Option B)](../troubleshooting/ran-ue.md#case-56) |
 
-**Multi-Step Empirical Load Characterization under Profile 1 (60-second test runs):**
+---
+
+#### 4.4.4 Researcher Decision Guide: Choosing Between 106 PRBs and 51 PRBs
+Based on our empirical characterization, researchers can choose the operational profile that aligns with their experimental objective:
+
+1. **Choose 51 PRBs with `-E` and Active `chanmod` (Configuration 4 — Recommended Default):**
+   * **Target Use Case:** Machine Learning model training, NWDAF AnLF bottleneck detection, Near-RT RIC xApp closed-loop steering, and cross-domain root-cause analysis (RCA).
+   * **Expected Behavior:** Radio progress runs strictly in real-time ($1.05\times - 1.09\times$). Application loads at 5, 10, and 15 Mbps pass with zero queuing delay ($+0.05\text{ s}$). Load at 20 Mbps cleanly saturates the physical channel at $16.6\text{ Mbps}$, accumulating a predictable, pure physical socket backlog without CPU simulator distortion. Radio telemetry contains authentic link adaptation variations.
+2. **Choose 106 PRBs without `chanmod` (Configuration 3 — Pure Wire-Speed Baseline):**
+   * **Target Use Case:** Core network user-plane benchmarking, UPF queue queuing/drop characterization under extreme throughput, or evaluating maximum line-rate saturation (20.0+ Mbps).
+   * **Expected Behavior:** Perfect line-rate delivery ($20.0\text{ Mbps}$, $20.03\text{ s}$ duration, 0% packet loss) and real-time execution ($1.02\times$). However, channel telemetry is sterile (BLER 0%, MCS 28, CQI 15).
+3. **Avoid 106 PRBs with `chanmod` (Configuration 1 & Configuration 2):**
+   * **Observed Limitation:** Without downscaling, per-sample Gaussian convolutions in `apply_channelmod.c` saturate single-core CPU throughput, dilating radio progress to $0.44\times$ (full sampling) or $0.58\times$ (with `-E`).
+   * **Experimental Risk:** Wall-clock packet intake is artificially capped at $\approx 13\text{ Mbps}$ (or $17\text{ Mbps}$), generating severe secondary bufferbloat and false latency spikes that corrupt time-series training data.
+
+---
+
+#### 4.4.5 Multi-Step Empirical Load Characterization under Profile 1 (60-second test runs)
 
 | Offered Load (UDP) | SFN Clock Ratio | Receiver Throughput | Packet Loss | Duration Delta | Mean RTT (Slice 2 Co-run) | Status |
 |---|---|---|---|---|---|---|

@@ -1041,6 +1041,19 @@ $$\text{Total Observed Latency/Backlog} = \Delta t_{\text{sim\_dilation}} + \Del
 
 ---
 
+### Comparative Synthesis: 106 PRBs vs. 51 PRBs Across Evaluated Profiles
+
+The table below provides a comprehensive comparison of what occurs under each configuration based on our empirical campaign:
+
+| Configuration Profile | Bandwidth & Sampling | Channel Modeling | SFN Progress | Throughput @ 20M | Queue Backlog Delta | Telemetry Richness | Recommended Use Case |
+|---|---|---|---|---|---|---|---|
+| **1. Historical Impairment (106 PRB, no `-E`)** | 106 PRB / 61.44 Msps (FFT 2048) | Active (`chanmod`) | **0.44x (Dilated)** | ~13.0 Mbps (Artificial) | +10.54s (Severe bloat) | Dynamic | Benchmark for dilation (see [Case 55](#case-55)) |
+| **2. Transition Option A (106 PRB, `-E`)** | 106 PRB / 46.08 Msps (FFT 1536) | Active (`chanmod`) | **0.58x (Dilated)** | ~17.1 Mbps (+31.5%) | +3.37s (Reduced bloat) | Dynamic | Transitional testing (see [Case 56](#case-56)) |
+| **3. Clean Pipe Baseline (106 PRB, no `-E`)** | 106 PRB / 61.44 Msps (FFT 2048) | Disabled (`options = ();`) | **1.02x (Real-time)**| **20.0 Mbps (Wire-speed)**| +0.03s (Zero queue) | Static (BLER 0%, MCS 28)| Line-rate transport benchmark (see [Case 55](#case-55)) |
+| **4. Calibrated Profile 1 (51 PRB, `-E`)** | 51 PRB / 23.04 Msps (FFT 768) | Active (`chanmod`) | **1.05x - 1.09x (Real-time)**| **16.6 Mbps (TDD Cap)** | +0.05s (<=15M), +12.45s (20M)| Dynamic (BLER, MCS, SNR)| **Default for ML / NWDAF Telemetry** |
+
+---
+
 ### Operational SOP: Configuration Profiles & Rollback Procedures
 
 The testbed supports three distinct operational profiles depending on the experimental objective:
