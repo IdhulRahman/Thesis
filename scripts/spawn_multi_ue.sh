@@ -153,7 +153,7 @@ EOF_CONF
   local prb_val="106"
   local freq_val="3619200000"
   if [[ "$slice_num" -eq 1 ]]; then
-    sampling_args=(-E)
+    sampling_args=(-E --ue-scan-carrier)
     prb_val="51"
     freq_val="3609120000"
   fi
