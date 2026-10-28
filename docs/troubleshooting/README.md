@@ -76,6 +76,7 @@ The table below maps all historical Case numbers from the monolithic log to thei
 | **Case 53** | [`ran-ue.md`](ran-ue.md#case-53) | `Radio Link Failure (RLF) Breakdown Threshold` | Radio Link Failure (RLF) Breakdown Threshold & Tunnel Teardown |
 | **Case 54** | [`ran-ue.md`](ran-ue.md#case-54) | `5G Core Docker JSON Log Growth and Rotation` | 5G Core Docker JSON Log Growth and Rotation Configuration |
 | **Case 55** | [`ran-ue.md`](ran-ue.md#case-55) | `RFSimulator 'chanmod' Bottleneck & Clock Dilation` | OAI RFSimulator 'chanmod' Computational Bottleneck, Clock Dilation, and Bufferbloat Under High Offered Load (20 Mbps) |
+| **Case 56** | [`ran-ue.md`](ran-ue.md#case-56) | `RFSimulator Real-Time via -E & 51 PRB Downscaling` | OAI RFSimulator Real-Time Resolution via Three-Quarter Sampling (-E) & 51 PRB Downscaling: Disaggregating Simulator Computational Dilation from Physical TDD Channel Saturation |
 | **Case 31** | [`5g-core.md`](5g-core.md) | `Docker Compose Network Collision & Undefined ` | Docker Compose Network Collision & Undefined Network during NWDAF Merge |
 | **Case 32** | [`5g-core.md`](5g-core.md) | `MySQL 8.0 Subscriber Initialization Failure o` | MySQL 8.0 Subscriber Initialization Failure on OAI v2.1.0 Schema (`ERROR 1054` & `ERROR 3140`) |
 | **Case 34** | [`5g-core.md`](5g-core.md) | `Transient Docker Hub Timeout during Large Ima` | Transient Docker Hub Timeout during Large Image Pulls (`net/http: timeout awaiting response headers`) |

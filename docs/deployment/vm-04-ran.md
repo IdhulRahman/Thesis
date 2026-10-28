@@ -576,9 +576,15 @@ du1 = du1.replace('remote_n_address = "192.168.71.150";', 'remote_n_address = "1
 du1 = du1.replace('local_n_portd   = 2153;', 'local_n_portd   = 2153;')
 du1 = du1.replace('remote_n_portd  = 2153;', 'remote_n_portd  = 2153;')
 
-# Configure Calibrated Operational Baseline for DU-1 (options = (); ploss_dB = 0.0; noise_power_dB = -100.0)
-# options = (); disables chanmod overhead to maintain real-time radio progress at 20 Mbps (see Case 55)
-du1 = re.sub(r'options\s*=\s*\([^\)]*\);', 'options = ();', du1)
+# Configure Profile 1: Calibrated Real-Time Slicing Profile (51 PRBs, -E, chanmod Active)
+# Downscaling to 51 PRBs + -E (23.04 Msps) maintains 1.05x - 1.09x real-time execution with chanmod (see Case 56)
+du1 = re.sub(r'absoluteFrequencySSB\s*=\s*\d+;', 'absoluteFrequencySSB = 640704;', du1)
+du1 = re.sub(r'dl_absoluteFrequencyPointA\s*=\s*\d+;', 'dl_absoluteFrequencyPointA = 639996;', du1)
+du1 = re.sub(r'dl_carrierBandwidth\s*=\s*\d+;', 'dl_carrierBandwidth = 51;', du1)
+du1 = re.sub(r'ul_carrierBandwidth\s*=\s*\d+;', 'ul_carrierBandwidth = 51;', du1)
+du1 = re.sub(r'initialDLBWPlocationAndBandwidth\s*=\s*\d+;', 'initialDLBWPlocationAndBandwidth = 13750;', du1)
+du1 = re.sub(r'initialULBWPlocationAndBandwidth\s*=\s*\d+;', 'initialULBWPlocationAndBandwidth = 13750;', du1)
+du1 = re.sub(r'options\s*=\s*\([^\)]*\);', 'options = ("chanmod");', du1)
 du1 = re.sub(r'ploss_dB\s*=\s*[-0-9.]+;', 'ploss_dB = 0.0;', du1)
 du1 = re.sub(r'noise_power_dB\s*=\s*[-0-9.]+;', 'noise_power_dB = -100.0;', du1)
 

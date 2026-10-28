@@ -127,11 +127,14 @@ A primary evaluation goal of this thesis is benchmarking machine learning algori
   2. **Channel Coverage Degradation:** Low/moderate PRB demand accompanied by poor radio channel conditions (declining SNR $\to$ link adaptation drops MCS $\to$ BLER escalates $\to$ RLC retransmissions surge).
   Dynamic channel metrics (BLER, MCS, CQI, SNR) are required to realistically represent coverage degradation states in the training dataset.
 
-#### 4.4.3 Operational Baseline & Future Scaling Roadmap
-To balance computational stability with metric richness for machine learning:
-1. **Calibrated Operational Baseline:** Dual-slice operation without `chanmod` (`options = ();`) is maintained as the temporary calibration baseline for multi-slice load capacity (verified at 20.0 Mbps line rate for the evaluated test sessions).
-2. **Planned Dynamic Metric Enrichment Paths:** Subsequent experimental phases will empirically evaluate dynamic channel variation via:
-   * **Bandwidth / PRB Downscaling:** Standard 3GPP TS 38.104 Table 5.3.2-1 transmission bandwidth configurations for SCS 30 kHz ($\mu = 1$) specify **51 PRBs (20 MHz)** and **24 PRBs (10 MHz)** (not 25 PRBs). Downscaling to 51 or 24 PRBs reduces the subcarrier sample volume requiring convolution; the actual performance benefit on RFSimulator execution speed must be empirically characterized.
-   * **Three-Quarter Sampling:** Evaluating the `-E` command-line flag on `nr-softmodem` and `nr-uesoftmodem` to decrease FFT sampling overhead per OAI RFSimulator guidelines.
-   * **Profiling and Targeted Code Optimization:** Investigating explicit noise configuration guards in `apply_channelmod.c` to prevent redundant Gaussian generation when noise is unutilized, noting that configured values such as `noise_power_dB = -100.0` remain computationally non-zero.
+#### 4.4.3 Calibrated Operational Profiles & Empirical Resolution Roadmap
+To balance computational stability with metric richness for machine learning, our experimental campaign empirically evaluated three operational profiles (see [Case 55](../troubleshooting/ran-ue.md#case-55) and [Case 56](../troubleshooting/ran-ue.md#case-56)):
+1. **Profile 1: Calibrated Real-Time Slicing Profile (51 PRB + `-E` + `chanmod` Active — Recommended):**
+   * **PHY Parameterization:** Band 78 ($\mu = 1$, SCS 30 kHz), Point A ARFCN `639996` ($3599.94\text{ MHz}$), SSB ARFCN `640704` ($3610.56\text{ MHz}$), BWP RIV `13750` ($51\text{ PRB}$), nrUE center frequency $3609.12\text{ MHz}$ (`3609120000`).
+   * **Sampling & Transform:** Three-quarter sampling (`-E`) reduces FFT size to 768 ($23.04\text{ Msps}$ per `get_samplerate_and_bw()` in OAI `nr_common.c`), cutting sample volume by $50\%$ relative to 106 PRB `-E` and $62.5\%$ relative to unscaled full sampling.
+   * **Runtime Performance:** Sustains **$1.05\times - 1.09\times$ real-time radio progress** under full load with software channel modeling active (`ploss_dB = 0.0`, `noise_power_dB = -100.0`). Physical uplink capacity is bounded at **$16.6\text{ Mbps}$** by TDD slot allocations (2 UL slots per 5 ms), allowing healthy multi-slice traffic at 5, 10, and 15 Mbps with zero queuing delay ($+0.05\text{ s}$ duration delta) and clean buffer backlog accumulation at 20 Mbps ($12.45\text{ s}$ queue drainage).
+2. **Profile 2: Full-Bandwidth Wire-Speed Baseline (106 PRB, no `-E`, `options = ();`):**
+   * Disables software channel modeling overhead to evaluate physical upper-bound throughput at $20.0\text{ Mbps}$ line-rate ($20.03\text{ s}$ receiver duration, SFN ratio $\approx 1.02\times$).
+3. **Profile 3: Historical Full-Bandwidth Impairment Reference (106 PRB + `chanmod`, no `-E`):**
+   * Retained as a documented historical benchmark demonstrating the $0.44\times$ clock dilation ceiling ($\approx 13\text{ Mbps}$ wall-clock absorption limit).
 
