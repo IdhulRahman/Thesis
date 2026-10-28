@@ -912,13 +912,20 @@ To enable rich dynamic radio channel telemetry (varying BLER, CQI, adaptive MCS,
 Inspection of OAI codebase (full reference commit [`29d5fa7d38bb1ee8935ef7ae30a396d53772ea4f`](https://github.com/OPENAIRINTERFACE/openairinterface5g/tree/29d5fa7d38bb1ee8935ef7ae30a396d53772ea4f)) reveals the exact algorithmic mechanisms governing `chanmod` computational overhead and the `-E` sampling reduction:
 
 #### 1. Software Channel Modeling Overhead (`chanmod`)
-In `radio/rfsimulator/apply_channelmod.c` (`rxAddInput()`):
-```c
-// Gaussian noise generator called twice per I/Q sample across all PRBs
-out_ptr->r += ... + noise_per_sample * gaussZiggurat(0.0, 1.0);
-out_ptr->i += ... + noise_per_sample * gaussZiggurat(0.0, 1.0);
-```
-Even when configured with unity gain (`ploss_dB = 0.0`) and low noise floor (`noise_power_dB = -100.0`), `gaussZiggurat(0.0, 1.0)` executes floating-point pseudorandom generation and multipath channel matrix convolutions for every I/Q sample. At 106 PRBs full sampling ($61.44\text{ Msps}$), this imposes over $122.8\text{ million}$ pseudorandom function calls per second on a single thread (`ru_thread`), saturating the CPU core and dilating simulator execution time.
+* **Core Functionality & Architectural Role:**
+  `chanmod` (*Channel Modeling*) is the wireless propagation emulation module within OAI RFSimulator.
+  * **Default State without `chanmod` (`options = ();`):** RFSimulator acts as an ideal lossless channel ("pure pipe") with zero attenuation, noise floor, multipath delay spread, or fading.
+  * **Active Channel Modeling (`options = ("chanmod");`):** Injects realistic wireless channel physics, dynamically computing large-scale path loss (`ploss_dB`), thermal noise floor (`noise_power_dB`), and multipath Rayleigh/Rician fading matrices.
+* **Research Necessity for ML / NWDAF Telemetry:**
+  This module is vital for training machine learning algorithms in NWDAF and Near-RT RIC. Without active channel modeling, radio metrics are sterile and static: BLER (*Block Error Rate*) is permanently $0\%$, MCS (*Modulation and Coding Scheme*) is permanently locked at the maximum index ($28$), and CQI is pinned at $15$. To train an ML classifier capable of differentiating between **Radio Resource Saturation (high PRB utilization under clean radio conditions)** and **Channel Coverage Degradation (declining SNR $\to$ MCS drop $\to$ BLER surge $\to$ RLC retransmissions)**, dynamic radio channel metrics are mandatory.
+* **Algorithmic Root Cause of the CPU Bottleneck:**
+  In `radio/rfsimulator/apply_channelmod.c` (`rxAddInput()`):
+  ```c
+  // Gaussian noise generator called twice per I/Q sample across all PRBs
+  out_ptr->r += ... + noise_per_sample * gaussZiggurat(0.0, 1.0);
+  out_ptr->i += ... + noise_per_sample * gaussZiggurat(0.0, 1.0);
+  ```
+  Even when configured with unity gain (`ploss_dB = 0.0`) and low noise floor (`noise_power_dB = -100.0`), `gaussZiggurat(0.0, 1.0)` executes floating-point pseudorandom generation and multipath channel matrix convolutions for every I/Q sample. At 106 PRBs full sampling ($61.44\text{ Msps}$), this imposes over $122.8\text{ million}$ pseudorandom function calls per second on a single thread (`ru_thread`), saturating the CPU core and dilating simulator execution time to $0.44\times$ real-time ([Case 55](#case-55)).
 
 #### 2. Three-Quarter Sampling (`-E`) Flag Activation
 In `executables/softmodem-common.h` ([line 141](https://github.com/OPENAIRINTERFACE/openairinterface5g/blob/29d5fa7d38bb1ee8935ef7ae30a396d53772ea4f/executables/softmodem-common.h#L141)):
@@ -930,7 +937,15 @@ Passing `-E` sets `softmodem_params.threequarter_fs = 1`. In `executables/nr-ues
 fp->threequarter_fs = get_softmodem_params()->threequarter_fs;
 ```
 
-#### 3. FFT Size Determination Algorithm
+#### 3. FFT Size Determination Algorithm & 3GPP Standardization Background
+* **OFDM Frequency-Domain Processing & 3GPP Bandwidth Mapping:**
+  OFDM signals are processed in the frequency domain using the Fast Fourier Transform (FFT). Standard Cooley-Tukey FFT implementations operate most efficiently on power-of-two sizes ($2^N$, such as 512, 1024, 2048). However, standard 3GPP transmission bandwidth allocations rarely match exact power-of-two boundaries:
+  * **106 PRBs:** $106 \times 12\text{ subcarriers} = 1272\text{ active subcarriers}$. The next power-of-two FFT is **2048 points** ($61.44\text{ Msps}$). This leaves $2048 - 1272 = 776$ unused guard-band subcarriers that the CPU simulator is forced to compute.
+  * OAI provides the `-E` (*three-quarter sampling rate*) option, reducing FFT size to $\frac{3}{4} \times 2048 = 1536\text{ points}$ ($46.08\text{ Msps}$). Because $1536 \ge 1272$, all 106 PRBs are accommodated without frequency truncation, reducing computational sample volume by **$25\%$**.
+  * **51 PRBs:** $51 \times 12\text{ subcarriers} = 612\text{ active subcarriers}$. The next power-of-two size is 1024. With `-E`, the transform size scales to:
+    $$\text{FFT} = 1024 \times \frac{3}{4} = 768\text{ points} \quad (23.04\text{ Msps})$$
+    Because $768 \ge 612$, all 51 PRBs fit completely without distortion, while cutting computational sample volume by **$62.5\%$** relative to unscaled 106 PRBs!
+
 In `openair1/PHY/INIT/nr_parms.c` ([lines 97–116](https://github.com/OPENAIRINTERFACE/openairinterface5g/blob/29d5fa7d38bb1ee8935ef7ae30a396d53772ea4f/openair1/PHY/INIT/nr_parms.c#L97-L116)):
 ```c
 // Start with FFT size 512, double until sufficient for N_RB * 12 subcarriers
@@ -949,9 +964,6 @@ if (fp->threequarter_fs) {
     }
 }
 ```
-* **106 PRBs without `-E`:** $106 \times 12 = 1272$ subcarriers $\implies \text{FFT} = 2048$ points ($61.44\text{ Msps}$).
-* **106 PRBs with `-E`:** $2048 \times 3 / 4 = 1536 \ge 1272 \implies \text{FFT} = 1536$ points ($46.08\text{ Msps}$). Computing load drops by $25\%$.
-* **51 PRBs with `-E`:** $51 \times 12 = 612$ subcarriers. Power-of-2 size is $1024$. $1024 \times 3 / 4 = 768 \ge 612 \implies \text{FFT} = 768$ points ($23.04\text{ Msps}$). Computing load drops by $62.5\%$ compared to unscaled 106 PRBs.
 
 In `common/utils/nr/nr_common.c` ([lines 809–902](https://github.com/OPENAIRINTERFACE/openairinterface5g/blob/29d5fa7d38bb1ee8935ef7ae30a396d53772ea4f/common/utils/nr/nr_common.c#L809-L902)):
 ```c
