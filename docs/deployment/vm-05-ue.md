@@ -68,9 +68,17 @@ All parameter selections on VM-5 strictly comply with 3GPP Release 16/17 and off
 - **Standard:** **3GPP TS 38.101-1** (User Equipment radio transmission and reception) and **3GPP TS 38.211**.
 - **Band:** **Band n78** (TDD, $3300 - 3800\text{ MHz}$).
 - **Subcarrier Spacing (SCS):** **$\mu = 1$ ($30\text{ kHz}$)**, corresponding to `--numerology 1`.
-- **Transmission Bandwidth:** **106 PRBs** ($40\text{ MHz}$ nominal channel bandwidth at $30\text{ kHz}$ SCS), corresponding to `-r 106`.
-- **Downlink Carrier Frequency:** **$3619200000\text{ Hz}$ ($3.6192\text{ GHz}$)**, corresponding to `-C 3619200000`.
-- **Constraint:** Must match identically with the radio profile defined in `cu_gnb.conf` and `du_gnb*.conf` on VM-4. Any mismatch in frequency, band, or numerology prevents the UE from synchronizing to the Primary and Secondary Synchronization Signals (PSS/SSS) during cell search.
+- **Per-Slice Transmission Bandwidth & Carrier Parameterization:**
+  - **UE 1 / Slice 1 (DU-1 / Cell 1 :4043) — Calibrated Profile 1:**
+    - Transmission Bandwidth: **51 PRBs** ($20\text{ MHz}$ nominal channel bandwidth per 3GPP TS 38.104 Table 5.3.2-1), corresponding to `-r 51`.
+    - Downlink Carrier Frequency: **$3609120000\text{ Hz}$ ($3.60912\text{ GHz}$)**, corresponding to `-C 3609120000`.
+    - Transform Optimization: Three-quarter sampling (`-E`), yielding 768-point FFT ($23.04\text{ Msps}$).
+    - Initial Synchronization: `--ue-scan-carrier` to scan GSCN 7923 ($3610.56\text{ MHz}$, SSB offset 6).
+    *(Note: If rolled back to Profile 2 baseline, UE 1 operates at 106 PRBs, $3619.20\text{ MHz}$, no `-E`).*
+  - **UE 2 / Slice 2 (DU-2 / Cell 2 :4044) — Baseline:**
+    - Transmission Bandwidth: **106 PRBs** ($40\text{ MHz}$ nominal channel bandwidth), corresponding to `-r 106`.
+    - Downlink Carrier Frequency: **$3619200000\text{ Hz}$ ($3.6192\text{ GHz}$)**, corresponding to `-C 3619200000`.
+- **Constraint:** Parameters must match identically with the radio profiles defined in `du_gnb1.conf` and `du_gnb2.conf` on VM-4. Any mismatch in frequency, bandwidth, or numerology prevents the UE from synchronizing to the Primary and Secondary Synchronization Signals (PSS/SSS) during cell search.
 
 ### 2.2 5G AKA Security & Authentication Credentials
 - **Standard:** **3GPP TS 33.501** (Security architecture and procedures for 5G System).

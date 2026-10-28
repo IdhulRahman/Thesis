@@ -50,10 +50,10 @@ The diagram below reflects the **empirically validated state** of the testbed cu
 #### A. Radio Access Network Subsystem (VM-4)
 * **CU-CP / CU-UP Split:** OAI native C softmodem (`nr-softmodem`) runs on VM-4, terminating RRC for control plane and SDAP/PDCP for user plane.
 * **Dual Distributed Units (DU-1 & DU-2):**
-  * **DU-1 (Cell-1, PCI 1):** Operates on RFsimulator TCP port `4043`. Default serving cell for Slice 1 (eMBB).
-  * **DU-2 (Cell-2, PCI 2):** Operates on RFsimulator TCP port `4044`. Default serving cell for Slice 2 (URLLC).
+  * **DU-1 (Cell-1, PCI 1):** Operates on RFsimulator TCP port `4043`. Default serving cell for Slice 1 (eMBB). Supports calibrated operational profiles: **Profile 1 (Default)** operates at 51 PRBs ($20\text{ MHz}$, SCS 30 kHz, Point A `639996`, SSB `640704`, RIV `13750`) with Three-Quarter Sampling (`-E`, $23.04\text{ Msps}$) and active channel modeling (`options = ("chanmod");`), sustaining real-time execution ($1.05\times - 1.09\times$ SFN progress); **Profile 2** operates at 106 PRBs line-rate baseline without `chanmod`.
+  * **DU-2 (Cell-2, PCI 2):** Operates on RFsimulator TCP port `4044` at 106 PRBs ($40\text{ MHz}$, SCS 30 kHz, Point A `640008`, SSB `641280`). Default serving cell for Slice 2 (URLLC).
 * **RAN Telemetry Adapter (`ran_adapter.py`):**  
-  A lightweight Python daemon that tails physical gNB scheduler logs (`du1.log` and `du2.log`), parsing instantaneous MAC allocation (`NPRB / 106`), UL-SCH SNR, MCS, and BLER, and transmitting JSON payloads to VM-6 (`POST :9100/report`) at 1.0 Hz.
+  A lightweight Python daemon that tails physical gNB scheduler logs (`du1.log` and `du2.log`), auto-detecting carrier bandwidth per cell (`dl_carrierBandwidth` from `du_gnb*.conf`), calculating normalized instantaneous MAC PRB utilization (51 PRBs for Cell 1, 106 PRBs for Cell 2), UL-SCH SNR, MCS, and BLER, and transmitting JSON payloads to VM-6 (`POST :9100/report`) at 1.0 Hz.
 
 #### B. 5G Core Network & NWDAF Subsystem (VM-3)
 * **Control Plane Network Functions:** Containerized AMF, SMF-1 (eMBB), SMF-2 (URLLC), NRF-12, UDM, UDR, AUSF, and NSSF operating under 3GPP Release 16/17 SA specifications.
