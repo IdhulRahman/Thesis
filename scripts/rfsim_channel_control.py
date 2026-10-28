@@ -13,6 +13,7 @@ Standard Library only: Zero external Python dependencies.
 import argparse
 import datetime
 import math
+import os
 import re
 import socket
 import sys
@@ -136,14 +137,30 @@ def validate_finite(name: str, value: float) -> float:
     return float(value)
 
 
-# Verified baseline path_loss_dB configured in du_gnb1.conf for this testbed:
-# Model 0 (rfsimu_channel_enB0): ploss_dB = 20.0 dB
-# Model 1 (rfsimu_channel_ue0) : ploss_dB = 20.0 dB
-# NOTE: These values correspond to this testbed's du_gnb1.conf channelmod configuration,
-# not an immutable universal default of OAI.
+def detect_configured_baseline_ploss(channel_id: int) -> float:
+    """Read configured ploss_dB from du_gnb1.conf if available, else default to calibrated 0.0 dB."""
+    conf_path = "/opt/oran/ran/conf/du_gnb1.conf"
+    if os.path.exists(conf_path):
+        try:
+            with open(conf_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            m = re.search(r'ploss_dB\s*=\s*([-0-9.]+);', content)
+            if m:
+                return float(m.group(1))
+        except Exception:
+            pass
+    # Default to Calibrated Profile 1 baseline (0.0 dB unity gain)
+    return float(os.environ.get("RFSIM_BASELINE_PLOSS", "0.0"))
+
+
+# Calibrated baseline path_loss_dB for this testbed (Profile 1: ploss_dB = 0.0 dB unity gain):
+# Model 0 (rfsimu_channel_enB0): DL path loss
+# Model 1 (rfsimu_channel_ue0) : UL path loss
+# Under Profile 1, ploss_dB = 0.0 dB corresponds to 1.0x unity gain.
+# Attenuation of X dB sets target path_loss_dB = baseline - X (e.g. 0.0 - 10.0 = -10.0 dB).
 TESTBED_VERIFIED_BASELINES = {
-    0: 20.0,
-    1: 20.0,
+    0: detect_configured_baseline_ploss(0),
+    1: detect_configured_baseline_ploss(1),
 }
 
 
@@ -515,7 +532,7 @@ Usage Examples:
   # 3. Direct raw path_loss_dB setting:
   python3 rfsim_channel_control.py set-raw-ploss -5.0 --channel-id 1 --port 9090
 
-  # 4. Reset channels back to testbed baseline (+20 dB):
+  # 4. Reset channels back to testbed baseline (0.0 dB):
   python3 rfsim_channel_control.py reset --port 9090
 
   # 5. Sweep attenuation from 0 dB to 25 dB in steps of 5 dB (15s per step):
@@ -552,7 +569,7 @@ Usage Examples:
     # Subcommand: reset
     p_reset = subparsers.add_parser(
         "reset", parents=[sub_base],
-        help="Reset channel(s) back to testbed verified baseline (+20.0 dB from du_gnb1.conf)"
+        help="Reset channel(s) back to testbed verified baseline (0.0 dB unity gain from du_gnb1.conf)"
     )
     p_reset.add_argument("--channel-id", type=int, default=None, help="Channel index (default: both 0 and 1)")
     p_reset.add_argument("--target-ploss", type=float, default=None, help="Explicit target path_loss_dB (default: testbed verified baseline)")

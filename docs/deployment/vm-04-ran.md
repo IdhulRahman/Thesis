@@ -452,13 +452,13 @@ gNBs =
  }
 );
 
-# [CALIBRATED BASELINE] RFsimulator TCP server listening port for Cell-1
-# Profile A: Calibrated Operational Baseline (Default - Real-Time Multi-Slice)
-# options = (); disables software channelmod overhead to maintain ~1.0x real-time radio progress at 20 Mbps.
+# [CALIBRATED PROFILE 1] RFsimulator TCP server listening port for Cell-1
+# Profile 1: Calibrated Real-Time Slicing Profile (Default - 51 PRB, -E, chanmod Active)
+# Downscaling to 51 PRBs + -E (23.04 Msps) maintains 1.05x - 1.09x real-time execution with chanmod (see Case 56)
 rfsimulator :
 {
     serverport = 4043;                    # [CUSTOMIZABLE] VM-5 nrUE connects here
-    options = ();                         # [BASELINE] Disables chanmod CPU overhead (see Case 55)
+    options = ("chanmod");                # [CALIBRATED] Enables channel modeling (see Case 56)
     modelname = "AWGN";
 };
 
@@ -630,7 +630,7 @@ sudo ./nr-softmodem -O /opt/oran/ran/conf/cu_gnb.conf \
 ```bash
 cd /opt/oran/ran/openairinterface5g/cmake_targets/ran_build/build
 sudo ./nr-softmodem -O /opt/oran/ran/conf/du_gnb1.conf \
-  --rfsim --telnetsrv --telnetsrv.listenport 9090 \
+  --rfsim -E --telnetsrv --telnetsrv.listenport 9090 \
   2>&1 | tee /opt/oran/ran/du1.log
 ```
 

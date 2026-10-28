@@ -114,20 +114,18 @@ All baseline comparisons are executed across a minimum of $N \ge 10$ independent
 
 ### 4.4 Testbed Execution Timing & RFSimulator Channel Modeling Specification
 
-#### 4.4.1 RFSimulator Channel Modeling Architecture (`chanmod`) & Research Rationale
+#### 4.4.1 RFSimulator Channel Modeling Architecture (`chanmod`) & Research Considerations
 In virtualized 5G experimentation, OpenAirInterface RFSimulator provides two distinct operational modes:
-* **Ideal Propagation Mode (`options = ();`):** By default, RFSimulator behaves as an ideal, distortion-free communication medium ("pure pipe") without signal path loss, thermal noise, Doppler shift, or multipath fading.
-* **Realistic Propagation Mode (`options = ("chanmod");`):** Activating software channel modeling introduces physical wireless propagation characteristics, dynamically calculating large-scale path loss (`ploss_dB`), thermal noise floor (`noise_power_dB`), and multi-tap Rayleigh/Rician fading matrices.
+* **Ideal Propagation Mode (`options = ();`):** By default, RFSimulator acts as an ideal, distortion-free communication medium ("pure pipe") without path loss, thermal noise, Doppler shift, or multipath fading.
+* **Realistic Propagation Mode (`options = ("chanmod");`):** Activating software channel modeling introduces physical wireless propagation characteristics, dynamically computing large-scale path loss (`ploss_dB`), thermal noise floor (`noise_power_dB`), and multi-tap Rayleigh/Rician fading matrices.
 
-**Critical Necessity for Machine Learning / NWDAF Telemetry:**
-In this thesis research, dynamic channel modeling is fundamental for training explainable Machine Learning classifiers (NWDAF AnLF and Near-RT RIC xApps). Under an ideal channel, radio telemetry is sterile and invariant:
-* Block Error Rate (BLER) remains identically $0.0\%$.
-* Modulation and Coding Scheme (MCS) is locked permanently at the highest index (MCS 28).
-* Channel Quality Indicator (CQI) remains pegged at 15.
-
-Without radio variance, machine learning models exhibit **shortcut learning**, relying disproportionately on Core UPF queue metrics and failing to differentiate between:
-1. **Radio Resource Saturation (Congestion Bottleneck):** High PRB demand under pristine channel conditions (high SNR $> 25\text{ dB}$, high MCS 28, minimal BLER).
-2. **Channel Coverage Degradation (Radio Impairment Bottleneck):** Moderate PRB demand accompanied by degrading link conditions (falling SNR $\to$ link adaptation drops MCS $\to$ BLER escalates $\to$ RLC retransmissions surge).
+**Research Rationale & Telemetry Dynamics for Machine Learning:**
+In this thesis research, dynamic channel modeling is investigated to provide realistic radio link adaptation behavior for training explainable Machine Learning classifiers (NWDAF AnLF and Near-RT RIC xApps):
+* **Experimental Risk of Shortcut Learning:** Operating under an ideal channel presents an experimental risk: link adaptation operates near its theoretical optimum (MCS adapting minimally, BLER remaining near $0\%$). When evaluated for bottleneck classification, an absence of radio channel variance creates a risk of shortcut learning, where an ML model might disproportionately rely on Core UPF queue metrics while under-utilizing radio features. This represents a research hypothesis to be evaluated during offline ML training.
+* **Differentiating Bottleneck Domains:** Realistic multi-slice bottleneck identification requires distinguishing between:
+  1. **Radio Resource Saturation (Congestion Bottleneck):** High PRB demand under clean radio conditions (high SNR, high MCS, minimal BLER).
+  2. **Channel Coverage Degradation (Radio Impairment Bottleneck):** Moderate PRB demand accompanied by degrading link conditions (falling SNR $\to$ link adaptation drops MCS $\to$ BLER escalates $\to$ RLC retransmissions surge).
+  *Note: While `ran_adapter.py` actively exports NPRB, MCS, BLER, SNR, and RSSI, it does not currently export CQI. Furthermore, during the unattenuated calibration test under Profile 1 (`ploss_dB = 0.0`, `noise_power_dB = -100.0`), radio link conditions remained near-ideal with minimal BLER.*
 
 **Computational Bottleneck Analysis in Source Code:**
 Inspection of OAI source code (commit [`29d5fa7d`](https://github.com/OPENAIRINTERFACE/openairinterface5g/tree/29d5fa7d38bb1ee8935ef7ae30a396d53772ea4f), file `radio/rfsimulator/apply_channelmod.c` at `rxAddInput()`):
@@ -141,7 +139,7 @@ Even with unity gain (`ploss_dB = 0.0`) and low noise floor (`noise_power_dB = -
 ---
 
 #### 4.4.2 3GPP Bandwidth Mapping & Three-Quarter Sampling (`-E`)
-To eliminate simulator computational dilation while preserving active channel modeling, the testbed leverages 3GPP bandwidth downscaling paired with OAI Three-Quarter Sampling (`-E`):
+To relieve simulator computational dilation while preserving active channel modeling, the testbed evaluates 3GPP bandwidth downscaling paired with OAI Three-Quarter Sampling (`-E`):
 
 **1. Frequency Domain Processing & FFT Sizing:**
 OFDM signals are processed in the frequency domain via Fast Fourier Transform (FFT). Standard Cooley-Tukey FFT architectures require transform sizes of power-of-two ($2^N$). Standard 3GPP transmission bandwidth configurations (3GPP TS 38.104 Table 5.3.2-1), however, rarely align with power-of-two boundaries:
@@ -151,7 +149,7 @@ OFDM signals are processed in the frequency domain via Fast Fourier Transform (F
   $$\text{FFT} = 1024 \times \frac{3}{4} = 768\text{ points} \quad (23.04\text{ Msps})$$
   Because $768 \ge 612$, all 51 PRBs fit completely without spectral distortion, reducing computational sample volume by **$62.5\%$** relative to unscaled 106 PRBs.
 
-**2. Source Code Implementation in OpenAirInterface:**
+**2. Source Code Implementation in OpenAirInterface (Commit `29d5fa7d`):**
 * **CLI Parameter Declaration (`executables/softmodem-common.h` line 141):**
   ```c
   {"E", CONFIG_HLP_TQFS, PARAMFLAG_BOOL, .iptr=&softmodem_params.threequarter_fs, .defintval=0, TYPE_INT, 0},
@@ -176,46 +174,49 @@ OFDM signals are processed in the frequency domain via Fast Fourier Transform (F
       }
   }
   ```
-* **Sampling Rate Mapping (`common/utils/nr/nr_common.c` lines 809–902):**
+* **Sampling Rate Mapping (`common/utils/nr/nr_common.c` lines 895–901 in `get_samplerate_and_bw()`):**
   ```c
   case 51:
     if (threequarter_fs) {
-      *sampling_rate = 23040000;  // 23.04 Msps
-      *bandwidth = 20e6;          // 20 MHz
+      *sample_rate = 23040000;
+      *tx_bw = 20e6;
+      *rx_bw = 20e6;
     }
   ```
 * **SSB Carrier Scan for 51 PRBs (`--ue-scan-carrier`):**
-  In carrier bandwidths of 51 PRBs ($612$ subcarriers), the hardcoded default SSB subcarrier offset of 516 falls outside the carrier bandwidth ($516 + 240 = 756 > 612$), causing synchronization failure (`synch Failed`). Passing `--ue-scan-carrier` enables dynamic GSCN carrier scanning via `get_scan_ssb_first_sc()` (`openair1/PHY/NR_UE_TRANSPORT/nr_initial_sync.c`), achieving synchronization to GSCN 7923 ($3610.56\text{ MHz}$) in 1 frame.
+  In carrier bandwidths of 51 PRBs ($612$ subcarriers), the hardcoded default SSB subcarrier offset assumed by `nr-uesoftmodem` (516 subcarriers, tailored for 106 PRBs) falls outside the carrier bandwidth ($516 + 240 = 756 > 612$), causing initial synchronization failure (`synch Failed`). Passing `--ue-scan-carrier` enables dynamic carrier scanning via `get_scan_ssb_first_sc()` (`openair1/PHY/NR_UE_TRANSPORT/nr_initial_sync.c`), allowing the UE to scan GSCN raster candidates (e.g. GSCN 7923 at $3610.56\text{ MHz}$) and compute the exact subcarrier offset `ssbFirstSC` ($234$ subcarriers from Point A), achieving initial synchronization in 1 frame.
 
 ---
 
 #### 4.4.3 Comprehensive Comparison: 106 PRBs vs. 51 PRBs Across Evaluated Profiles
 To provide an authoritative decision matrix for testbed operators and researchers, the table below consolidates the empirical findings across all four evaluated testbed configurations:
 
-| Evaluation Metric | Configuration 1: Historical Baseline (106 PRB + `chanmod`, no `-E`) | Configuration 2: Transition Option A (106 PRB + `-E` + `chanmod`) | Configuration 3: Wire-Speed Baseline (106 PRB, no `chanmod`, no `-E`) | Configuration 4: Calibrated Profile 1 (51 PRB + `-E` + `chanmod` — Recommended) |
+| Evaluation Metric | Configuration 1: Historical Dilation Benchmark (106 PRB + `chanmod`, no `-E`) | Configuration 2: Transition Option A (106 PRB + `-E` + `chanmod`) | Configuration 3: Wire-Speed Baseline (106 PRB, no `chanmod`, no `-E`) | Configuration 4: Calibrated Profile 1 (51 PRB + `-E` + `chanmod` — Recommended) |
 |---|---|---|---|---|
 | **Nominal Bandwidth** | $40\text{ MHz}$ (Band n78, SCS $30\text{ kHz}$) | $40\text{ MHz}$ (Band n78, SCS $30\text{ kHz}$) | $40\text{ MHz}$ (Band n78, SCS $30\text{ kHz}$) | **$20\text{ MHz}$** (Band n78, SCS $30\text{ kHz}$) |
 | **Allocated PRBs** | $106\text{ PRBs}$ ($1272\text{ subcarriers}$) | $106\text{ PRBs}$ ($1272\text{ subcarriers}$) | $106\text{ PRBs}$ ($1272\text{ subcarriers}$) | **$51\text{ PRBs}$** ($612\text{ subcarriers}$) |
 | **Sampling Rate & FFT**| $61.44\text{ Msps}$ (FFT 2048) | $46.08\text{ Msps}$ (FFT 1536) | $61.44\text{ Msps}$ (FFT 2048) | **$23.04\text{ Msps}$ (FFT 768)** |
-| **Channel Simulation** | Active (`options = ("chanmod");`) | Active (`options = ("chanmod");`) | **Disabled (`options = ();`)** | **Active (`options = ("chanmod");`)** |
-| **SFN Radio Clock Ratio**| $\mathbf{0.42\times - 0.44\times}$ (Severe Dilation) | $\mathbf{0.57\times - 0.58\times}$ (Partial Dilation) | $\mathbf{1.02\times}$ (Real-Time) | $\mathbf{1.05\times - 1.09\times}$ (**Strictly Real-Time**) |
-| **Real-Time Execution?**| **NO** (Software Throttled) | **NO** (Software Throttled) | **YES** | **YES** ($100\%$ Dilation Free) |
-| **Throughput @ 20M Load**| $\approx 12.9 - 13.1\text{ Mbps}$ (Artificial Cap) | $\approx 17.1\text{ Mbps}$ ($+31.5\%$) | **$20.0\text{ Mbps}$** (Full Line-Rate) | **$16.6\text{ Mbps}$** (True Physical TDD Cap) |
-| **Queue Backlog (Delta)**| $\mathbf{+10.54\text{ s}}$ (Simulator Bufferbloat)| $\mathbf{+3.37\text{ s}}$ (Reduced Backlog) | $\mathbf{+0.03\text{ s}}$ (Zero Queue) | $\mathbf{+0.05\text{ s}}$ ($\le 15\text{M}$); $\mathbf{+12.45\text{ s}}$ (Physical @ 20M) |
-| **Channel Telemetry** | Dynamic (BLER, MCS, CQI, SNR) | Dynamic (BLER, MCS, CQI, SNR) | **Static** (BLER 0%, MCS 28, CQI 15) | **Dynamic** (BLER, adaptive MCS, SNR) |
-| **Empirical Case Link** | [Case 55 (Symptom)](../troubleshooting/ran-ue.md#case-55) | [Case 56 (Option A)](../troubleshooting/ran-ue.md#case-56) | [Case 55 (Resolution)](../troubleshooting/ran-ue.md#case-55) & [Case 53](../troubleshooting/ran-ue.md#case-53) | [Case 56 (Option B)](../troubleshooting/ran-ue.md#case-56) |
+| **Channel Simulation** | Active (`ploss=0.0`, `noise=-100.0`) | Active (`ploss=0.0`, `noise=-100.0`) | **Disabled (`options = ();`)** | **Active (`ploss=0.0`, `noise=-100.0`)** |
+| **SFN Radio Clock Ratio**| $\mathbf{0.42\times - 0.44\times}$ (Severe Dilation) | $\mathbf{0.57\times - 0.58\times}$ (Partial Dilation) | $\mathbf{1.02\times}$ (Near Real-Time) | $\mathbf{1.05\times - 1.09\times}$ (**Near Real-Time**) |
+| **Computational Dilation Relief**| Severe Dilation Constraint | Partial Relief ($+31.8\%$ speedup) | Dilation Free | Substantially Relieved (No large lag) |
+| **Receiver Throughput @ 20M**| $\approx 12.9 - 13.1\text{ Mbps}$ (Dilation Absorption Cap)| $\approx 17.1\text{ Mbps}$ ($+31.5\%$) | **$20.0\text{ Mbps}$** (Line-Rate Delivery)| **$16.6\text{ Mbps}$** (Session Average Measured)|
+| **Queue Backlog (Delta)**| $\mathbf{+10.54\text{ s}}$ (Simulator Bufferbloat)| $\mathbf{+3.37\text{ s}}$ (Reduced Backlog) | $\mathbf{+0.03\text{ s}}$ (Zero Queue) | $\mathbf{+0.05\text{ s}}$ ($\le 15\text{M}$); $\mathbf{+12.45\text{ s}}$ (@ 20M session)|
+| **Telemetry Dynamics** | Link adaptation active under RF test | Link adaptation active under RF test | **Unperturbed** (MCS near 28, BLER ~0%)| Link adaptation active under RF test |
+| **Empirical Case Link** | [Case 55 (Gejala)](../troubleshooting/ran-ue.md#case-55) | [Case 56 (Phase 1)](../troubleshooting/ran-ue.md#case-56) | [Case 55 (Solusi)](../troubleshooting/ran-ue.md#case-55) & [Case 53](../troubleshooting/ran-ue.md#case-53) | [Case 56 (Phase 2)](../troubleshooting/ran-ue.md#case-56) |
+
+*(Note on Historical Profiles: Configuration 1 corresponds to Profile 3A evaluated at `ploss_dB = 0.0, noise_power_dB = -100.0` demonstrating dilation. Profile 3B represents early RF fault injection trials evaluated at elevated noise `noise_power_dB = -2.0` in Case 51).*
 
 ---
 
 #### 4.4.4 Researcher Decision Guide: Choosing Between 106 PRBs and 51 PRBs
-Based on our empirical characterization, researchers can choose the operational profile that aligns with their experimental objective:
+Based on empirical characterization, researchers can select the operational profile tailored to their experimental goal:
 
 1. **Choose 51 PRBs with `-E` and Active `chanmod` (Configuration 4 — Recommended Default):**
    * **Target Use Case:** Machine Learning model training, NWDAF AnLF bottleneck detection, Near-RT RIC xApp closed-loop steering, and cross-domain root-cause analysis (RCA).
-   * **Expected Behavior:** Radio progress runs strictly in real-time ($1.05\times - 1.09\times$). Application loads at 5, 10, and 15 Mbps pass with zero queuing delay ($+0.05\text{ s}$). Load at 20 Mbps cleanly saturates the physical channel at $16.6\text{ Mbps}$, accumulating a predictable, pure physical socket backlog without CPU simulator distortion. Radio telemetry contains authentic link adaptation variations.
-2. **Choose 106 PRBs without `chanmod` (Configuration 3 — Pure Wire-Speed Baseline):**
+   * **Expected Behavior:** Radio progress runs near real-time ($1.05\times - 1.09\times$). Offered loads at 5, 10, and 15 Mbps complete with zero duration delta ($+0.05\text{ s}$). Offered load at 20 Mbps results in an average measured receiver throughput of $16.6\text{ Mbps}$ with a post-traffic receiver drainage duration of $12.45\text{ s}$. Radio link adaptation mechanisms remain available for dynamic RF impairment sweeps.
+2. **Choose 106 PRBs without `chanmod` (Configuration 3 — Wire-Speed Baseline):**
    * **Target Use Case:** Core network user-plane benchmarking, UPF queue queuing/drop characterization under extreme throughput, or evaluating maximum line-rate saturation (20.0+ Mbps).
-   * **Expected Behavior:** Perfect line-rate delivery ($20.0\text{ Mbps}$, $20.03\text{ s}$ duration, 0% packet loss) and real-time execution ($1.02\times$). However, channel telemetry is sterile (BLER 0%, MCS 28, CQI 15).
+   * **Expected Behavior:** Line-rate delivery ($20.0\text{ Mbps}$, $20.03\text{ s}$ duration, 0% packet loss) and near real-time execution ($1.02\times$). Radio link metrics remain unperturbed.
 3. **Avoid 106 PRBs with `chanmod` (Configuration 1 & Configuration 2):**
    * **Observed Limitation:** Without downscaling, per-sample Gaussian convolutions in `apply_channelmod.c` saturate single-core CPU throughput, dilating radio progress to $0.44\times$ (full sampling) or $0.58\times$ (with `-E`).
    * **Experimental Risk:** Wall-clock packet intake is artificially capped at $\approx 13\text{ Mbps}$ (or $17\text{ Mbps}$), generating severe secondary bufferbloat and false latency spikes that corrupt time-series training data.
@@ -226,30 +227,20 @@ Based on our empirical characterization, researchers can choose the operational 
 
 | Offered Load (UDP) | SFN Clock Ratio | Receiver Throughput | Packet Loss | Duration Delta | Mean RTT (Slice 2 Co-run) | Status |
 |---|---|---|---|---|---|---|
-| **5.0 Mbps** | $1.09\times$ (Real-time) | **$5.00\text{ Mbps}$** | **0.0%** (0/25,897) | $+0.05\text{ s}$ | $18.9\text{ ms}$ | Healthy Normal |
-| **10.0 Mbps** | $1.08\times$ (Real-time) | **$9.99\text{ Mbps}$** | **0.0%** (0/51,795) | $+0.05\text{ s}$ | $17.4\text{ ms}$ | Healthy Normal |
-| **15.0 Mbps** | $1.06\times$ (Real-time) | **$15.0\text{ Mbps}$** | **0.0%** (0/77,694) | $+0.05\text{ s}$ | $15.1\text{ ms}$ | Healthy Normal |
-| **20.0 Mbps** | $1.05\times$ (Real-time) | **$16.6\text{ Mbps}$** (Capacity)| **0.0%** (0/103,592)| $+12.45\text{ s}$ (Drainage) | $20.2\text{ ms}$ | RAN Capacity Backlog |
+| **5.0 Mbps** | $1.09\times$ (Near Real-time) | **$5.00\text{ Mbps}$** | **0.0%** (0/25,897) | $+0.05\text{ s}$ | $18.9\text{ ms}$ | Healthy Normal |
+| **10.0 Mbps** | $1.08\times$ (Near Real-time) | **$9.99\text{ Mbps}$** | **0.0%** (0/51,795) | $+0.05\text{ s}$ | $17.4\text{ ms}$ | Healthy Normal |
+| **15.0 Mbps** | $1.06\times$ (Near Real-time) | **$15.0\text{ Mbps}$** | **0.0%** (0/77,694) | $+0.05\text{ s}$ | $15.1\text{ ms}$ | Healthy Normal |
+| **20.0 Mbps** | $1.05\times$ (Near Real-time) | **$16.6\text{ Mbps}$** (Measured Avg)| **0.0%** (0/103,592)| $+12.45\text{ s}$ (Drainage) | $20.2\text{ ms}$ | High Load Session |
 
 ---
 
-#### 4.4.4 Disaggregation of Bottleneck Domains: Computational vs. Physical Channel Saturation
-A paramount scientific outcome of this calibration is disaggregating simulation software artifacts from physical communication constraints:
+#### 4.4.6 Analysis of 20 Mbps Session Timing and Queue Drainage
+Under Profile 1 (51 PRBs + `-E`), transmitting 20.0 Mbps UDP load over 60 seconds resulted in an average receiver throughput of $16.56\text{ Mbps}$ ($16.6\text{ Mbps}$ rounded) over an active receiver duration of $72.45\text{ s}$ (a duration delta of $+12.45\text{ s}$ relative to sender).
 
-$$\text{Total Observed Latency/Backlog} = \Delta t_{\text{sim\_dilation}} + \Delta t_{\text{phy\_backlog}}$$
+**Algebraic Relation vs. Queue Validation:**
+The relationship between sender offered rate $R_{\text{tx}}$, sender duration $T_{\text{tx}}$, receiver throughput $G_{\text{rx}}$, and receiver duration delta $\Delta t = T_{\text{rx}} - T_{\text{tx}}$ is expressed algebraically as:
+$$\Delta t = \frac{(R_{\text{tx}} - G_{\text{rx}}) \times T_{\text{tx}}}{G_{\text{rx}}} = \frac{(20.0 - 16.563) \times 60.0}{16.563} \approx 12.45\text{ seconds}$$
+This formulation confirms algebraic consistency between the total volume of delivered bits and the reported reporting duration across the session. It serves as an accounting check for delivered data rather than an independent validation of exact queue location (e.g. socket send buffer vs. RLC entity vs. receiver socket).
 
-1. **Elimination of Computational Dilation ($\Delta t_{\text{sim\_dilation}} = 0$):**
-   Under Profile 1, the SFN radio clock advances at **$1.05\times - 1.09\times$ real-time** across all offered loads. Computational time dilation is completely eliminated.
-2. **Isolation of Physical TDD Capacity Bound:**
-   Under 3GPP Band 78 TDD frame structure with $\mu = 1$ ($30\text{ kHz}$ SCS) and $5\text{ ms}$ periodicity ($10\text{ slots}$), the frame pattern allocates:
-   * 7 Downlink slots, 2 Uplink slots, and 1 Mixed slot $\implies 20\%$ to $25\%$ of radio frame time dedicated to PUSCH transmission.
-   * At 51 PRBs, the theoretical uplink physical limit is **$16.6\text{ Mbps}$**.
-3. **Mathematical Queue Backlog Verification:**
-   When offered $20.0\text{ Mbps}$ UDP load against a $16.6\text{ Mbps}$ physical channel:
-   * Excess load generation rate: $\Delta R = 20.0 - 16.6 = 3.4\text{ Mbps}$.
-   * Total excess volume generated over 60 seconds: $3.4\text{ Mbps} \times 60\text{ s} = 204\text{ Mbit}$.
-   * Theoretical buffer drainage duration:
-     $$\Delta t_{\text{drainage}} = \frac{204\text{ Mbit}}{16.6\text{ Mbps}} = \mathbf{12.28\text{ seconds}}$$
-   * Measured receiver reporting duration delta: $72.45\text{ s} - 60.00\text{ s} = \mathbf{12.45\text{ seconds}}$.
-   * **Calculated vs. measured error is less than $1.4\%$**, rigorously proving that the delay observed under 20 Mbps is authentic socket/RLC queue drainage rather than CPU clock throttling.
-
+**Channel Parameterization Context:**
+Per 3GPP TS 38.214, physical PUSCH maximum data rate depends on detailed transmission parameters including allocated PRBs ($51$), OFDM symbols per slot, DMRS pattern and overhead, modulation order (e.g. 64QAM), target coding rate, and TDD DL/UL slot allocation ratio (2 UL slots per 5 ms period). Under this testbed configuration, 16.6 Mbps represents the **empirically measured average receiver throughput under 20 Mbps offered load**, providing a stable operating reference for multi-slice evaluation.

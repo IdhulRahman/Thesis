@@ -970,14 +970,15 @@ In `common/utils/nr/nr_common.c` ([lines 809–902](https://github.com/OPENAIRIN
 // 51 PRBs (20 MHz, SCS 30 kHz) with threequarter_fs = 1 explicitly maps to 23.04 Msps:
 case 51:
   if (threequarter_fs) {
-    *sampling_rate = 23040000;
-    *bandwidth = 20e6;
+    *sample_rate = 23040000;
+    *tx_bw = 20e6;
+    *rx_bw = 20e6;
   }
 ```
 
 #### 4. GSCN Scanning Requirement for 51 PRBs
-When downscaling DU-1 to 51 PRBs (`absoluteFrequencyPointA = 639996` [3599.94 MHz], `absoluteFrequencySSB = 640704` [3610.56 MHz], GSCN 7923), the nrUE requires dynamic carrier scanning. By default, `nr-uesoftmodem` assumes an SSB subcarrier offset of 516 (tailored for 106 PRB carrier). For 51 PRBs ($612$ total subcarriers), $516 + 240 = 756 > 612$, falling completely outside the carrier bandwidth and triggering `pbch not decoded` and `synch Failed`.
-Passing `--ue-scan-carrier` instructs the UE to invoke `get_scan_ssb_first_sc()` (`openair1/PHY/NR_UE_TRANSPORT/nr_initial_sync.c`), properly calculating the subcarrier offset for GSCN 7923 and achieving initial sync within 1 frame.
+When downscaling DU-1 to 51 PRBs (`absoluteFrequencyPointA = 639996` [3599.94 MHz], `absoluteFrequencySSB = 640704` [3610.56 MHz], GSCN 7923), the nrUE requires dynamic carrier scanning. By default, `nr-uesoftmodem` assumes a fixed SSB subcarrier offset of 516 (tailored for 106 PRB carrier geometry). In a 51 PRB carrier ($612$ total subcarriers), $516 + 240 = 756 > 612$, which falls completely outside the carrier bandwidth and triggers `pbch not decoded` and `synch Failed`.
+Passing `--ue-scan-carrier` instructs the UE to invoke `get_scan_ssb_first_sc()` (`openair1/PHY/NR_UE_TRANSPORT/nr_initial_sync.c`), properly scanning GSCN raster candidates (GSCN 7923 at $3610.56\text{ MHz}$) and calculating the true first subcarrier index `ssbFirstSC` ($234$ subcarriers from Point A), achieving initial synchronization in 1 frame.
 
 ---
 
@@ -1096,7 +1097,8 @@ The testbed supports three distinct operational profiles depending on the experi
    c = re.sub(r'noise_power_dB\s*=\s*[-0-9.]+;', 'noise_power_dB = -100.0;', c)
    with open(path, "w") as f: f.write(c)
    EOF
-   sudo sed -i 's|./nr-softmodem -O "$CONF_DIR/du_gnb1.conf" --rfsim |./nr-softmodem -O "$CONF_DIR/du_gnb1.conf" --rfsim -E|g' /opt/oran/ran/start_ran.sh
+   # Ensure -E is present idempotently (avoids duplicate -E-E if run repeatedly)
+   grep -q "du_gnb1.conf.*--rfsim -E" /opt/oran/ran/start_ran.sh || sudo sed -i 's|\(du_gnb1\.conf" --rfsim\)\( -E\)*|\1 -E|' /opt/oran/ran/start_ran.sh
    sudo /opt/oran/ran/stop_ran.sh && sleep 2 && sudo /opt/oran/ran/start_ran.sh
    ```
 2. **VM-5 (`nrue`):**
@@ -1122,7 +1124,8 @@ The testbed supports three distinct operational profiles depending on the experi
    c = re.sub(r'options\s*=\s*\([^)]*\);', 'options = ();', c)
    with open(path, "w") as f: f.write(c)
    EOF
-   sudo sed -i 's|./nr-softmodem -O "$CONF_DIR/du_gnb1.conf" --rfsim -E|./nr-softmodem -O "$CONF_DIR/du_gnb1.conf" --rfsim|g' /opt/oran/ran/start_ran.sh
+   # Remove -E idempotently
+   sudo sed -i 's|\(du_gnb1\.conf" --rfsim\) -E|\1|g' /opt/oran/ran/start_ran.sh
    sudo /opt/oran/ran/stop_ran.sh && sleep 2 && sudo /opt/oran/ran/start_ran.sh
    ```
 2. **VM-5 (`nrue`):**
