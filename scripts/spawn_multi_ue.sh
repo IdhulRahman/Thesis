@@ -149,8 +149,14 @@ EOF_CONF
   fi
 
   # 3. Launch nr-uesoftmodem inside namespace
+  local -a sampling_args=()
+  if [[ "$slice_num" -eq 1 ]]; then
+    sampling_args=(-E)
+  fi
+
   echo "Menjalankan softmodem UE #$ue_idx di namespace $ns mengarah ke port $rf_port..."
   sudo ip netns exec "$ns" nohup "$BUILD_DIR/nr-uesoftmodem" \
+    "${sampling_args[@]}" \
     -r 106 \
     --numerology 1 \
     --band 78 \

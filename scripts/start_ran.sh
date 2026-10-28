@@ -25,8 +25,8 @@ nohup sudo ./nr-softmodem -O "$CONF_DIR/cu_gnb.conf" \
 echo "Waiting for CU to establish N2 (AMF) and E2 (Near-RT RIC)..."
 sleep 4
 
-echo "=== 2. Starting DU-1 (Cell-1, Port 4043, Telnet 9090) in background ==="
-nohup sudo ./nr-softmodem -O "$CONF_DIR/du_gnb1.conf" --rfsim \
+echo "=== 2. Starting DU-1 (Cell-1, Port 4043, Telnet 9090, 3/4 Sampling -E) in background ==="
+nohup sudo ./nr-softmodem -O "$CONF_DIR/du_gnb1.conf" --rfsim -E \
   --telnetsrv --telnetsrv.listenport 9090 \
   < /dev/null > "$LOG_DIR/du1.log" 2>&1 &
 sleep 2
