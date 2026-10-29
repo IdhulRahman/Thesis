@@ -136,6 +136,11 @@ out_ptr->i += ... + noise_per_sample * gaussZiggurat(0.0, 1.0);
 ```
 Even with unity gain (`ploss_dB = 0.0`) and low noise floor (`noise_power_dB = -100.0`), `gaussZiggurat(0.0, 1.0)` executes per-sample floating-point random generation and channel matrix convolutions. At 106 PRBs full sampling ($61.44\text{ Msps}$), this generates over **$122.8\text{ million}$** random number calls per second on a single thread (`ru_thread`), inducing severe CPU saturation that dilates the simulated radio clock to $\approx 0.42\times - 0.44\times$ real-time ([Case 55](../troubleshooting/ran-ue.md#case-55)).
 
+**Empirical SFN Radio Clock Verification Instrument:**
+To quantitatively detect and audit execution speed dilation, the testbed utilizes the Python audit utility [`scripts/measure_sfn_clock.py`](../../scripts/measure_sfn_clock.py). Operating on VM-4 (`oai-ran`), the tool tails DU scheduler frame announcements (`Frame.Slot <N>.0`):
+$$\text{SFN Ratio} = \frac{\Delta T_{\text{radio}}}{\Delta T_{\text{wall}}} = \frac{\Delta \text{Frame} \times 0.010\text{ s}}{\Delta t_{\text{monotonic}}}$$
+Per 3GPP TS 38.211 §4.3.1, one NR frame is exactly $10\text{ ms}$. A ratio $\approx 1.0\times$ confirms unhindered real-time emulation, while a ratio $< 0.8\times$ reveals simulator-induced CPU stalling.
+
 ---
 
 #### 4.4.2 3GPP Bandwidth Mapping & Three-Quarter Sampling (`-E`)

@@ -17,6 +17,7 @@ This directory contains the operational daemons, automation scripts, fault injec
 | **VM-4** | `10.102.0.167` | [`stop_ran.sh`](stop_ran.sh) | Gracefully terminates all running OAI softmodem processes on VM-4. | Bash teardown utility; kills CU and DUs. |
 | **VM-4** | `10.102.0.167` | [`rfsim_channel_control.py`](rfsim_channel_control.py) | Dynamic RF channel impairment controller over OAI softmodem Telnet (`:9090`). Controls UL/DL path loss and attenuation without restarting gNB processes. | Python CLI utility; supports `show`, `set-attenuation`, `set-raw-ploss`, `reset`, `sweep`. |
 | **VM-4** | `10.102.0.167` | [`ran_adapter.py`](ran_adapter.py) | Tails `du1.log` & `du2.log`, extracts live MAC PRB allocation (normalized per cell: 51 PRBs for Cell-1, 106 PRBs for Cell-2, with auto-detection from `du_gnb*.conf`), UL-SCH SNR, MCS, and BLER with file progression and staleness tracking. Formally designated as *OAI DU scheduler-log-derived telemetry (~1 Hz)*. | Continuous daemon (1.0 Hz); pushes JSON to VM-6 `:9100/report`. |
+| **VM-4** | `10.102.0.167` | [`measure_sfn_clock.py`](measure_sfn_clock.py) | Audits OAI gNB DU SFN (System Frame Number) radio progression against host monotonic wall clock to detect simulator clock dilation. | Python CLI utility; outputs live frame progress, radio/wall ratio, and session summary. |
 | **VM-5** | `10.102.0.165` | [`spawn_multi_ue.sh`](spawn_multi_ue.sh) | Spawns isolated UE softmodems inside Linux netns (`ue1` on Cell-1 with 51 PRB / 3609.12 MHz / `-E` / `--ue-scan-carrier`, `ue2` on Cell-2 with 106 PRB / 3619.20 MHz), configures veth, NAT, and verifies canary ping. | Bash automation; writes `active_ues.txt` and UE softmodem logs. |
 | **VM-5** | `10.102.0.165` | [`stop_multi_ue.sh`](stop_multi_ue.sh) | Terminates UE softmodems, tears down veth interfaces, and cleans network namespaces. | Bash teardown utility. |
 | **VM-5** | `10.102.0.165` | [`enter_ue.sh`](enter_ue.sh) | Interactive helper to enter a designated UE namespace (`sudo ip netns exec ue<N> bash`). | Diagnostic CLI utility. |
@@ -60,5 +61,28 @@ To inspect statistical distributions of the recorded run:
 ```bash
 python3 /opt/oran/monitoring/scripts/analyze_dataset.py /opt/oran/monitoring/data/raw/<RUN_ID>/telemetry_<RUN_ID>.csv
 ```
+
+---
+
+## 3. SFN Radio Clock Audit Guide (`measure_sfn_clock.py`)
+
+To verify whether RFSimulator executes in real-time or suffers CPU-induced time dilation (see [Case 55](../docs/troubleshooting/ran-ue.md#case-55)):
+
+```bash
+# Monitor Cell-1 (DU-1) live progression
+python3 /opt/oran/ran/scripts/measure_sfn_clock.py --log /opt/oran/ran/du1.log
+
+# Monitor Cell-2 (DU-2) reporting every 128 frames (1.28s)
+python3 /opt/oran/ran/scripts/measure_sfn_clock.py --log /opt/oran/ran/du2.log --step 128
+
+# Audit an existing log file from the beginning and exit after 10 samples
+python3 /opt/oran/ran/scripts/measure_sfn_clock.py --log /opt/oran/ran/du1.log --from-start --max-samples 10
+```
+
+* **Interpretation:**
+  * Ratio $\ge 0.95\times$: Real-time execution (no simulator dilation).
+  * Ratio $0.70\times - 0.95\times$: Moderate dilation / high CPU load.
+  * Ratio $< 0.70\times$: Severe software simulator bottleneck (e.g. 106 PRB full sampling `chanmod`).
+
 
 

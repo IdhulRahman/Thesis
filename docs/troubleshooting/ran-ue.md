@@ -831,6 +831,7 @@ A systematic multi-stage experimental audit identified that the throughput ceili
 
 1. **System Frame Number (SFN) Radio Clock Dilation Measurement:**
    Tracking frame progression in `/opt/oran/ran/du1.log` against monotonic wall-clock time revealed that when `chanmod` is active, 128 radio frames ($1.28\text{ s}$ 3GPP radio time per TS 38.211 §4.3.1) required $2.87 - 3.06\text{ s}$ of wall-clock time, yielding a progress ratio of $\approx 0.42\times - 0.44\times$. This artificial time dilation limits the rate at which wall-clock application packets can be consumed by the radio stack to $\approx 13 - 14\text{ Mbps}$ wall-clock.
+   *Diagnostic Reproduction Tool:* Live SFN progression was audited using [`scripts/measure_sfn_clock.py`](../../scripts/measure_sfn_clock.py) (`python3 scripts/measure_sfn_clock.py --log /opt/oran/ran/du1.log --step 128`), tracking `Frame.Slot <N>.0` entries and computing the ratio $R = \frac{\Delta \text{Frame} \times 0.010\text{ s}}{\Delta t_{\text{wall}}}$.
 2. **CPU Pressure Stall Information (PSI) & Per-Thread Profiling:**
    During 20 Mbps load with `chanmod` active:
    * **VM-4 (`oai-ran`):** CPU pressure reached `some avg10 = 40.43%` with load average $5.17$ on 4 vCPUs. Thread `ru_thread` (PID `435491`, DU-1) consumed $88.2\%$ of a core, and DU-2 `ru_thread` consumed $47.1\%$.
@@ -1013,6 +1014,7 @@ Passing `--ue-scan-carrier` instructs the UE to invoke `get_scan_ssb_first_sc()`
   *(Note: Log snippet preserved with unverified status. In OAI `nr_initial_sync.c`, the logged field `with SSB offset: %d` prints `ssbInfo->gscnInfo.ssbFirstSC`. The numerical discrepancy between this excerpted log value of 6 and the calculated subcarrier offset for the 51 PRB configuration remains unverified, pending cross-verification against full raw session logs and the corresponding session configuration).*
   `[NR_PHY] Initializing UE threads (threequarter_fs=1, ofdm_symbol_size=768, samples_per_subframe=23040)`
 * **Multi-Step Load Characterization (60-second test runs):**
+  *(Note: SFN clock progression was monitored live via [`scripts/measure_sfn_clock.py`](../../scripts/measure_sfn_clock.py) on `/opt/oran/ran/du1.log`).*
 
 | Offered Load (UDP) | SFN Clock Ratio | Receiver Throughput | Packet Loss | Duration Delta | Mean RTT (Slice 2 Co-run) |
 |---|---|---|---|---|---|
