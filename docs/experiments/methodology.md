@@ -184,7 +184,7 @@ OFDM signals are processed in the frequency domain via Fast Fourier Transform (F
     }
   ```
 * **SSB Carrier Scan for 51 PRBs (`--ue-scan-carrier`):**
-  In carrier bandwidths of 51 PRBs ($612$ subcarriers), the hardcoded default SSB subcarrier offset assumed by `nr-uesoftmodem` (516 subcarriers, tailored for 106 PRBs) falls outside the carrier bandwidth ($516 + 240 = 756 > 612$), causing initial synchronization failure (`synch Failed`). Passing `--ue-scan-carrier` enables dynamic carrier scanning via `get_scan_ssb_first_sc()` (`openair1/PHY/NR_UE_TRANSPORT/nr_initial_sync.c`), allowing the UE to scan GSCN raster candidates (e.g. GSCN 7923 at $3610.56\text{ MHz}$) and compute the exact subcarrier offset `ssbFirstSC` ($234$ subcarriers from Point A), achieving initial synchronization in 1 frame.
+  In carrier bandwidths of 51 PRBs ($612$ subcarriers), the hardcoded default SSB subcarrier offset assumed by `nr-uesoftmodem` (516 subcarriers, tailored for 106 PRBs) falls outside the carrier bandwidth ($516 + 240 = 756 > 612$), causing initial synchronization failure (`synch Failed`). Passing `--ue-scan-carrier` enables dynamic carrier scanning via `get_scan_ssb_first_sc()` (`openair1/PHY/NR_UE_TRANSPORT/nr_initial_sync.c`), allowing the UE to scan GSCN raster candidates (e.g. GSCN 7923 at $3610.56\text{ MHz}$) and resolve the subcarrier offset `ssbFirstSC` dynamically, achieving initial synchronization in 1 frame.
 
 ---
 
@@ -201,7 +201,7 @@ To provide an authoritative decision matrix for testbed operators and researcher
 | **Computational Dilation Relief**| Severe Dilation Constraint | Partial Relief ($+31.8\%$ speedup) | Dilation Free | Substantially Relieved (No large lag) |
 | **Receiver Throughput @ 20M**| $\approx 12.9 - 13.1\text{ Mbps}$ (Dilation Absorption Cap)| $\approx 17.1\text{ Mbps}$ ($+31.5\%$) | **$20.0\text{ Mbps}$** (Line-Rate Delivery)| **$16.6\text{ Mbps}$** (Session Average Measured)|
 | **Receiver–Sender Duration Difference ($\Delta t$)**| $\mathbf{+10.54\text{ s}}$ (Simulator Bufferbloat)| $\mathbf{+3.37\text{ s}}$ (Reduced Backlog) | $\mathbf{+0.03\text{ s}}$ (Nominal difference) | $\mathbf{+0.05\text{ s}}$ ($\le 15\text{M}$); $\mathbf{+12.45\text{ s}}$ (@ 20M session)|
-| **Telemetry Dynamics** | Link adaptation active under RF test | Link adaptation active under RF test | **Unperturbed** (MCS near 28, BLER ~0%)| Link adaptation active under RF test |
+| **Telemetry Dynamics** | Link adaptation active under RF test | Link adaptation active under RF test | **Unperturbed** (ideal channel, minimal link adaptation)| Link adaptation active under RF test |
 | **Empirical Case Link** | [Case 55 (Gejala)](../troubleshooting/ran-ue.md#case-55) | [Case 56 (Phase 1)](../troubleshooting/ran-ue.md#case-56) | [Case 55 (Solusi)](../troubleshooting/ran-ue.md#case-55) & [Case 53](../troubleshooting/ran-ue.md#case-53) | [Case 56 (Phase 2)](../troubleshooting/ran-ue.md#case-56) |
 
 *(Note on Historical Profiles: Configuration 1 corresponds to Profile 3A evaluated at `ploss_dB = 0.0, noise_power_dB = -100.0` demonstrating dilation. Profile 3B represents early RF fault injection trials evaluated at elevated noise `noise_power_dB = -2.0` in Case 51).*
@@ -213,7 +213,7 @@ Based on empirical characterization, researchers can select the operational prof
 
 1. **Choose 51 PRBs with `-E` and Active `chanmod` (Configuration 4 — Recommended Default):**
    * **Target Use Case:** Machine Learning model training, NWDAF AnLF bottleneck detection, Near-RT RIC xApp closed-loop steering, and cross-domain root-cause analysis (RCA).
-   * **Expected Behavior:** Radio progress runs near real-time ($1.05\times - 1.09\times$). Offered loads at 5, 10, and 15 Mbps complete with zero duration delta ($+0.05\text{ s}$). Offered load at 20 Mbps results in an average measured receiver throughput of $16.6\text{ Mbps}$ with a receiver–sender duration difference ($\Delta t$) of $12.45\text{ s}$. Radio link adaptation mechanisms remain available for dynamic RF impairment sweeps.
+   * **Expected Behavior:** Radio progress runs near real-time ($1.05\times - 1.09\times$). Offered loads at 5, 10, and 15 Mbps complete with a nominal duration difference ($\approx +0.05\text{ s}$). Offered load at 20 Mbps results in an average measured receiver throughput of $16.6\text{ Mbps}$ with a receiver–sender duration difference ($\Delta t$) of $12.45\text{ s}$. Radio link adaptation mechanisms remain available for dynamic RF impairment sweeps.
 2. **Choose 106 PRBs without `chanmod` (Configuration 3 — Wire-Speed Baseline):**
    * **Target Use Case:** Core network user-plane benchmarking, UPF queue queuing/drop characterization under extreme throughput, or evaluating maximum line-rate saturation (20.0+ Mbps).
    * **Expected Behavior:** Line-rate delivery ($20.0\text{ Mbps}$, $20.03\text{ s}$ duration, 0% packet loss) and near real-time execution ($1.02\times$). Radio link metrics remain unperturbed.

@@ -983,7 +983,7 @@ case 51:
 
 #### 4. GSCN Scanning Requirement for 51 PRBs
 When downscaling DU-1 to 51 PRBs (`absoluteFrequencyPointA = 639996` [3599.94 MHz], `absoluteFrequencySSB = 640704` [3610.56 MHz], GSCN 7923), the nrUE requires dynamic carrier scanning. By default, `nr-uesoftmodem` assumes a fixed SSB subcarrier offset of 516 (tailored for 106 PRB carrier geometry). In a 51 PRB carrier ($612$ total subcarriers), $516 + 240 = 756 > 612$, which falls completely outside the carrier bandwidth and triggers `pbch not decoded` and `synch Failed`.
-Passing `--ue-scan-carrier` instructs the UE to invoke `get_scan_ssb_first_sc()` (`openair1/PHY/NR_UE_TRANSPORT/nr_initial_sync.c`), properly scanning GSCN raster candidates (GSCN 7923 at $3610.56\text{ MHz}$) and calculating the true first subcarrier index `ssbFirstSC` ($234$ subcarriers from Point A), achieving initial synchronization in 1 frame.
+Passing `--ue-scan-carrier` instructs the UE to invoke `get_scan_ssb_first_sc()` (`openair1/PHY/NR_UE_TRANSPORT/nr_initial_sync.c`), scanning GSCN raster candidates (GSCN 7923 at $3610.56\text{ MHz}$) and dynamically resolving `ssbFirstSC`, achieving initial synchronization in 1 frame.
 
 ---
 
@@ -1010,7 +1010,7 @@ Passing `--ue-scan-carrier` instructs the UE to invoke `get_scan_ssb_first_sc()`
   `[PHY] Setting symbol size: 768, samples per subframe: 23040`
 * **UE-1 Initialization Verification:**
   `[NR_PHY] Scanning GSCN: 7923, with SSB offset: 6, SSB Freq: 3610.560000`
-  *(Note on Log Field: In OAI `nr_initial_sync.c`, the logged field `with SSB offset: 6` represents the GSCN raster search candidate offset index relative to the search window, whereas the true subcarrier position of the SSB is calculated by `get_scan_ssb_first_sc()` as `ssbFirstSC = 234` subcarriers from Point A).*
+  *(Note: Log snippet preserved with unverified status. In OAI `nr_initial_sync.c`, the logged field `with SSB offset: %d` prints `ssbInfo->gscnInfo.ssbFirstSC`. The numerical discrepancy between this excerpted log value of 6 and the calculated subcarrier offset for the 51 PRB configuration remains unverified, pending cross-verification against full raw session logs and the corresponding session configuration).*
   `[NR_PHY] Initializing UE threads (threequarter_fs=1, ofdm_symbol_size=768, samples_per_subframe=23040)`
 * **Multi-Step Load Characterization (60-second test runs):**
 
@@ -1051,7 +1051,7 @@ The table below provides a comprehensive comparison of what occurs under each co
 |---|---|---|---|---|---|---|---|
 | **1. Historical Impairment (106 PRB, no `-E`)** | 106 PRB / 61.44 Msps (FFT 2048) | Active (`chanmod`) | **0.44x (Dilated)** | ~13.0 Mbps (Artificial) | +10.54s (Severe bloat) | Dynamic | Benchmark for dilation (see [Case 55](#case-55)) |
 | **2. Transition Option A (106 PRB, `-E`)** | 106 PRB / 46.08 Msps (FFT 1536) | Active (`chanmod`) | **0.58x (Dilated)** | ~17.1 Mbps (+31.5%) | +3.37s (Reduced bloat) | Dynamic | Transitional testing (see [Case 56](#case-56)) |
-| **3. Clean Pipe Baseline (106 PRB, no `-E`)** | 106 PRB / 61.44 Msps (FFT 2048) | Disabled (`options = ();`) | **1.02x (Real-time)**| **20.0 Mbps (Wire-speed)**| +0.03s (Nominal difference) | Static (BLER 0%, MCS 28)| Line-rate transport benchmark (see [Case 55](#case-55)) |
+| **3. Clean Pipe Baseline (106 PRB, no `-E`)** | 106 PRB / 61.44 Msps (FFT 2048) | Disabled (`options = ();`) | **1.02x (Real-time)**| **20.0 Mbps (Wire-speed)**| +0.03s (Nominal difference) | Unperturbed (ideal channel, minimal link adaptation)| Line-rate transport benchmark (see [Case 55](#case-55)) |
 | **4. Calibrated Profile 1 (51 PRB, `-E`)** | 51 PRB / 23.04 Msps (FFT 768) | Active (`chanmod`) | **1.05x - 1.09x (Real-time)**| **16.6 Mbps (Session Avg Measured)** | +0.05s (<=15M), +12.45s (@ 20M session)| Dynamic (BLER, MCS, SNR)| **Default for ML / NWDAF Telemetry** |
 
 ---
@@ -1066,17 +1066,18 @@ The testbed supports three distinct operational profiles depending on the experi
 | DU-1: 51 PRB, SCS 30 kHz, -E (23.04 Msps), chanmod ACTIVE, unity gain (0.0 dB), noise -100.0 dB  |
 | UE-1: -r 51, -C 3609120000, -E, --ue-scan-carrier                                                |
 | DU-2 / UE-2: 106 PRB Baseline (Port 4044, 61.44 Msps)                                             |
-| Verified Capacity: 16.6 Mbps UL, SFN progress 1.05x - 1.09x real-time                             |
+| Observed Behavior: 16.6 Mbps measured avg (at 20M load), SFN progress 1.05x - 1.09x real-time    |
 +---------------------------------------------------------------------------------------------------+
 | Profile 2: High-Throughput Wire-Speed Baseline (Pure Clean Pipe, No Channel Variation)            |
 | DU-1: 106 PRB, SCS 30 kHz, no -E (61.44 Msps), options = (); (chanmod DISABLED)                  |
 | UE-1: -r 106, -C 3619200000, timing-correction-disable                                           |
 | DU-2 / UE-2: 106 PRB Baseline (Port 4044)                                                         |
-| Verified Capacity: 20.0 Mbps wire-speed (20.03s receiver duration), SFN progress 1.02x real-time   |
+| Observed Behavior: 20.0 Mbps line-rate (20.03s receiver duration), SFN progress 1.02x real-time  |
 +---------------------------------------------------------------------------------------------------+
 | Profile 3: Historical Full-Bandwidth Impairment Profile (Reference Benchmark - Dilation Mode)     |
-| DU-1: 106 PRB, SCS 30 kHz, no -E (61.44 Msps), options = ("chanmod"); noise_power_dB = -2.0     |
-| Verified Behavior: SFN progress dilates to 0.44x, throughput capped at ~13 Mbps (see Case 55)    |
+| DU-1: 106 PRB, SCS 30 kHz, no -E (61.44 Msps), options = ("chanmod"); noise_power_dB = -100.0    |
+| Observed Behavior: SFN progress dilates to 0.44x, throughput capped at ~13 Mbps (see Case 55)   |
+| (Note: Historical RF fault injection in Case 51 evaluated elevated noise at noise_power_dB = -2.0) |
 +---------------------------------------------------------------------------------------------------+
 ```
 
