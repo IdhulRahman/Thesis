@@ -68,7 +68,7 @@ The table below outlines the planned treatment matrix. Parameter values represen
    python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 180 --notes "S1 Normal Light Reference"
    ```
 6. **Evidence to Collect:** Telemetry CSV (`telemetry_*.csv`), sender/receiver iperf JSON logs, UE-1 and UE-2 ping logs, SFN clock progress ratio.
-7. **Responses to Examine:** Sender offered rate matches receiver goodput ($G_{\text{rx}} \approx R_{\text{tx}}$), sender–receiver duration difference $\Delta t \approx 0$, ICMP RTT within healthy bounds ($< 25\text{ ms}$), zero UPF queue backlog and drops, stable SFN progress ($1.05\times - 1.09\times$).
+7. **Responses to Examine:** Directional candidate observations to evaluate: verify whether sender offered rate matches receiver goodput ($G_{\text{rx}} \approx R_{\text{tx}}$); duration difference remains nominal ($\Delta t \approx 0$); ICMP RTT stays within healthy bounds (using candidate $< 25\text{ ms}$ as a nominal baseline comparator); zero UPF queue backlog (`upf_backlog_bytes_embb = 0`) and zero drops (`upf_drops_embb = 0`); stable SFN progress tracks near real-time (referencing historical $1.05\times - 1.09\times$ baseline observations).
 8. **Interpretation Boundaries:** Observation of healthy metrics confirms baseline stability for the session, but does not guarantee immunity from transient hypervisor scheduling jitter.
 
 ---
@@ -116,25 +116,29 @@ The table below outlines the planned treatment matrix. Parameter values represen
 2. **Initial Conditions:** Reference channel baseline ($0.0\text{ dB}$); fixed moderate traffic demand ($\approx 10\text{ Mbps}$) that is fully served under reference conditions.
 3. **Independent Variables (Changed):** Injected Uplink path attenuation on DU-1 Channel 1 (`rfsimu_channel_ue0`) via Telnet controller while maintaining reference noise power constant.
 4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$), reference noise power, Core UPF unshaped egress, Slice 2 canary probing.
-5. **Planned Execution Sequence:**
+5. **Planned Execution Sequence & Terminal Separation:**
+   *Note on Execution Timing & Recovery:* Commands span separate VMs and run in distinct terminals. To record both active disturbance (~180s) and recovery (~60s+), the recorder must span the combined duration (`--duration 240`) or operate in manual stop mode (`--duration 0`).
    ```bash
-   # Planned procedure:
-   # 1. VM-5: Launch fixed moderate traffic
+   # Terminal 1 (VM-5 UE): Launch fixed moderate traffic in foreground
    sudo /opt/oran/ue/scripts/trafgen.sh start 300 10
-   # 2. VM-4: Inject Uplink path attenuation (candidate: 12 dB) and verify readback
+
+   # Terminal 2 (VM-4 RAN): Inject Uplink path attenuation (candidate: 12 dB) and verify readback
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 12.0 --channel-id 1 --port 9090
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py show --port 9090
-   # 3. VM-6: Record RAN impairment dataset
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S4 --duration 180 --notes "S4 RAN Channel Degradation 12dB Attenuation"
-   # 4. VM-4: Restore reference channel baseline
+
+   # Terminal 3 (VM-6 Monitoring): Record active disturbance and recovery window (~240s total)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S4 --duration 240 --notes "S4 RAN Degradation 12dB + Recovery"
+
+   # Terminal 2 (VM-4 RAN at t = 180s): Restore path attenuation back to 0.0 dB baseline
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
    ```
 6. **Evidence to Collect:** Telemetry CSV (NPRB, SNR, MCS, BLER), Telnet command/readback logs, iperf receiver logs, softmodem logs.
 7. **Responses to Examine:** Decreased Uplink SNR; downward link adaptation (lower MCS index); increased BLER and HARQ retransmissions (`ulsch_rounds`); throughput deficit at receiver; zero UPF backlog ($0\text{ B}$).
 8. **Interpretation Boundaries:**
    * Target channel model identity (`rfsimu_channel_ue0` for Channel 1 UL) must be verified via explicit readback.
-   * If attenuation induces softmodem assertion crashes or process termination, this must be logged as a **testbed operational boundary failure**, NOT as an acceptable training sample of radio congestion.
-   * Specific BLER, MCS, or SNR numerical thresholds are behavioral hypotheses, not strict prerequisites.
+   * Historical attenuation values ($5\text{–}16\text{ dB}$) from early trials serve strictly as an empirical reference starting point for candidate evaluation under Profile 1, not an established deterministic response law.
+   * Specific BLER, MCS, or SNR numerical thresholds are directional behavioral hypotheses, not rigid prerequisites. A clean baseline operating with low BLER is fully valid; radio link variations are primarily induced and evaluated during this S4 treatment.
+   * If severe attenuation induces softmodem assertion crashes or process termination, this must be logged as a **testbed operational boundary failure**, NOT as an acceptable training sample of radio congestion.
 
 ---
 
@@ -143,23 +147,25 @@ The table below outlines the planned treatment matrix. Parameter values represen
 2. **Initial Conditions:** Radio channel at healthy reference condition (capable of fully forwarding the offered load); UPF-1 container running with default qdisc.
 3. **Independent Variables (Changed):** Linux Token Bucket Filter (`tbf`) configured on the egress interface of UPF-1 (`oai-upf-slice1` container `eth0`, facing EXT-DN).
 4. **Controlled Variables (Maintained):** Clean radio channel (51 PRBs, unity gain, reference noise), offered load ($\approx 10\text{ Mbps}$), Slice 2 canary probing.
-5. **Planned Execution Sequence:**
+5. **Planned Execution Sequence & Terminal Separation:**
+   *Note on Execution Timing & Recovery:* Commands span separate VMs and run in distinct terminals. To record both active disturbance (~180s) and recovery (~60s+), the recorder must span the combined duration (`--duration 240`) or operate in manual stop mode (`--duration 0`).
    ```bash
-   # Planned procedure:
-   # 1. VM-3: Apply binding egress rate shaping on UPF-1 container
+   # Terminal 1 (VM-3 Core UPF): Apply binding egress rate shaping on UPF-1 container
    # Terminology: UPF-host/container egress shaping
    sudo docker exec oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 5mbit burst 10kb latency 200ms
-   # Verify qdisc readback:
    sudo docker exec oai-upf-slice1 tc -s qdisc show dev eth0
-   # 2. VM-5: Launch traffic exceeding TBF rate
+
+   # Terminal 2 (VM-5 UE): Launch traffic exceeding TBF rate in foreground
    sudo /opt/oran/ue/scripts/trafgen.sh start 300 10
-   # 3. VM-6: Record Core bottleneck dataset
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S6 --duration 180 --notes "S6 Core Bottleneck UPF-1 TBF 5Mbps"
-   # 4. VM-3: Remove shaping after session
+
+   # Terminal 3 (VM-6 Monitoring): Record active disturbance and recovery window (~240s total)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S6 --duration 240 --notes "S6 Core Bottleneck TBF 5M + Recovery"
+
+   # Terminal 1 (VM-3 Core UPF at t = 180s): Remove shaping to assess recovery
    sudo docker exec oai-upf-slice1 tc qdisc del dev eth0 root
    ```
-6. **Evidence to Collect:** Telemetry CSV (`upf_backlog_bytes_slice1`, `upf_drops_slice1`), `tc -s qdisc` readback logs, iperf receiver throughput and packet loss logs, in-band RTT.
-7. **Responses to Examine:** UPF queue backlog accumulation (`upf_backlog_bytes_slice1 > 0`); surge in kernel packet drops (`upf_drops_slice1`); receiver goodput throttled near TBF rate ($\approx 5\text{ Mbps}$); radio telemetry remains unconstrained (nominal PRB grant proxy, high SNR, high MCS, BLER $\approx 0\%$).
+6. **Evidence to Collect:** Telemetry CSV (`upf_backlog_bytes_embb`, `upf_drops_embb`), `tc -s qdisc` readback logs, iperf receiver throughput and packet loss logs, in-band RTT.
+7. **Responses to Examine:** UPF queue backlog accumulation (`upf_backlog_bytes_embb > 0`); surge in kernel packet drops (`upf_drops_embb`); receiver goodput throttled near TBF rate ($\approx 5\text{ Mbps}$); radio telemetry remains unconstrained (nominal PRB grant proxy, high SNR, high MCS, BLER $\approx 0\%$).
 8. **Interpretation Boundaries:**
    * Terminology must consistently specify **UPF-host/container egress shaping**.
    * Shaping binds on traffic exiting UPF-1 towards EXT-DN across interface `eth0`.
@@ -198,7 +204,7 @@ The table below outlines the planned treatment matrix. Parameter values represen
 7. **Evidence to Collect:** Telemetry CSV showing simultaneous radio degradation features and Core queue features; iperf receiver logs; qdisc readback.
 8. **Responses to Examine:** Simultaneous presence of:
    * Radio domain signatures: degraded SNR, lower MCS, elevated BLER / retransmissions.
-   * Core domain signatures: non-zero UPF queue backlog (`upf_backlog_bytes_slice1 > 0`) and elevated packet drops.
+   * Core domain signatures: non-zero UPF queue backlog (`upf_backlog_bytes_embb > 0`) and elevated packet drops.
 9. **Interpretation Boundaries:** True Joint classification requires verified empirical evidence of binding congestion in both domains. If UPF queue remains empty, the condition is not empirically Joint.
 
 ---
@@ -262,8 +268,9 @@ The experimental testbed operates a dual-slice architecture:
 * **Slice 1 (eMBB):** Serving cell DU-1 (Cell-1, Port 4043, 51 PRBs, 20 MHz); Core UPF-1 (`oai-upf-slice1`, SST 1, SD 0x000001); generates primary data workload.
 * **Slice 2 (URLLC):** Serving cell DU-2 (Cell-2, Port 4044, 106 PRBs, 40 MHz); Core UPF-2 (`oai-upf-slice2`, SST 222, SD 0x00007B); generates periodic 100 ms canary probe (`ping`).
 
-**Canary Integrity Principle:**  
-Because Slice 2 operates over independent radio instances, separate PRB pools, and a dedicated UPF container, treatments applied to Slice 1 (radio attenuation on DU-1 or egress TBF on UPF-1) must **NOT degrade Slice 2 canary latency** under proper slice isolation. Degradation on Slice 2 during Slice 1 stress indicates hypervisor CPU starvation or testbed infrastructure contention, which must be logged as testbed interference rather than normal intra-slice queuing.
+**Canary Integrity & Shared-Infrastructure Demarcation:**  
+While Slice 2 operates over a dedicated radio instance (DU-2, Cell-2), separate PRB pools, and an independent UPF container (`oai-upf-slice2`), both network slices share common host-level compute and execution paths (the shared DU/CU host platform VM-4/VM-2, hypervisor vCPU scheduling on the host machine, and common network bridges).  
+Impact on Slice 2 canary latency is continuously measured and tracked. Under ideal slice isolation, Slice 1 disturbances should leave Slice 2 minimally perturbed. However, if degradation occurs on Slice 2 during Slice 1 stress, researchers must evaluate shared resource contention (such as hypervisor CPU scheduling, kernel socket buffer contention, or shared CU processing) and shared network paths before attributing root causes.
 
 ---
 
@@ -272,11 +279,17 @@ Because Slice 2 operates over independent radio instances, separate PRB pools, a
 To support the revised scenario framework without modifying code during this documentation phase, the following implementation gaps are formally documented:
 
 1. **Scenario Preset Gap in `record_experiment.py` (`scripts/record_experiment.py` lines 49–59):**
-   * *Gap:* `CANONICAL_PRESETS` contains `S1`, `S2`, `S3`, `S6`, `S9`, `S10_A`, `S10_B`, `RECOVERY`, and `CLEAR`. Scenario `S4` (`S4_RAN_DEGRADATION`) is not defined in the presets dictionary.
-   * *Impact:* Running `record_experiment.py S4` will raise a dictionary lookup error or fall back to unknown event labels unless invoked with custom flag overrides or until `CANONICAL_PRESETS` is updated.
+   * *Gap:* `CANONICAL_PRESETS` contains `S1`, `S2`, `S3`, `S6`, `S9`, `S10_A`, `S10_B`, `RECOVERY`, and `CLEAR`. Scenario `S4` (`S4_RAN_DEGRADATION`) is not registered in `CANONICAL_PRESETS`.
+   * *Impact:* Running `record_experiment.py S4` does not crash with a dictionary lookup error; rather, `resolve_scenario_metadata()` falls back to `event_domain = "CUSTOM"` and `event_component = "NONE"`. Furthermore, `record_experiment.py` currently has no CLI parameter flags (such as `--domain`) to override domain or component metadata from the command line.
 2. **Multi-Phase Dynamic Annotation Gap in `record_experiment.py`:**
    * *Gap:* `record_experiment.py` applies static scenario and domain labels (`event_scenario`, `event_domain`) across the entire recording duration.
-   * *Impact:* For `S10` multi-phase staged recovery, the recorder cannot dynamically switch phase labels mid-run without external orchestration or manual segment concatenation.
+   * *Impact:* For `S10` multi-phase staged recovery, the recorder cannot dynamically switch phase labels mid-run without external orchestration or post-processing segmentation.
 3. **Dynamic Noise Parameter Control in `rfsim_channel_control.py` (`scripts/rfsim_channel_control.py`):**
-   * *Gap:* `rfsim_channel_control.py` parses `noise_power_dB` during `show`, but lacks a CLI subcommand to adjust `noise_power_dB` dynamically via Telnet.
-   * *Impact:* Noise calibration sweeps must either be applied via configuration file edits and DU restarts, or an enhanced Telnet command must be verified in future script updates.
+   * *Gap:* `rfsim_channel_control.py` parses `noise_power_dB` during `show`, but lacks a CLI subcommand (`set-noise-power`) to adjust `noise_power_dB` dynamically via Telnet.
+   * *Impact:* Noise calibration sweeps must currently be applied via configuration file edits and DU restarts, until an enhanced Telnet command is added.
+4. **Channel Controller Reset Scope (`scripts/rfsim_channel_control.py` line 349):**
+   * *Gap:* The `reset` subcommand in `rfsim_channel_control.py` only restores `path_loss_dB` (to $0.0\text{ dB}$ Profile 1 baseline). It does **not** restore `noise_power_dB`.
+   * *Impact:* If noise was altered during testing, running `reset` will leave the noise parameter at its modified value.
+5. **Post-Traffic Canary Observation in `trafgen.sh` (`scripts/trafgen.sh` lines 178, 185, 350):**
+   * *Gap:* In `scripts/trafgen.sh`, ping probe packet counts are hardcoded to $\approx \text{DURATION} + 5\text{ s}$, and the script invokes `cleanup()` immediately upon loop completion, killing all ping processes.
+   * *Impact:* `trafgen.sh` cannot provide post-traffic canary probing during the 60-second recovery window unless ping is launched independently or trafgen duration is set longer than traffic transmission.

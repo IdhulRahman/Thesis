@@ -698,6 +698,7 @@ To dynamically inject channel impairments without restarting gNodeB or interrupt
    # Planned procedure: Reset both channels to testbed verified baseline (0.0 dB unity gain):
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
    ```
+   *(Note on Reset Scope: The `reset` subcommand in `rfsim_channel_control.py` resets channel path loss to $0.0	ext{ dB}$; it does not reset `noise_power_dB`. If noise parameters were altered during calibration, they must be reverted explicitly via configuration).*
 
 #### Historical Empirical Reference (Early Profile 3B Trials from Case 51):
 Under early testbed characterization (`du_gnb1.conf`, AWGN channel, historical elevated noise power `-2.0 dB`, 15 Mbps UDP load, initial +20 dB gain):

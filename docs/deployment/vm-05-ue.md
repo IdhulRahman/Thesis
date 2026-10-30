@@ -517,9 +517,16 @@ sudo /opt/oran/ue/scripts/trafgen.sh start 300 10
 
 ### 11.2 Ground-Truth SLA Evaluation Contract & Recovery Observation
 During each observation window $k$, SLA compliance is evaluated at VM-5:
-- **Slice 1 (eMBB) SLA Contract:** Evaluated relative to offered workload: user goodput $T_{\text{eMBB}} \ge 16.0\text{ Mbps}$ under saturation stress ($\ge 20\text{ Mbps}$ offered load), or $\ge 85\%$ of offered demand when operating below capacity. *(Boundary Notice: Recorded in CSV via `e2e_slice1_tput_mbps` from sender-side iperf3 client, measuring offered transmission rate $T_{\text{offered}}$. eMBB goodput SLA cannot be evaluated on CSV data alone and is reported as Unmeasured pending verified receiver goodput logs from EXT-DN).*
+- **Slice 1 (eMBB) SLA Contract & Demarcation:**
+  * **Historical Empirical Measurement:** In Case 56 Phase 2, an average receiver goodput of $\approx 16.6\text{ Mbps}$ (with duration difference $\Delta t = 12.45\text{ s}$) was measured under $20\text{ Mbps}$ offered load on 51 PRBs with `-E`, unity gain ($0.0\text{ dB}$), and noise floor $-100.0\text{ dB}$.
+  * **Capacity Pending Characterization:** The true physical radio capacity under the planned reference noise floor (candidate grid $-40$ to $-20\text{ dB}$) and dynamic link adaptation remains to be characterized via upcoming pilot sweeps.
+  * **Researcher-Selected Evaluation Target:** For 51 PRBs, the thesis proposes a candidate evaluation target bound of user goodput $T_{\text{eMBB}} \ge 16.0\text{ Mbps}$ under saturation stress ($\ge 20\text{ Mbps}$ offered load), or $\ge 85\%$ of offered demand below capacity. (Note: The historical $\ge 20.0\text{ Mbps}$ threshold documented in `docs/references/standards.md` applied to the unscaled 106 PRB wire-speed profile).
+  * **Throughput vs. Latency Orthogonality:** Satisfying the $\ge 16.0\text{ Mbps}$ throughput target does not imply acceptable packet latency; transport queue accumulation or bufferbloat can cause unacceptable delays even when goodput requirements are met.
+  * *(Boundary Notice: Recorded in CSV via `e2e_slice1_tput_mbps` from sender-side iperf3 client, measuring offered transmission rate $T_{\text{offered}}$. eMBB goodput SLA cannot be evaluated on CSV data alone and is reported as Unmeasured pending verified receiver goodput logs from EXT-DN).*
 - **Slice 2 (URLLC) SLA Contract:** End-to-End Round-Trip Time $RTT \le 20.0\text{ ms}$ (measured to EXT-DN `192.168.70.145`) and packet loss $\le 1.0\%$.
-- **Recovery Observation Protocol:** Following disturbance removal (treatment release at Stage 7), monitoring on VM-5 must persist for an observation window of $\ge 60\text{ seconds}$ to record queue drainage time ($\Delta t$), RTT stabilization, and post-fault SLA restoration.
+- **Recovery Observation Protocol & Script Boundaries:**
+  * Following disturbance removal (treatment release at Stage 7), monitoring on VM-5 must persist for an observation window of $\ge 60\text{ seconds}$ to record queue drainage time ($\Delta t$), RTT stabilization, and post-fault SLA restoration.
+  * *Operational Boundary:* In `scripts/trafgen.sh`, ping probe packet counts are hardcoded to $\approx \text{DURATION} + 5\text{ s}$ and terminated immediately upon loop exit via `cleanup()`. Post-traffic recovery observation requires executing ping independently or running trafgen with a duration extending $\ge 60\text{ s}$ beyond traffic cessation.
 
 > [!NOTE]
 > **Scope & Standards Demarcation:**  

@@ -42,33 +42,39 @@ This directory contains the operational daemons, automation scripts, fault injec
    ```
    *Prompts for scenario identifier, duration in seconds (180s proposed for standard recording window), and run notes.*
 
-2. **Direct CLI Execution (Candidate Calibration Durations):**
+2. **Direct CLI Execution (Active Disturbance & Recovery Windows):**
+   > [!IMPORTANT]
+   > *Recording Duration Boundary:* `--duration 180` records only the active disturbance window and halts immediately upon treatment release. To capture both the active regime (~180s) AND the post-fault recovery observation window (~60s+), the CLI should be executed with a combined duration (e.g., `--duration 240`) or run in manual stop mode (`--duration 0`).
+
    ```bash
-   # Record S1 Light Baseline (180s recording window proposed)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 180 --notes "S1 Light Baseline Candidate 5M"
+   # Record S1 Light Baseline (240s total: settling + baseline run + observation)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 240 --notes "S1 Light Baseline Candidate 5M"
 
-   # Record S2 Higher Baseline (180s recording window proposed)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S2 --duration 180 --notes "S2 Higher Baseline Candidate 10M"
+   # Record S2 Higher Baseline (240s total)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S2 --duration 240 --notes "S2 Higher Baseline Candidate 10M"
 
-   # Record S3 RAN Overload (180s recording window proposed)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S3 --duration 180 --notes "S3 RAN Overload Capacity Saturation"
+   # Record S3 RAN Overload (240s total: 180s active saturation + 60s queue drainage)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S3 --duration 240 --notes "S3 RAN Overload Capacity Saturation"
 
-   # Record S6 Core Bottleneck (180s recording window proposed)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S6 --duration 180 --notes "S6 Core Bottleneck UPF-1 TBF 5M"
+   # Record S6 Core Bottleneck (240s total: 180s active TBF + 60s post-release drainage)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S6 --duration 240 --notes "S6 Core Bottleneck UPF-1 TBF 5M"
    ```
 
 3. **Manual Stop Mode (`Ctrl+C`):**
    ```bash
    python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 0
    ```
-   *Runs continuously until operator terminates with `Ctrl+C`. Safely flushes and closes CSV and writes manifest.*
+   *Runs continuously until operator terminates with `Ctrl+C`. Safely flushes and closes CSV and writes manifest. Recommended when post-fault recovery duration is open-ended.*
 
 ### CLI Automation Capabilities & Implementation Gaps
-* **Canonical Presets in `record_experiment.py` (`CANONICAL_PRESETS`):** Currently defines `S1`, `S2`, `S3`, `S6`, `S9`, `S10_A`, `S10_B`, `RECOVERY`, and `CLEAR`.
-  * *Implementation Gap 1:* Scenario `S4` (`S4_RAN_DEGRADATION`) is not yet in `CANONICAL_PRESETS` and requires future script addition.
-  * *Implementation Gap 2:* Scenario `S10` multi-phase dynamic labeling across sequential state transitions is not natively automated by `record_experiment.py` (which stamps a static scenario/domain label across the full run duration).
+* **Preset Resolution in `record_experiment.py` (`CANONICAL_PRESETS`):** Defines `S1`, `S2`, `S3`, `S6`, `S9`, `S10_A`, `S10_B`, `RECOVERY`, and `CLEAR`.
+  * *Implementation Gap 1:* Scenario `S4` (`S4_RAN_DEGRADATION`) is not registered in `CANONICAL_PRESETS`. When executed, `resolve_scenario_metadata()` falls back to `event_domain="CUSTOM"` and `event_component="NONE"`. Furthermore, the CLI currently lacks override flags (such as `--domain`) to specify metadata manually.
+  * *Implementation Gap 2:* Scenario `S10` multi-phase dynamic labeling across sequential state transitions is not supported; the recorder stamps static `event_scenario` and `event_domain` values across the entire file.
 * **RF Control CLI Capabilities (`rfsim_channel_control.py`):** Supports `show`, `set-attenuation`, `set-raw-ploss`, `reset`, and `sweep`.
-  * *Implementation Gap 3:* `rfsim_channel_control.py` currently adjusts path loss/attenuation, but lacks a CLI subcommand to dynamically adjust `noise_power_dB` over Telnet.
+  * *Implementation Gap 3:* `rfsim_channel_control.py` lacks a CLI subcommand (`set-noise-power`) to dynamically adjust `noise_power_dB` over Telnet.
+  * *Implementation Gap 4:* The `reset` subcommand only restores `path_loss_dB` (to $0.0	ext{ dB}$ Profile 1 baseline); it does **not** restore `noise_power_dB`.
+* **Traffic Generator Tooling (`trafgen.sh`):**
+  * *Implementation Gap 5:* In `scripts/trafgen.sh`, ping probe packet counts are hardcoded to $pprox 	ext{DURATION} + 5	ext{ s}$, and the script executes `cleanup()` immediately upon loop completion. It cannot provide canary probing for 60 seconds post-traffic without extending the script duration or running ping independently.
 
 ### Post-Recording Statistical Analysis
 To inspect statistical distributions of the recorded run:
