@@ -526,7 +526,9 @@ During each observation window $k$, SLA compliance is evaluated at VM-5:
 - **Slice 2 (URLLC) SLA Contract:** End-to-End Round-Trip Time $RTT \le 20.0\text{ ms}$ (measured to EXT-DN `192.168.70.145`) and packet loss $\le 1.0\%$.
 - **Recovery Observation Protocol & Script Boundaries:**
   * Following disturbance removal (treatment release at Stage 7), monitoring on VM-5 must persist for an observation window of $\ge 60\text{ seconds}$ to record queue drainage time ($\Delta t$), RTT stabilization, and post-fault SLA restoration.
-  * *Operational Boundary:* In `scripts/trafgen.sh`, ping probe packet counts are hardcoded to $\approx \text{DURATION} + 5\text{ s}$ and terminated immediately upon loop exit via `cleanup()`. Post-traffic recovery observation requires executing ping independently or running trafgen with a duration extending $\ge 60\text{ s}$ beyond traffic cessation.
+  * *Operational Script Lifecycles (`scripts/trafgen.sh`):* In `trafgen.sh`, parameter `DURATION` simultaneously determines the duration of `iperf3 -u` (`-t "$DURATION"`) and terminal reporting. The canary ping packet counts are also scaled to `DURATION` (`(DURATION + 5) * 5` for eMBB, `(DURATION + 5) * 10` for URLLC). After the display loop concludes, `trafgen.sh` explicitly waits for the active iperf3 process (`wait "$IPERF_PID" 2>/dev/null || sleep 1`) before executing `cleanup()`, terminating child ping processes. Two operational cases must therefore be distinguished:
+    1. *Traffic continues after fault removal:* If evaluating recovery while offered workload persists (e.g., observing queue drainage and SLA restoration under continued 10 Mbps load after TBF/attenuation release), a `trafgen.sh` session spanning both fault and post-release windows (e.g. 240s) is appropriate.
+    2. *Observation after traffic ceases:* If observing quiescent channel recovery after traffic has stopped, extending `trafgen.sh` duration cannot be used because it extends iperf transmission. An independent ping probe with a separate lifecycle (invoked outside `trafgen.sh`) is required.
 
 > [!NOTE]
 > **Scope & Standards Demarcation:**  

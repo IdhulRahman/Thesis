@@ -44,7 +44,8 @@ This directory contains the operational daemons, automation scripts, fault injec
 
 2. **Direct CLI Execution (Active Disturbance & Recovery Windows):**
    > [!IMPORTANT]
-   > *Recording Duration Boundary:* `--duration 180` records only the active disturbance window and halts immediately upon treatment release. To capture both the active regime (~180s) AND the post-fault recovery observation window (~60s+), the CLI should be executed with a combined duration (e.g., `--duration 240`) or run in manual stop mode (`--duration 0`).
+   > *Recording Duration & Labeling Boundary:* `--duration 180` records only the active disturbance window and halts immediately upon treatment release. To capture both the active regime (~180s) AND the post-fault recovery observation window (~60s+), the CLI should be executed with a combined duration (e.g., `--duration 240`) or run in manual stop mode (`--duration 0`).  
+   > *Offline Labeling Rule:* The recorder stamps `event_domain` statically across the full run duration. Rows after disturbance release must NOT be assumed to be `BASELINE` immediately, as queues require drainage time ($\Delta t$). Offline segmentation based on event timestamps and empirical indicators (queue backlog = 0 B, RTT normal) is required.
 
    ```bash
    # Record S1 Light Baseline (240s total: settling + baseline run + observation)
@@ -72,9 +73,9 @@ This directory contains the operational daemons, automation scripts, fault injec
   * *Implementation Gap 2:* Scenario `S10` multi-phase dynamic labeling across sequential state transitions is not supported; the recorder stamps static `event_scenario` and `event_domain` values across the entire file.
 * **RF Control CLI Capabilities (`rfsim_channel_control.py`):** Supports `show`, `set-attenuation`, `set-raw-ploss`, `reset`, and `sweep`.
   * *Implementation Gap 3:* `rfsim_channel_control.py` lacks a CLI subcommand (`set-noise-power`) to dynamically adjust `noise_power_dB` over Telnet.
-  * *Implementation Gap 4:* The `reset` subcommand only restores `path_loss_dB` (to $0.0	ext{ dB}$ Profile 1 baseline); it does **not** restore `noise_power_dB`.
+  * *Implementation Gap 4:* The `reset` subcommand only restores `path_loss_dB` (to $0.0\text{ dB}$ Profile 1 baseline); it does **not** restore `noise_power_dB`.
 * **Traffic Generator Tooling (`trafgen.sh`):**
-  * *Implementation Gap 5:* In `scripts/trafgen.sh`, ping probe packet counts are hardcoded to $pprox 	ext{DURATION} + 5	ext{ s}$, and the script executes `cleanup()` immediately upon loop completion. It cannot provide canary probing for 60 seconds post-traffic without extending the script duration or running ping independently.
+  * *Implementation Gap 5:* In `scripts/trafgen.sh`, parameter `DURATION` simultaneously determines the runtime of `iperf3 -u` (`-t "$DURATION"`), the display loop, and the ping probe packet counts. When the display loop finishes, `trafgen.sh` explicitly waits for the iperf3 process (`wait "$IPERF_PID" 2>/dev/null || sleep 1`) before executing `cleanup()`. A single extended `trafgen.sh` duration works when evaluating post-release recovery under ongoing traffic; however, observing quiescent channel recovery after traffic stops requires an independent ping probe executed outside `trafgen.sh`.
 
 ### Post-Recording Statistical Analysis
 To inspect statistical distributions of the recorded run:

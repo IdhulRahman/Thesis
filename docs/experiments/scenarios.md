@@ -33,6 +33,17 @@ The experimental Scenario IDs (`S1`, `S2`, `S3`, `S4`, `S6`, `S9`, `S10`) serve 
 * **Transitional / Multi-Phase Sequence:** Evaluated under `S10` (Staged recovery across two distinct sequences). **A multi-phase recording covering sequential state transitions must NOT be assigned a single static class label.**
 * **Operational Reset Action (`CLEAR`):** `CLEAR` is an **operational reset and baseline recovery procedure**, NOT an additional training class.
 
+### 1.1 Treatment Metadata vs. Multi-Phase Ground-Truth Labeling
+The scenario and domain labels recorded in the raw telemetry CSV (`event_scenario`, `event_domain`, `event_component`) represent **experimental treatment metadata** assigned at recorder invocation (e.g., `event_domain = "CORE"` for Scenario S6).
+When single-fault scenarios (S3, S4, S6, S9) are recorded with an extended duration to capture post-fault recovery (e.g., `--duration 240` where the fault is released at $t = 180\text{ s}$):
+* **Raw Recorder Behavior:** The recorder assigns the initial preset label statically across all 240 seconds.
+* **Physical Temporal Regimes:** The recording actually spans three distinct physical phases:
+  1. *Active Disturbance Phase ($t \in [0, 180\text{ s}]$):* Impairment is actively applied; system displays domain-specific bottleneck signatures.
+  2. *Transient Drainage / Recovery Phase ($t \in [180\text{ s}, 180 + \Delta t]$):* Impairment is physically released, but residual packets queued in socket buffers, RLC entities, or UPF qdiscs drain gradually, and radio link adaptation stabilizes.
+  3. *Steady-State Post-Recovery Baseline Phase ($t > 180 + \Delta t$):* Queues are empty, receiver throughput matches offered load, and latency returns to nominal SLA bounds.
+* **Methodological Annotation Rule:**  
+  Labels must **NOT** be automatically switched to `BASELINE` at the exact instant the fault is physically released ($t = 180\text{ s}$), because physical queue drainage requires non-zero time ($\Delta t$). For supervised model training and RCA evaluation, researchers must perform offline temporal segmentation using logged event timestamps combined with empirical telemetry evidence (queue backlog returning to 0 B, goodput delta normalizing to $\approx 0$, ICMP RTT stabilizing). This transition segmentation rule applies to all recordings that span recovery, including single-fault scenarios and multi-phase staged recovery (S10).
+
 ---
 
 ## 2. Canonical Scenario Registry (Candidate Parameters for Calibration)
@@ -139,6 +150,7 @@ The table below outlines the planned treatment matrix. Parameter values represen
    * Historical attenuation values ($5\text{–}16\text{ dB}$) from early trials serve strictly as an empirical reference starting point for candidate evaluation under Profile 1, not an established deterministic response law.
    * Specific BLER, MCS, or SNR numerical thresholds are directional behavioral hypotheses, not rigid prerequisites. A clean baseline operating with low BLER is fully valid; radio link variations are primarily induced and evaluated during this S4 treatment.
    * If severe attenuation induces softmodem assertion crashes or process termination, this must be logged as a **testbed operational boundary failure**, NOT as an acceptable training sample of radio congestion.
+   * **Recovery Segmentation Rule:** When recorded with an extended duration (e.g. 240s) spanning treatment release at $t = 180\text{ s}$, the active degradation window ($[0, 180\text{ s}]$), transient link recovery ($[180, 180 + \Delta t]$), and post-recovery baseline ($> 180 + \Delta t$) must be partitioned offline based on logged timestamps and telemetry evidence, rather than applying a single uniform label or assuming instantaneous baseline recovery at $t = 180\text{ s}$.
 
 ---
 
@@ -170,6 +182,7 @@ The table below outlines the planned treatment matrix. Parameter values represen
    * Terminology must consistently specify **UPF-host/container egress shaping**.
    * Shaping binds on traffic exiting UPF-1 towards EXT-DN across interface `eth0`.
    * Radio path must be independently verified as capable of serving the offered load, ensuring the bottleneck is isolated to the Core.
+   * **Recovery Segmentation Rule:** In an extended recording (e.g. 240s) where TBF is removed at $t = 180\text{ s}$, the active Core queuing phase ($[0, 180\text{ s}]$), transient UPF queue drainage ($[180, 180 + \Delta t]$), and post-recovery baseline ($> 180 + \Delta t$) must be segmented offline using logged timestamps and `upf_backlog_bytes_embb` drainage evidence, rather than assuming an immediate switch to `BASELINE` at $t = 180\text{ s}$.
 
 ---
 
@@ -269,7 +282,7 @@ The experimental testbed operates a dual-slice architecture:
 * **Slice 2 (URLLC):** Serving cell DU-2 (Cell-2, Port 4044, 106 PRBs, 40 MHz); Core UPF-2 (`oai-upf-slice2`, SST 222, SD 0x00007B); generates periodic 100 ms canary probe (`ping`).
 
 **Canary Integrity & Shared-Infrastructure Demarcation:**  
-While Slice 2 operates over a dedicated radio instance (DU-2, Cell-2), separate PRB pools, and an independent UPF container (`oai-upf-slice2`), both network slices share common host-level compute and execution paths (the shared DU/CU host platform VM-4/VM-2, hypervisor vCPU scheduling on the host machine, and common network bridges).  
+While Slice 2 operates over a dedicated radio instance (DU-2, Cell-2), separate PRB pools, and an independent UPF container (`oai-upf-slice2`), both network slices share common host-level compute and execution paths (the shared DU/CU host platform VM-4 (hosting CU, DU-1, and DU-2), hypervisor vCPU scheduling on the host machine, and common network bridges).  
 Impact on Slice 2 canary latency is continuously measured and tracked. Under ideal slice isolation, Slice 1 disturbances should leave Slice 2 minimally perturbed. However, if degradation occurs on Slice 2 during Slice 1 stress, researchers must evaluate shared resource contention (such as hypervisor CPU scheduling, kernel socket buffer contention, or shared CU processing) and shared network paths before attributing root causes.
 
 ---
@@ -290,6 +303,6 @@ To support the revised scenario framework without modifying code during this doc
 4. **Channel Controller Reset Scope (`scripts/rfsim_channel_control.py` line 349):**
    * *Gap:* The `reset` subcommand in `rfsim_channel_control.py` only restores `path_loss_dB` (to $0.0\text{ dB}$ Profile 1 baseline). It does **not** restore `noise_power_dB`.
    * *Impact:* If noise was altered during testing, running `reset` will leave the noise parameter at its modified value.
-5. **Post-Traffic Canary Observation in `trafgen.sh` (`scripts/trafgen.sh` lines 178, 185, 350):**
-   * *Gap:* In `scripts/trafgen.sh`, ping probe packet counts are hardcoded to $\approx \text{DURATION} + 5\text{ s}$, and the script invokes `cleanup()` immediately upon loop completion, killing all ping processes.
-   * *Impact:* `trafgen.sh` cannot provide post-traffic canary probing during the 60-second recovery window unless ping is launched independently or trafgen duration is set longer than traffic transmission.
+5. **Post-Traffic Canary Observation & Probe Lifecycles in `trafgen.sh` (`scripts/trafgen.sh`):**
+   * *Gap:* In `scripts/trafgen.sh`, parameter `DURATION` simultaneously determines the runtime of `iperf3 -u` (`-t "$DURATION"`), the display loop, and the ping probe packet counts (`(DURATION + 5) * 5` for eMBB, `(DURATION + 5) * 10` for URLLC). Following completion of the display loop, the script explicitly waits for the iperf3 process (`wait "$IPERF_PID" 2>/dev/null || sleep 1`) before executing `cleanup()`, terminating all child ping processes.
+   * *Impact:* Extending `trafgen.sh` duration is effective when offered traffic continues running after disturbance removal (e.g. evaluating queue drainage under continued 10 Mbps traffic). However, if the protocol requires observing quiescent recovery after traffic stops, extending `trafgen.sh` duration also extends iperf traffic. Observability after traffic cessation requires launching canary ping probes with an independent lifecycle outside `trafgen.sh`.
