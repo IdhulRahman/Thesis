@@ -493,27 +493,33 @@ python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
 
 To measure end-to-end SLA satisfaction and evaluate baseline recovery times from the actual user perspective, VM-5 runs synchronized traffic generators across the distinct slice network namespaces using `scripts/trafgen.sh` (or standalone invocations per namespace).
 
-### 11.1 Workload Generator Profiles
+> [!NOTE]
+> **Operational Status:**  
+> The workload profiles and commands documented below represent **planned operational procedures** for upcoming scenario executions and calibration runs (see [docs/experiments/scenarios.md](../experiments/scenarios.md) and [docs/experiments/methodology.md](../experiments/methodology.md)). They must NOT be executed during documentation reviews.
+
+### 11.1 Planned Workload Generator Profiles for Future Execution
+Workload parameters align with the candidate calibration matrix:
+* **Scenario S1 (Light Reference):** Offered load candidate $\approx 5\text{ Mbps}$ UDP.
+* **Scenario S2 (Higher Baseline):** Offered load candidate $\approx 10\text{–}12\text{ Mbps}$ UDP.
+* **Scenario S3 (RAN Saturation):** Fixed overload candidate ($15, 18, 20\text{ Mbps}$) selected via capacity pilot.
+* **Scenario S4 & S6 (Degradation / Core TBF):** Fixed moderate load $\approx 10\text{ Mbps}$ UDP.
+* **Scenario S10 (Staged Recovery):** Fixed load $\approx 10\text{ Mbps}$ continuously over $\approx 360\text{ s}$ spanning sequential recovery phases.
 
 ```bash
-# Terminal 1: Slice 1 (Throughput / eMBB) - Goodput saturation and 5 Hz canary probe
-sudo ip netns exec ue1 iperf3 -c 192.168.70.145 -u -b 25M -t 60 -i 1
-sudo ip netns exec ue1 ping -D -O -I oaitun_ue1 -i 0.2 -c 325 192.168.70.145
-
-# Terminal 2: Slice 2 (Low Latency / URLLC) - High-frequency 10 Hz canary latency probe
-sudo ip netns exec ue2 ping -D -O -I oaitun_ue1 -i 0.1 -c 650 192.168.70.145
-```
-
-Or execute automated multi-slice orchestration via `trafgen.sh`:
-```bash
+# Planned procedure for automated multi-slice orchestration via trafgen.sh:
 # Syntax: ./trafgen.sh start <duration_sec> <embb_mbps>
-./trafgen.sh start 60 25
+# Example for S1 Light Baseline (300s session covering settling, 180s record, and 60s recovery):
+sudo /opt/oran/ue/scripts/trafgen.sh start 300 5
+
+# Example for S2 Higher Baseline (candidate 10 Mbps):
+sudo /opt/oran/ue/scripts/trafgen.sh start 300 10
 ```
 
-### 11.2 Ground-Truth SLA Evaluation Contract
+### 11.2 Ground-Truth SLA Evaluation Contract & Recovery Observation
 During each observation window $k$, SLA compliance is evaluated at VM-5:
-- **Slice 1 (eMBB) SLA Contract:** Evaluated relative to offered workload: user goodput $T_{\text{eMBB}} \ge 20.0\text{ Mbps}$ under saturation stress ($\ge 25\text{ Mbps}$ offered load), or $\ge 85\%$ of offered demand when operating below capacity. *(Boundary Notice: Recorded in CSV via `e2e_slice1_tput_mbps` from sender-side iperf3 client, measuring offered transmission rate $T_{\text{offered}}$. eMBB goodput SLA cannot be evaluated on CSV data alone and is reported as Unmeasured pending verified receiver goodput logs from EXT-DN).*
+- **Slice 1 (eMBB) SLA Contract:** Evaluated relative to offered workload: user goodput $T_{\text{eMBB}} \ge 16.0\text{ Mbps}$ under saturation stress ($\ge 20\text{ Mbps}$ offered load), or $\ge 85\%$ of offered demand when operating below capacity. *(Boundary Notice: Recorded in CSV via `e2e_slice1_tput_mbps` from sender-side iperf3 client, measuring offered transmission rate $T_{\text{offered}}$. eMBB goodput SLA cannot be evaluated on CSV data alone and is reported as Unmeasured pending verified receiver goodput logs from EXT-DN).*
 - **Slice 2 (URLLC) SLA Contract:** End-to-End Round-Trip Time $RTT \le 20.0\text{ ms}$ (measured to EXT-DN `192.168.70.145`) and packet loss $\le 1.0\%$.
+- **Recovery Observation Protocol:** Following disturbance removal (treatment release at Stage 7), monitoring on VM-5 must persist for an observation window of $\ge 60\text{ seconds}$ to record queue drainage time ($\Delta t$), RTT stabilization, and post-fault SLA restoration.
 
 > [!NOTE]
 > **Scope & Standards Demarcation:**  

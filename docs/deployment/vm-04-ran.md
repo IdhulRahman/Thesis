@@ -676,35 +676,36 @@ To dynamically inject channel impairments without restarting gNodeB or interrupt
 * **Channel 1 (`rfsimu_channel_ue0`):** Uplink Channel (UE TX $\to$ gNodeB RX).  
   *Note:* Because the telemetry pipeline and `ran_adapter.py` monitor Uplink Shared Channel (`ulsch`) scheduler logs on gNodeB, channel impairments targeting thesis telemetry metrics must specify `--channel-id 1`.
 
-#### Calibrated Operating Regimes (Observed Under Testbed Baseline):
-Under this testbed's baseline configuration (`du_gnb1.conf`, AWGN channel, -2 dB noise power, 15 Mbps UDP offered load, MCS baseline 28):
+#### Planned Channel Impairment Procedures for Future Execution (Scenario S4 & S9):
+> [!NOTE]
+> **Operational Status:**  
+> The CLI commands below represent **planned operational procedures** for upcoming scenario testing. They must NOT be executed during documentation reviews. Dynamic channel adjustments must be coordinated with the noise calibration framework documented in [docs/experiments/methodology.md](../experiments/methodology.md#55-stepwise-noise-calibration-plan-planned-procedure).
 
-1. **Controlled Degradation Regime ($5\text{ dB} - 16\text{ dB}$ attenuation):**
-   * **Observed Response:** Signal attenuation reduces received RSSI; link adaptation triggers downward MCS adjustment (e.g., from 28 down to 4–14), and scheduler logs (`du1.log`) show dynamic BLER elevation into the ~30–80% range with elevated HARQ retransmissions (`ulsch_rounds`), while maintaining PDU session connectivity.
+1. **Query Active Channel Parameters & Model Configuration:**
    ```bash
-   # Inject 10 dB Uplink attenuation (moderate stress):
+   # Inspect active path_loss_dB and noise_power_dB across all configured models:
+   python3 /opt/oran/ran/scripts/rfsim_channel_control.py show --port 9090
+   ```
+
+2. **Inject Planned Uplink Path Attenuation (Targeting Scenario S4 & S9):**
+   ```bash
+   # Planned procedure: Apply 10 dB Uplink attenuation on Channel 1 (rfsimu_channel_ue0):
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 10.0 --channel-id 1 --port 9090
    ```
 
-2. **Severe Link Budget Collapse / Outage ($\ge 20 - 25\text{ dB}$ attenuation):**
-   * **Observed Response:** Attenuation beyond 20 dB drives received signal below receiver sensitivity threshold in this setup. In live logs, `pucch0_DTX` spikes, triggering standard 3GPP Radio Link Failure (RLF), and the Linux kernel tears down tunnel interface `oaitun_ue1`.
+3. **Restore Channels to Calibrated Profile 1 Baseline (0.0 dB Unity Gain):**
    ```bash
-   # Induce severe link collapse leading to RLF:
-   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 25.0 --channel-id 1 --port 9090
-   ```
-
-3. **Status Query & Baseline Restoration:**
-   ```bash
-   # Inspect active path_loss_dB across all configured channels:
-   python3 /opt/oran/ran/scripts/rfsim_channel_control.py show --port 9090
-
-   # Restore both channels back to testbed baseline (+20.00 dB):
+   # Planned procedure: Reset both channels to testbed verified baseline (0.0 dB unity gain):
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
    ```
 
-> [!NOTE]
-> **Testbed Empirical Calibration Context:**  
-> The BLER ranges, MCS transitions, and RLF thresholds documented above represent empirical observations on this specific testbed configuration (`du_gnb1.conf` with AWGN model and 15 Mbps UDP load). If noise figures, bandwidth, or channel profiles are altered, exact breakdown thresholds must be re-calibrated.
+#### Historical Empirical Reference (Early Profile 3B Trials from Case 51):
+Under early testbed characterization (`du_gnb1.conf`, AWGN channel, historical elevated noise power `-2.0 dB`, 15 Mbps UDP load, initial +20 dB gain):
+* **Controlled Degradation Regime ($5\text{ dB} - 16\text{ dB}$ attenuation):** Signal attenuation reduced received RSSI, triggering downward MCS adaptation (from 28 down to 4–14) and elevated BLER (30–80%) with increased HARQ retransmissions (`ulsch_rounds`).
+* **Severe Link Outage ($\ge 20 - 25\text{ dB}$ attenuation):** Drove received signal below sensitivity, triggering PUCCH DTX, RRC link failure, and netns tunnel teardown.
+
+> [!IMPORTANT]
+> **Epistemic Demarcation:** The numerical ranges from Case 51 represent historical observations under uncalibrated noise (-2.0 dB). Under the currently verified Profile 1 (51 PRBs, unity gain 0.0 dB, reference noise -100.0 dB), attenuation thresholds and link adaptation dynamics are subject to the planned calibration process documented in [docs/experiments/scenarios.md](../experiments/scenarios.md).
 
 ---
 

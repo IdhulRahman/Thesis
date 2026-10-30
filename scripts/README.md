@@ -30,31 +30,45 @@ This directory contains the operational daemons, automation scripts, fault injec
 
 ## 2. Telemetry Recording Operational Guide (`record_experiment.py`)
 
+> [!NOTE]
+> **Operational Status:**  
+> Command examples below represent **planned operational procedures** for future scenario recordings (see [docs/experiments/scenarios.md](../docs/experiments/scenarios.md) and [docs/experiments/methodology.md](../docs/experiments/methodology.md)). Parameter values are candidates subject to calibration.
+
 ### Usage Modes
 
 1. **Interactive Prompt:**
    ```bash
    python3 /opt/oran/monitoring/scripts/record_experiment.py
    ```
-   *Asks for scenario name (default `S1`), duration in seconds (default `60`), and optional notes.*
+   *Prompts for scenario identifier, duration in seconds (180s proposed for standard recording window), and run notes.*
 
-2. **Direct CLI Execution:**
+2. **Direct CLI Execution (Candidate Calibration Durations):**
    ```bash
-   # Record S1 Baseline (60s)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 60 --notes "Baseline normal 10M"
+   # Record S1 Light Baseline (180s recording window proposed)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 180 --notes "S1 Light Baseline Candidate 5M"
 
-   # Record S3 RAN Overload (60s)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S3 --duration 60 --notes "Kandidat overload 80M"
+   # Record S2 Higher Baseline (180s recording window proposed)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S2 --duration 180 --notes "S2 Higher Baseline Candidate 10M"
 
-   # Record S6 Core Bottleneck (60s)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S6 --duration 60 --notes "Kandidat TBF Core 12M"
+   # Record S3 RAN Overload (180s recording window proposed)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S3 --duration 180 --notes "S3 RAN Overload Capacity Saturation"
+
+   # Record S6 Core Bottleneck (180s recording window proposed)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S6 --duration 180 --notes "S6 Core Bottleneck UPF-1 TBF 5M"
    ```
 
 3. **Manual Stop Mode (`Ctrl+C`):**
    ```bash
    python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 0
    ```
-   *Runs continuously until operator presses `Ctrl+C`. Safely flushes and closes CSV and writes manifest.*
+   *Runs continuously until operator terminates with `Ctrl+C`. Safely flushes and closes CSV and writes manifest.*
+
+### CLI Automation Capabilities & Implementation Gaps
+* **Canonical Presets in `record_experiment.py` (`CANONICAL_PRESETS`):** Currently defines `S1`, `S2`, `S3`, `S6`, `S9`, `S10_A`, `S10_B`, `RECOVERY`, and `CLEAR`.
+  * *Implementation Gap 1:* Scenario `S4` (`S4_RAN_DEGRADATION`) is not yet in `CANONICAL_PRESETS` and requires future script addition.
+  * *Implementation Gap 2:* Scenario `S10` multi-phase dynamic labeling across sequential state transitions is not natively automated by `record_experiment.py` (which stamps a static scenario/domain label across the full run duration).
+* **RF Control CLI Capabilities (`rfsim_channel_control.py`):** Supports `show`, `set-attenuation`, `set-raw-ploss`, `reset`, and `sweep`.
+  * *Implementation Gap 3:* `rfsim_channel_control.py` currently adjusts path loss/attenuation, but lacks a CLI subcommand to dynamically adjust `noise_power_dB` over Telnet.
 
 ### Post-Recording Statistical Analysis
 To inspect statistical distributions of the recorded run:

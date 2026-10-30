@@ -93,10 +93,10 @@ The diagram below illustrates the complete **proposed multi-timescale closed-loo
    The Non-RT RIC coordinator on VM-1 ingests normalized, time-aligned feature vectors streaming from the VM-6 telemetry pipeline at 1 Hz intervals.
 2. **Analyze (Bottleneck Classification):**  
    The rApp executes an explainable classification engine (Decision Tree / Rules) to categorize system health into one of four states:
-   * **`NORMAL`:** System operating within SLA bounds; no intervention required.
-   * **`RAN_BOTTLENECK`:** Radio resource exhaustion (high PRB utilization, collapsed SNR/MCS, or elevated BLER), while Core queues remain empty.
-   * **`CORE_BOTTLENECK`:** Transport queue accumulation (`upf_queue_backlog_bytes > 0`), surging packet drops, or elevated GTP delay, while radio PRBs remain available.
-   * **`JOINT_BOTTLENECK`:** Simultaneous radio exhaustion and core transport queuing.
+   * **`BASELINE` (`NORMAL`):** System operating within SLA bounds under reference channel; no intervention required.
+   * **`RAN` (`RAN_BOTTLENECK`):** Radio air-interface bottleneck (scheduling capacity saturation or channel degradation/attenuation), while Core queues remain empty.
+   * **`CORE` (`CORE_BOTTLENECK`):** Transport queue accumulation (`upf_queue_backlog_bytes > 0`), surging packet drops, or elevated delay under binding UPF egress shaping, while radio PRBs remain available.
+   * **`JOINT` (`JOINT_BOTTLENECK`):** Simultaneous active radio impairment and binding core transport queuing.
 
    > [!NOTE]
    > **Observability Demarcation (Standard AnLF vs. Host OAM):**  
