@@ -39,10 +39,11 @@ When single-fault scenarios (S3, S4, S6, S9) are recorded with an extended durat
 * **Raw Recorder Behavior:** The recorder assigns the initial preset label statically across all 240 seconds.
 * **Physical Temporal Regimes:** The recording actually spans three distinct physical phases:
   1. *Active Disturbance Phase ($t \in [0, 180\text{ s}]$):* Impairment is actively applied; system displays domain-specific bottleneck signatures.
-  2. *Transient Drainage / Recovery Phase ($t \in [180\text{ s}, 180 + \Delta t]$):* Impairment is physically released, but residual packets queued in socket buffers, RLC entities, or UPF qdiscs drain gradually, and radio link adaptation stabilizes.
-  3. *Steady-State Post-Recovery Baseline Phase ($t > 180 + \Delta t$):* Queues are empty, receiver throughput matches offered load, and latency returns to nominal SLA bounds.
-* **Methodological Annotation Rule:**  
-  Labels must **NOT** be automatically switched to `BASELINE` at the exact instant the fault is physically released ($t = 180\text{ s}$), because physical queue drainage requires non-zero time ($\Delta t$). For supervised model training and RCA evaluation, researchers must perform offline temporal segmentation using logged event timestamps combined with empirical telemetry evidence (queue backlog returning to 0 B, goodput delta normalizing to $\approx 0$, ICMP RTT stabilizing). This transition segmentation rule applies to all recordings that span recovery, including single-fault scenarios and multi-phase staged recovery (S10).
+  2. *Transient Drainage / Recovery Phase ($t \in [180\text{ s}, 180 + T_{\text{recovery}}]$):* Impairment is physically released, but residual packets queued in socket buffers, RLC entities, or UPF qdiscs drain gradually, and radio link adaptation stabilizes.
+  3. *Steady-State Post-Recovery Baseline Phase ($t > 180 + T_{\text{recovery}}$):* Queues are empty, receiver throughput matches offered load, and latency returns to nominal SLA bounds.
+* **Methodological Annotation Rule & Notational Demarcation:**  
+  Labels must **NOT** be automatically switched to `BASELINE` at the exact instant the fault is physically released ($t = 180\text{ s}$), because physical queue drainage requires non-zero empirical recovery time ($T_{\text{recovery}}$).  
+  *Notational Demarcation:* Recovery duration $T_{\text{recovery}}$ is distinct from the iperf session duration difference ($\Delta t = T_{\text{rx}} - T_{\text{tx}}$). $T_{\text{recovery}}$ must be determined directly from actual telemetry observations (e.g., when UPF backlog reaches 0 B, canary RTT normalizes, and receiver goodput matches offered load), rather than assuming the iperf session duration delta ($\Delta t$) as the boundary. For supervised model training and RCA evaluation, researchers must perform offline temporal segmentation using logged event timestamps combined with empirical telemetry evidence. This transition segmentation rule applies to all recordings that span recovery, including single-fault scenarios and multi-phase staged recovery (S10).
 
 ---
 
@@ -150,7 +151,7 @@ The table below outlines the planned treatment matrix. Parameter values represen
    * Historical attenuation values ($5\text{–}16\text{ dB}$) from early trials serve strictly as an empirical reference starting point for candidate evaluation under Profile 1, not an established deterministic response law.
    * Specific BLER, MCS, or SNR numerical thresholds are directional behavioral hypotheses, not rigid prerequisites. A clean baseline operating with low BLER is fully valid; radio link variations are primarily induced and evaluated during this S4 treatment.
    * If severe attenuation induces softmodem assertion crashes or process termination, this must be logged as a **testbed operational boundary failure**, NOT as an acceptable training sample of radio congestion.
-   * **Recovery Segmentation Rule:** When recorded with an extended duration (e.g. 240s) spanning treatment release at $t = 180\text{ s}$, the active degradation window ($[0, 180\text{ s}]$), transient link recovery ($[180, 180 + \Delta t]$), and post-recovery baseline ($> 180 + \Delta t$) must be partitioned offline based on logged timestamps and telemetry evidence, rather than applying a single uniform label or assuming instantaneous baseline recovery at $t = 180\text{ s}$.
+   * **Recovery Segmentation Rule:** When recorded with an extended duration (e.g. 240s) spanning treatment release at $t = 180\text{ s}$, the active degradation window ($[0, 180\text{ s}]$), transient link recovery ($[180, 180 + T_{\text{recovery}}]$), and post-recovery baseline ($> 180 + T_{\text{recovery}}$) must be partitioned offline based on logged timestamps and telemetry evidence, rather than applying a single uniform label or assuming instantaneous baseline recovery at $t = 180\text{ s}$.
 
 ---
 
@@ -182,7 +183,7 @@ The table below outlines the planned treatment matrix. Parameter values represen
    * Terminology must consistently specify **UPF-host/container egress shaping**.
    * Shaping binds on traffic exiting UPF-1 towards EXT-DN across interface `eth0`.
    * Radio path must be independently verified as capable of serving the offered load, ensuring the bottleneck is isolated to the Core.
-   * **Recovery Segmentation Rule:** In an extended recording (e.g. 240s) where TBF is removed at $t = 180\text{ s}$, the active Core queuing phase ($[0, 180\text{ s}]$), transient UPF queue drainage ($[180, 180 + \Delta t]$), and post-recovery baseline ($> 180 + \Delta t$) must be segmented offline using logged timestamps and `upf_backlog_bytes_embb` drainage evidence, rather than assuming an immediate switch to `BASELINE` at $t = 180\text{ s}$.
+   * **Recovery Segmentation Rule:** In an extended recording (e.g. 240s) where TBF is removed at $t = 180\text{ s}$, the active Core queuing phase ($[0, 180\text{ s}]$), transient UPF queue drainage ($[180, 180 + T_{\text{recovery}}]$), and post-recovery baseline ($> 180 + T_{\text{recovery}}$) must be segmented offline using logged timestamps and `upf_backlog_bytes_embb` drainage evidence, rather than assuming an immediate switch to `BASELINE` at $t = 180\text{ s}$.
 
 ---
 
@@ -254,7 +255,7 @@ The table below outlines the planned treatment matrix. Parameter values represen
 6. **Responses to Examine:** Telemetry recovery latency per domain ($T_{\text{rec,RAN}}$ vs $T_{\text{rec,Core}}$); time lag between physical impairment removal and telemetry indicator settling; verification that clearing one domain does not cause false degradation in the other.
 7. **Interpretation Boundaries:**
    * **Labeling Rule:** The recording must NOT be stamped with a single uniform class label. Each phase must be annotated with its corresponding ground-truth regime (`JOINT` for Phase 1, `CORE` or `RAN` for Phase 2, `BASELINE` for Phase 3).
-   * Transition boundaries must account for physical drainage delays (e.g. queue drainage time $\Delta t$) before scoring state classification.
+   * Transition boundaries must account for physical drainage delays (e.g. queue drainage and recovery duration $T_{\text{recovery}}$) before scoring state classification.
 
 ---
 

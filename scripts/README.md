@@ -45,7 +45,7 @@ This directory contains the operational daemons, automation scripts, fault injec
 2. **Direct CLI Execution (Active Disturbance & Recovery Windows):**
    > [!IMPORTANT]
    > *Recording Duration & Labeling Boundary:* `--duration 180` records only the active disturbance window and halts immediately upon treatment release. To capture both the active regime (~180s) AND the post-fault recovery observation window (~60s+), the CLI should be executed with a combined duration (e.g., `--duration 240`) or run in manual stop mode (`--duration 0`).  
-   > *Offline Labeling Rule:* The recorder stamps `event_domain` statically across the full run duration. Rows after disturbance release must NOT be assumed to be `BASELINE` immediately, as queues require drainage time ($\Delta t$). Offline segmentation based on event timestamps and empirical indicators (queue backlog = 0 B, RTT normal) is required.
+   > *Offline Labeling Rule:* The recorder stamps `event_domain` statically across the full run duration. Rows after disturbance release must NOT be assumed to be `BASELINE` immediately, as queues require drainage and settling time ($T_{\text{recovery}}$, distinct from iperf duration delta $\Delta t$). Offline segmentation based on event timestamps and empirical indicators (queue backlog = 0 B, RTT normal) is required.
 
    ```bash
    # Record S1 Light Baseline (240s total: settling + baseline run + observation)
