@@ -207,57 +207,57 @@ Control actuation metrics (such as wrong-domain action ratios, missed interventi
 
 ## 6. Results and Discussion
 
-### 6.1 Baseline Performance at Horizon $H = 1\,\text{s}$
+### 6.1 Planned Analysis at Baseline Horizon ($H = 1\,\text{s}$)
+This section will present the primary comparative evaluation of the eight model candidates (`Base-P`, `DT`, `RF`, `XGBoost`, `SVR/SVM`, `MLP`, `LSTM`, `GRU`) across the three evaluation tiers:
 
-#### 1. Forecasting Fidelity (Tier 1)
-At the 1-second prediction horizon, all learned models significantly outperform the persistence baseline (`Base-P`):
-- `Base-P` achieves an RMSE of **0.6490**.
-- Learned ML models reduce RMSE to **0.5079–0.5530** (an improvement of $\approx 15\text{–}21\%$).
-- Learned DL models achieve RMSE values of **0.5089–0.5510** (GRU achieving **0.5089**, a $21.6\%$ reduction over Base-P).
-- MAE values across all learned models fall within a narrow band of **0.2317–0.2775** standard deviations, demonstrating consistent temporal tracking across physical features.
+#### 1. Forecasting Fidelity Analysis (Tier 1)
+- **Table I Template (Forecasting Performance):**
+  - Columns: `Model Candidate`, `MAE (Normalized)`, `RMSE (Normalized)`.
+  - Analytical Purpose: Evaluate how each learned model compares against the zero-parameter persistence baseline (`Base-P`), quantifying the extent to which machine learning architectures capture physical telemetry temporal dynamics.
 
-#### 2. Multi-Class Diagnostic Quality (Tier 2)
-On the 4-state diagnostic task ($N = 304$):
-- **Random Forest (RF)** achieves the highest overall diagnostic performance among ML models with **94.74% Accuracy**, **0.9508 Macro-F1**, and **0.9811 Macro-AP**.
-- **Multilayer Perceptron (MLP)** achieves the leading deep learning performance with **94.08% Accuracy**, **0.9449 Macro-F1**, and **0.9873 Macro-AP**.
-- **Support Vector Classifier (SVM)** and **XGBoost** demonstrate competitive accuracy at **94.41%** and **93.42%**, respectively.
-- **Confusion Matrix Analysis:** Across all trained models, off-diagonal misclassifications between isolated `RAN` and `CORE` domains are zero ($0$ samples). Misclassifications occur strictly along the boundary between `BASELINE` and isolated faults, proving that multi-domain telemetry fusion completely resolves cross-domain misdirection.
+#### 2. Multi-Class Diagnostic Quality Analysis (Tier 2)
+- **Table II Template (Diagnostic Root-Cause Localization):**
+  - Columns: `Model Candidate`, `Accuracy (%)`, `Macro-Precision`, `Macro-Recall`, `Macro-F1`, `Macro-AP`, and per-class F1-scores (`F1_BASELINE`, `F1_RAN`, `F1_CORE`, `F1_JOINT`).
+  - Analytical Purpose: Determine whether tree-based ensembles, margin-based classifiers, feedforward neural nets, or recurrent models provide superior class separation and minority-fault localization across the four network operational regimes.
+- **Figure 2 Template (Diagnostic Confusion Matrices):**
+  - Format: $4 \times 4$ normalized confusion matrix heatmaps comparing representative ML and DL candidates.
+  - Analytical Purpose: Inspect cross-domain error distributions, specifically verifying whether multi-domain telemetry fusion prevents misclassification between isolated `RAN` and `CORE` domains.
 
-#### 3. Computational Feasibility (Tier 3)
-- **Ultra-Low Latency Candidates:** DT ($0.110\,\text{ms}$), XGBoost ($0.460\,\text{ms}$), LSTM ($0.090\,\text{ms}$), and GRU ($0.076\,\text{ms}$) achieve sub-millisecond p95 latency and throughputs exceeding $2,500\,\text{IPS}$, operating well within the Near-RT RIC budget ($<10\,\text{ms}$).
-- **High-Accuracy Heavier Candidates:** RF requires $37.566\,\text{ms}$ and SVM requires $11.638\,\text{ms}$, remaining suitable for Non-RT RIC rApp slow-loop execution ($>1\,\text{s}$).
+#### 3. Computational Feasibility & Footprint Analysis (Tier 3)
+- **Table III Template (Inference Complexity & Resource Cost):**
+  - Columns: `Model Candidate`, `Inference Latency p95 (ms)`, `Inference Throughput (IPS)`, `Model Footprint (KB)`.
+  - Analytical Purpose: Characterize the computational cost of each architecture, establishing compliance with O-RAN execution timing budgets (Near-RT RIC $<10\,\text{ms}$ vs. Non-RT RIC $>1\,\text{s}$).
+- **Figure 4 Template (Accuracy vs. Latency Trade-Off):**
+  - Format: Pareto frontier scatter plot mapping Macro-F1 score against 95th-percentile inference latency (logarithmic scale) with bubble sizes indicating model memory footprint.
 
-### 6.2 Multi-Horizon Prediction Sensitivity Analysis ($H \in \{1, 3, 5, 10\}\,\text{s}$)
+---
 
-The empirical evaluation across extended temporal horizons reveals the fundamental operational trade-off:
+### 6.2 Planned Multi-Horizon Prediction Sensitivity Analysis ($H \in \{1, 3, 5, 10\}\,\text{s}$)
+This section will examine how temporal distance into the future affects model performance, capturing the operational trade-off between predictive lead time and forecasting uncertainty:
 
-| Horizon ($H$) | Model | MAE (Norm) | RMSE (Norm) | Accuracy (%) | Macro-F1 | Macro-AP |
-|:---:|:---|---:|---:|---:|---:|---:|
-| **1 s** | Base-P | 0.2441 | 0.6490 | N/A | N/A | N/A |
-| | MLP | 0.2585 | 0.5401 | 94.08% | 0.9449 | 0.9873 |
-| | LSTM | 0.2441 | 0.5331 | 91.78% | 0.9228 | 0.9263 |
-| | GRU | 0.2474 | 0.5136 | 91.45% | 0.9197 | 0.9856 |
-| **3 s** | Base-P | 0.2797 | 0.7035 | N/A | N/A | N/A |
-| | MLP | 0.2812 | 0.5695 | 91.67% | 0.9219 | 0.9651 |
-| | LSTM | 0.2726 | 0.5662 | 79.51% | 0.7949 | 0.8770 |
-| | GRU | 0.2568 | 0.5392 | 89.24% | 0.8987 | 0.9048 |
-| **5 s** | Base-P | 0.2734 | 0.6765 | N/A | N/A | N/A |
-| | MLP | 0.2835 | 0.5686 | 88.60% | 0.8930 | 0.9609 |
-| | LSTM | 0.2690 | 0.5835 | 86.76% | 0.8751 | 0.9451 |
-| | GRU | 0.2642 | 0.5500 | 88.60% | 0.8929 | 0.9646 |
-| **10 s** | Base-P | 0.2886 | 0.7110 | N/A | N/A | N/A |
-| | MLP | 0.3211 | 0.6458 | 84.48% | 0.8543 | 0.8730 |
-| | LSTM | 0.3071 | 0.6191 | 77.16% | 0.7782 | 0.9048 |
-| | GRU | 0.2845 | 0.6056 | 84.48% | 0.8543 | 0.8352 |
+- **Table IV Template (Multi-Horizon Evaluation):**
+  - Structure: Grouped by prediction horizon $H \in \{1\,\text{s}, 3\,\text{s}, 5\,\text{s}, 10\,\text{s}\}$ across candidates (`Base-P`, `MLP`, `LSTM`, `GRU`, and representative ML models).
+  - Columns: `Horizon (s)`, `Model Candidate`, `MAE (Norm)`, `RMSE (Norm)`, `Accuracy (%)`, `Macro-F1`, `Macro-AP`.
+- **Figure 3 Template (Horizon Degradation Curves):**
+  - Format: Dual-panel line plots tracking:
+    * *Panel A:* Evolution of continuous forecasting errors (MAE and RMSE) across expanding horizons ($1\,\text{s} \to 10\,\text{s}$).
+    * *Panel B:* Corresponding decay of discrete diagnostic quality (Accuracy and Macro-F1) across horizons.
+  - Analytical Purpose: Identify whether diagnostic degradation follows a gradual slope (*graceful degradation*) or a catastrophic drop-off, and identify which architectural families demonstrate superior resilience to multi-step error accumulation.
 
-### 6.3 Synthesis Addressing the Research Questions
-1. **Response to RQ1 (Forecasting across Horizons):**  
-   Forecasting error increases monotonically with horizon length due to accumulated traffic uncertainty. GRU demonstrates the lowest error inflation, maintaining an MAE of $0.2845$ at $H=10\,\text{s}$, compared to $0.3211$ for MLP.
-2. **Response to RQ2 (Forecasting Fidelity vs. Diagnostic Accuracy):**  
-   Diagnostic accuracy undergoes **graceful degradation** rather than catastrophic failure. While MAE increases by $\approx 25\%$ from $1\,\text{s}$ to $10\,\text{s}$, diagnostic accuracy remains above $84\%$ for GRU and MLP. A normalized MAE of $\approx 0.25$ standard deviations preserves adequate decision margin to separate healthy and degraded network states.
-3. **Response to RQ3 (Multi-Dimensional Pareto Trade-Offs):**  
-   - For **Near-RT RIC deployment** requiring sub-millisecond execution, **XGBoost** and **GRU** represent the optimal design choices, delivering high diagnostic fidelity ($>91-93\%$ accuracy) at latencies under $0.5\,\text{ms}$.
-   - For **Non-RT RIC deployment** operating on multi-second planning loops, **Random Forest** offers the highest short-horizon accuracy ($94.74\%$), while **GRU** provides the most resilient multi-horizon stability up to $10\,\text{seconds}$.
+---
+
+### 6.3 Synthesis Framework Addressing the Research Questions
+The discussion will synthesize experimental observations to directly answer the three research questions:
+
+1. **Synthesis for RQ1 (Forecasting across Horizons):**
+   - Synthesize the rate of forecasting error accumulation as prediction horizon scales from $1\,\text{s}$ to $10\,\text{s}$.
+   - Contrast the temporal memory mechanisms of recurrent architectures (LSTM/GRU) against feedforward (MLP) and tabular models under multivariate 5G telemetry.
+2. **Synthesis for RQ2 (Forecasting Fidelity vs. Diagnostic Accuracy):**
+   - Investigate the empirical correlation between continuous telemetry forecasting error (MAE/RMSE) and discrete root-cause classification accuracy (Macro-F1).
+   - Evaluate whether lower regression error strictly guarantees superior class separation, or whether decision boundary geometry dominates diagnostic localization.
+3. **Synthesis for RQ3 (Multi-Dimensional Pareto Trade-Offs):**
+   - Map empirical candidates onto the accuracy–latency–footprint Pareto frontier.
+   - Formulate concrete deployment recommendations: which models satisfy Near-RT RIC sub-millisecond execution constraints, and which models are optimal for Non-RT RIC multi-second strategic planning.
 
 ---
 
@@ -269,18 +269,18 @@ The empirical evaluation across extended temporal horizons reveals the fundament
    High-resolution UPF queuing metrics are extracted via Linux kernel socket inspection rather than standardized 3GPP NWDAF Data Collection Coordination Function (DCCF) interfaces.
 3. **Offline Diagnostic Scope:**  
    The empirical findings characterize open-loop predictive diagnosis and temporal sensitivity. Dynamic closed-loop control actuation (e.g., automated A1 policy dispatch and E2 traffic steering) and live SLA restoration dynamics are not evaluated in this paper.
-4. **Synthetic Load Boundaries:**  
+4. **Disturbance Scenario Boundaries:**  
    Evaluations focus on sustained traffic saturation and configured rate-limiting disturbances; bursty self-similar internet traffic and control-plane signaling storms are not modeled.
 
 ---
 
 ## 8. Conclusion
 
-This paper presented an empirical comparative study benchmarking machine learning and deep learning models for multi-horizon telemetry forecasting and cross-domain bottleneck root-cause diagnosis on a calibrated 5G multi-slice O-RAN testbed. By evaluating tree-based ensembles, linear margin models, dense networks, and recurrent architectures under equal historical context, the study established that:
-1. Fusing disaggregated RAN scheduling metrics with Core user-plane queue counters completely eliminates cross-domain diagnostic inversion.
-2. Moderate continuous telemetry forecasting errors do not impede high-accuracy discrete root-cause localization.
-3. Diagnostic accuracy degrades gracefully across multi-second horizons ($H \le 10\,\text{s}$), with GRU providing the most robust temporal resilience.
-4. Lightweight models such as XGBoost and GRU satisfy Near-RT RIC sub-millisecond execution constraints without compromising diagnostic reliability.
+The conclusion section will synthesize the paper's findings:
+1. Provide definitive answers to RQ1, RQ2, and RQ3 based on the empirical evaluation.
+2. Summarize the role of multi-domain telemetry fusion (RAN + Core user plane) in resolving cross-domain diagnostic confusion.
+3. Outline how the relationship between forecasting horizon length and diagnostic degradation guides the operational selection of predictive models for O-RAN rApp and xApp architectures.
+4. Delineate future research directions extending this predictive diagnostic intelligence into automated closed-loop traffic steering and multi-slice SLA recovery.
 
 ---
 
