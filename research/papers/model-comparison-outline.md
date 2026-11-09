@@ -200,6 +200,13 @@ Evaluates multi-class classification quality across the four states $\mathcal{C}
 2. **Inference Throughput (IPS):** Sustained inferences per second.
 3. **Model Size:** Memory and disk footprint in kilobytes (KB).
 
+### 5.4 Multi-Run Statistical Protocol ($K = 10$ Runs)
+To eliminate random seed sensitivity, mitigate stochastic weight initialization variance in neural networks (MLP, LSTM, GRU), and account for feature subsampling randomness in tree ensembles (RF, XGBoost), all stochastic models are trained and evaluated over $K = 10$ independent runs using distinct random seeds.
+
+For each evaluation metric $M$ (including Exact Match Accuracy, Macro-F1, MAE, and RMSE), the final reported performance is the sample mean across the 10 runs:
+$$\bar{M} = \frac{1}{K} \sum_{k=1}^{K} M^{(k)}$$
+optionally reported alongside the sample standard deviation $\sigma_M$. Deterministic baselines (zero-parameter Persistence and deterministic single Decision Trees) are evaluated once, as their outputs remain strictly identical across seeds.
+
 *Metric Exclusions:*  
 Control actuation metrics (such as wrong-domain action ratios, missed interventions, and policy churn) are excluded from the primary paper evaluation, as they pertain to dynamic closed-loop controller execution. Diagnostic clearance time ($T_{\text{clear}}$) is reported strictly as a telemetry tracking indicator and is not equated with closed-loop SLA recovery time ($T_{\text{rec}}$).
 
@@ -217,8 +224,8 @@ This section will present the primary comparative evaluation of the eight model 
 
 #### 2. Multi-Class Diagnostic Quality Analysis (Tier 2)
 - **Table II Template (Diagnostic Root-Cause Localization):**
-  - Columns: `Model Candidate`, `Accuracy (%)`, `Macro-Precision`, `Macro-Recall`, `Macro-F1`, `Macro-AP`, and per-class F1-scores (`F1_BASELINE`, `F1_RAN`, `F1_CORE`, `F1_JOINT`).
-  - Analytical Purpose: Determine whether tree-based ensembles, margin-based classifiers, feedforward neural nets, or recurrent models provide superior class separation and minority-fault localization across the four network operational regimes.
+  - Columns: `Model Candidate`, `Mean Accuracy (%) (10 Runs)`, `Macro-Precision`, `Macro-Recall`, `Macro-F1`, `Macro-AP`, and per-class F1-scores (`F1_BASELINE`, `F1_RAN`, `F1_CORE`, `F1_JOINT`).
+  - Analytical Purpose: Determine whether tree-based ensembles, margin-based classifiers, feedforward neural nets, or recurrent models provide superior class separation and minority-fault localization across the four network operational regimes under multi-run seed averaging.
 - **Figure 2 Template (Diagnostic Confusion Matrices):**
   - Format: $4 \times 4$ normalized confusion matrix heatmaps comparing representative ML and DL candidates.
   - Analytical Purpose: Inspect cross-domain error distributions, specifically verifying whether multi-domain telemetry fusion prevents misclassification between isolated `RAN` and `CORE` domains.
@@ -237,7 +244,7 @@ This section will examine how temporal distance into the future affects model pe
 
 - **Table IV Template (Multi-Horizon Evaluation):**
   - Structure: Grouped by prediction horizon $H \in \{1\,\text{s}, 3\,\text{s}, 5\,\text{s}, 10\,\text{s}\}$ across candidates (`Base-P`, `MLP`, `LSTM`, `GRU`, and representative ML models).
-  - Columns: `Horizon (s)`, `Model Candidate`, `MAE (Norm)`, `RMSE (Norm)`, `Accuracy (%)`, `Macro-F1`, `Macro-AP`.
+  - Columns: `Horizon (s)`, `Model Candidate`, `MAE (Norm)`, `RMSE (Norm)`, `Mean Accuracy (%)`, `Macro-F1`, `Macro-AP`.
 - **Figure 3 Template (Horizon Degradation Curves):**
   - Format: Dual-panel line plots tracking:
     * *Panel A:* Evolution of continuous forecasting errors (MAE and RMSE) across expanding horizons ($1\,\text{s} \to 10\,\text{s}$).
