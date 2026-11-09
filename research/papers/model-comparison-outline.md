@@ -201,7 +201,7 @@ Evaluates multi-class classification quality across the four states $\mathcal{C}
 3. **Model Size:** Memory and disk footprint in kilobytes (KB).
 
 *Metric Exclusions:*  
-Actuation metrics (such as Wrong-Domain Action Rate $W_{\text{act}}$, missed interventions, and action churn) are excluded from the main paper evaluation, as they pertain to closed-loop controller execution. Diagnostic clearance time ($T_{\text{clear}}$) is reported as a telemetry tracking metric and is strictly distinguished from closed-loop SLA recovery time ($T_{\text{rec}}$).
+Control actuation metrics (such as wrong-domain action ratios, missed interventions, and policy churn) are excluded from the primary paper evaluation, as they pertain to dynamic closed-loop controller execution. Diagnostic clearance time ($T_{\text{clear}}$) is reported strictly as a telemetry tracking indicator and is not equated with closed-loop SLA recovery time ($T_{\text{rec}}$).
 
 ---
 
