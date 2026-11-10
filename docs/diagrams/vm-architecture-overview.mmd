@@ -1,0 +1,136 @@
+flowchart LR
+%% ====================================================================
+%% Standard 3GPP Rel 16/17 & O-RAN Architecture (6-VM Testbed Platform)
+%% Cluster Hardware Specs & Management IP Mapping (Ubuntu 22.04 LTS)
+%% ====================================================================
+
+    %% ----------------------------------------------------
+    %% VM-5: User Equipment Domain
+    %% ----------------------------------------------------
+    subgraph VM5 ["<b>VM-5: User Equipment (UEs)</b><br/>IP: 10.102.0.165 • 4 vCPU, 8 GB RAM"]
+        UE1["UE-1 (eMBB Slice<br/>S-NSSAI: SST=1)"]
+        UE2["UE-2 (URLLC Slice<br/>S-NSSAI: SST=2)"]
+    end
+
+    %% ----------------------------------------------------
+    %% VM-4: Disaggregated O-RAN Radio Access Network
+    %% ----------------------------------------------------
+    subgraph VM4 ["<b>VM-4: O-RAN Radio Access Network (gNodeB)</b><br/>IP: 10.102.0.167 • 8 vCPU, 16 GB RAM"]
+        subgraph O_DU_BOX ["O-DU (Distributed Unit) [E2 Node]"]
+            ODU["O-DU (High-PHY, MAC, RLC)<br/>+ OAI RFSimulator Engine"]
+        end
+
+        subgraph O_CU_BOX ["O-CU (Central Unit)"]
+            CUCP["O-CU-CP (RRC, PDCP-C)<br/>[E2 Node]"]
+            CUUP["O-CU-UP (SDAP, PDCP-U)<br/>[E2 Node]"]
+            CUCP <== "E1 Interface" ==> CUUP
+        end
+
+        ODU -- "F1-C" --> CUCP
+        ODU -- "F1-U" --> CUUP
+    end
+
+    %% ----------------------------------------------------
+    %% VM-3: 5G Core Network & NWDAF
+    %% ----------------------------------------------------
+    subgraph VM3 ["<b>VM-3: 5G Core Network (5GC & NWDAF)</b><br/>IP: 10.102.0.164 • 8 vCPU, 16 GB RAM"]
+        subgraph CP_5GC ["5GC Control Plane NFs"]
+            AMF["AMF (Mobility)"]
+            SMF["SMF (Session)"]
+            PCF["PCF (Policy Control)"]
+            NSSF["NSSF (Slice Selection)"]
+            COMMON_CP["NRF / UDM / AUSF / UDR"]
+            AMF --- SMF
+            SMF --- PCF
+            AMF --- NSSF
+        end
+
+        subgraph UP_5GC ["5GC User Plane NFs"]
+            UPF1["UPF-1 (eMBB, SST=1)"]
+            UPF2["UPF-2 (URLLC, SST=2)"]
+            DN["Data Network (DN / Internet)"]
+            UPF1 -- "N6" --> DN
+            UPF2 -- "N6" --> DN
+        end
+
+        subgraph NWDAF_5GC ["Analytics Domain"]
+            NWDAF["NWDAF (Network Data Analytics)"]
+        end
+    end
+
+    %% ----------------------------------------------------
+    %% VM-2: O-RAN Near-RT RIC
+    %% ----------------------------------------------------
+    subgraph VM2 ["<b>VM-2: Near-RT RIC</b><br/>IP: 10.102.0.66 • 4 vCPU, 8 GB RAM"]
+        E2T["E2 Termination (E2T)"]
+        A1M["A1 Mediator"]
+        XAPP["Diagnostic xApp (Inference Engine)"]
+        DBAAS["RIC Database / SDL (RNIB / Redis)"]
+
+        E2T --- XAPP
+        A1M --- XAPP
+        XAPP --- DBAAS
+    end
+
+    %% ----------------------------------------------------
+    %% VM-1: O-RAN Non-RT RIC & SMO
+    %% ----------------------------------------------------
+    subgraph VM1 ["<b>VM-1: Non-RT RIC & SMO</b><br/>IP: 10.102.0.168 • 4 vCPU, 8 GB RAM"]
+        SMO["SMO Platform (Service Management & Orchestration)"]
+        A1_PMS["A1 Policy Management Service"]
+        RAPP["Diagnostic rApp / Offline Model Training"]
+        SMO --- A1_PMS
+        SMO --- RAPP
+    end
+
+    %% ----------------------------------------------------
+    %% VM-6: Observability / Telemetry Platform
+    %% ----------------------------------------------------
+    subgraph VM6 ["<b>VM-6: Observability Host</b><br/>IP: 10.102.0.67 • 4 vCPU, 8 GB RAM"]
+        COLLECTOR["Metrics Exporter & Collector"]
+        PROM["Prometheus TSDB (1.0 Hz)"]
+        GRAF["Grafana Dashboard"]
+        COLLECTOR --> PROM
+        PROM --> GRAF
+    end
+
+    %% ----------------------------------------------------
+    %% 3GPP Standard Interfaces
+    %% ----------------------------------------------------
+    UE1 == "Emulated Uu (OAI RFSim)" ==> ODU
+    UE2 == "Emulated Uu (OAI RFSim)" ==> ODU
+
+    CUCP -- "N2 (NGAP / Control Plane)" --> AMF
+    CUUP -- "N3 (GTP-U / User Plane)" --> UPF1
+    CUUP -- "N3 (GTP-U / User Plane)" --> UPF2
+
+    SMF -. "N4 (PFCP)" .-> UPF1
+    SMF -. "N4 (PFCP)" .-> UPF2
+    AMF -. "Nnwdaf" .-> NWDAF
+    SMF -. "Nnwdaf" .-> NWDAF
+
+    %% ----------------------------------------------------
+    %% O-RAN Standard E2 Interfaces (E2 Nodes <-> Near-RT RIC)
+    %% ----------------------------------------------------
+    ODU <== "O-RAN E2" ==> E2T
+    CUCP <== "O-RAN E2" ==> E2T
+    CUUP <== "O-RAN E2" ==> E2T
+
+    %% ----------------------------------------------------
+    %% O-RAN Standard A1 & O1 & O2 Interfaces
+    %% ----------------------------------------------------
+    A1_PMS <== "O-RAN A1" ==> A1M
+
+    SMO -. "O1 (FCAPS)" .-> ODU
+    SMO -. "O1 (FCAPS)" .-> CUCP
+    SMO -. "O1 (FCAPS)" .-> E2T
+
+    SMO -. "O2 (Cloud Orchestration)" .-> VM_OCLOUD["O-Cloud Virtualization Layer (VM-1..6)"]
+
+    %% ----------------------------------------------------
+    %% Observability & Telemetry Ingestion Pipeline
+    %% ----------------------------------------------------
+    ODU -. "Physical Metrics" .-> COLLECTOR
+    UPF1 -. "Core Metrics" .-> COLLECTOR
+    UPF2 -. "Core Metrics" .-> COLLECTOR
+    PROM -. "Telemetry Ingestion" .-> XAPP
