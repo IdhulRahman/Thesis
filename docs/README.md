@@ -10,20 +10,21 @@ This document provides the authoritative sitemap, documentation hierarchy, and r
 ## 1. Documentation Map by Functional Domain
 
 ```text
-d:\Idhul\Program\Thesis\docs
+docs/
 ├── README.md                           ◄── [You are here] Sitemap & Reading Guide
 ├── architecture.md                     ◄── Component Roles, Topography & Control Flows
 ├── implementation-status.md            ◄── Status Matrix & Empirical Validation Evidence
 ├── software-manifest.md                ◄── Versions, Git Commits, Container Images & Patches
 │
-├── deployment/                         ◄── 6-VM Step-by-Step Bring-up & Operational Guides
+├── deployment/                         ◄── 7-VM Step-by-Step Bring-up & Operational Guides
 │   ├── README.md                       ◄── Startup Sequence & Index
 │   ├── vm-01-non-rt-ric.md             ◄── Non-RT RIC, A1 PMS v2.6.0, rApp Environment
 │   ├── vm-02-near-rt-ric.md            ◄── Near-RT RIC (Dawn), A1 Mediator, E2Term, xApp
-│   ├── vm-03-5g-core.md                ◄── Multi-Slice 5GC, NWDAF Stack, UPF Overrides
+│   ├── vm-03-5g-core.md                ◄── Multi-Slice 5GC (UPF-1/2, SMF-1/2, AMF, UDM, NRF)
 │   ├── vm-04-ran.md                    ◄── Split RAN (CU, DU-1 :4043, DU-2 :4044), E2 Agent
 │   ├── vm-05-ue.md                     ◄── Multi-Instance nrUE, Network Namespaces, TrafGen
-│   └── vm-06-monitoring.md             ◄── Prometheus, Grafana, Collector, Monotonic Logger
+│   ├── vm-06-monitoring.md             ◄── Prometheus, Grafana, Collector, Monotonic Logger
+│   └── vm-07-nwdaf.md                  ◄── Standalone 3GPP NWDAF (AnLF), Kong Gateway (:8080)
 │
 ├── integration/                        ◄── Cross-VM Protocols & Service-Based Interfaces
 │   ├── README.md                       ◄── Integration Interface Matrix
@@ -51,7 +52,7 @@ d:\Idhul\Program\Thesis\docs
 │   └── nwdaf.md                        ◄── 3GPP NWDAF SBI/NBI & Telemetry Pipeline
 │
 ├── diagrams/                           ◄── Source Mermaid & Rendered Architectural Diagrams
-│   ├── current-system-architecture.mmd ◄── Source Mermaid of Current 6-VM Architecture
+│   ├── current-system-architecture.mmd ◄── Source Mermaid of Current 7-VM Architecture
 │   ├── current-system-architecture.png ◄── Rendered Diagram
 │   ├── proposed-control-loop.mmd       ◄── Source Mermaid of Proposed MAPE-K Loop
 │   └── proposed-control-loop.png       ◄── Rendered Diagram
@@ -76,11 +77,11 @@ d:\Idhul\Program\Thesis\docs
 
 ### 2.2 For Testbed Operators & Reproducibility Engineers
 1. **[Software Manifest](software-manifest.md):** Verify host allocations, pinned Git commits, container images, and custom patches.
-2. **[Deployment Guides Index](deployment/README.md):** Follow the deterministic 6-step startup sequence (`VM-3 → VM-4 → VM-1 → VM-2 → VM-5 → VM-6`).
+2. **[Deployment Guides Index](deployment/README.md):** Follow the deterministic 7-step startup sequence (`VM-3 → VM-07 → VM-2 → VM-1 → VM-4 → VM-5 → VM-6`).
 3. **[NWDAF Integration](integration/nwdaf-integration.md):** Verify the 5-layer native 3GPP user-plane telemetry chain and REST API health.
 4. **[Troubleshooting Index](troubleshooting/README.md):** Consult verified fixes for known operational issues across all domains.
 
 ### 2.3 For Data Scientists & Experimenters
 1. **[Experimental Scenarios](experiments/scenarios.md):** Learn how to trigger fault injections (S1 to S10) and annotate ground truth.
 2. **[Telemetry Metric Catalog](telemetry/metric-catalog.md):** Understand feature formulas, missing value handling (`NaN`), and semantic caveats.
-3. **[Model Comparison Outline](../research/papers/model-comparison-outline.md):** Review the predictive model architectures and comparative evaluation hypotheses.
+3. **[Experimental Methodology](experiments/methodology.md):** Review the baseline comparative framework and evaluation protocols.

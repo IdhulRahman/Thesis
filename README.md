@@ -11,18 +11,19 @@ The platform is deployed entirely on virtual machines connected over a dedicated
 
 ## 1. System Architecture Overview
 
-The experimental testbed implements a disaggregated O-RAN and 3GPP Release 16/17 software architecture across 6 dedicated virtual machines, aligning with normative standard interfaces where supported by open-source implementations and explicitly documenting implementation-defined bounds:
+The experimental testbed implements a disaggregated O-RAN and 3GPP Release 16/17 software architecture across 7 dedicated virtual machines, aligning with normative standard interfaces where supported by open-source implementations and explicitly documenting implementation-defined bounds:
 
 ![Current System Architecture](docs/diagrams/current-system-architecture.png)
 
 | Virtual Machine | Host IP Address | Functional Subsystem & Primary Services |
 |---|---|---|
 | **VM-1** (Non-RT RIC) | `10.102.0.168` | Non-RT RIC, A1 PMS v2.6.0 (`:8081`), rApp Host |
-| **VM-2** (Near-RT RIC) | `10.102.0.66` | Near-RT RIC (Dawn), A1 Mediator (`:10001`), xApp Host |
-| **VM-3** (5G Core & NWDAF) | `10.102.0.164` | OAI 5G Core Multi-Slice, 3GPP NWDAF (`:8080`), UPF Host |
+| **VM-2** (Near-RT RIC) | `10.102.0.232` | Near-RT RIC (Dawn), A1 Mediator (`:10001`), xApp Host |
+| **VM-3** (5G Core) | `10.102.0.246` | OAI 5G Core Multi-Slice Control & User Plane (UPF Host) |
 | **VM-4** (Split RAN) | `10.102.0.167` | OAI Split RAN (CU-CP, CU-UP, DU-1, DU-2), E2 Agent |
 | **VM-5** (nrUE Emulator) | `10.102.0.165` | OAI nrUE Emulator (netns: `ue1`, `ue2`), TrafGen |
 | **VM-6** (Observability) | `10.102.0.67` | Telemetry Collector (`:9100`), Prometheus TSDB, Logger |
+| **VM-07** (Standalone NWDAF) | `10.102.0.233` | 3GPP NWDAF (AnLF), Kong Gateway (`:8080`), MongoDB |
 
 For complete architectural details, see [docs/architecture.md](docs/architecture.md).  
 For the software versions, Git commits, and container image tags, see [docs/software-manifest.md](docs/software-manifest.md).
@@ -76,7 +77,7 @@ The repository documentation is modularized into discrete functional categories:
 | Documentation Directory | Description & Primary References |
 |---|---|
 | **[docs/](docs/README.md)** | Master documentation sitemap, reading order, and architecture guides. |
-| **[docs/deployment/](docs/deployment/README.md)** | Step-by-step installation, bring-up, and operational guides for all 6 VMs. |
+| **[docs/deployment/](docs/deployment/README.md)** | Step-by-step installation, bring-up, and operational guides for all 7 VMs. |
 | **[docs/integration/](docs/integration/README.md)** | Cross-VM protocol contracts: A1 interface, E2 interface, and native 3GPP NWDAF pipeline. |
 | **[docs/telemetry/](docs/telemetry/metric-catalog.md)** | Single authoritative metric dictionary for the 40-column dataset and Prometheus metrics. |
 | **[docs/experiments/](docs/experiments/methodology.md)** | Comparative baseline methodology (B0–B4 vs Proposed) and scenario registry (S1–S10). |
@@ -84,34 +85,36 @@ The repository documentation is modularized into discrete functional categories:
 | **[docs/troubleshooting/](docs/troubleshooting/README.md)** | Domain-separated troubleshooting guides with complete historical case mapping. |
 | **[docs/diagrams/](docs/diagrams/current-system-architecture.mmd)** | Source Mermaid files and high-resolution rendered architectural diagrams. |
 | **[docs/archive/](docs/archive/README.md)** | Historical technical snapshots, investigation reports, and pre-refactor audits. |
-| **[research/papers/](research/papers/model-comparison-outline.md)** | Academic draft paper outline, model comparison hypotheses, and mapping templates. |
 | **[scripts/](scripts/README.md)** | Multi-VM automation, daemon execution reference, and telemetry recorder tools. |
 
 ---
 
 ## 5. Quick-Start Deployment Sequence
 
-To bring up the multi-slice 5G O-RAN platform in correct dependency order, follow the 6-step sequence:
+To bring up the multi-slice 5G O-RAN platform in correct dependency order, follow the 7-step sequence:
 
 ```bash
-# Step 1: Start 5G Core & NWDAF on VM-3 (10.102.0.164)
+# Step 1: Start 5G Core on VM-3 (10.102.0.246)
 # (Follow docs/deployment/vm-03-5g-core.md)
 
-# Step 2: Start Split RAN on VM-4 (10.102.0.167)
+# Step 2: Start Standalone NWDAF on VM-07 (10.102.0.233)
+# (Follow docs/deployment/vm-07-nwdaf.md)
+
+# Step 3: Start Near-RT RIC on VM-2 (10.102.0.232)
+# (Follow docs/deployment/vm-02-near-rt-ric.md)
+
+# Step 4: Start Non-RT RIC on VM-1 (10.102.0.168)
+# (Follow docs/deployment/vm-01-non-rt-ric.md)
+
+# Step 5: Start Split RAN on VM-4 (10.102.0.167)
 sudo /opt/oran/ran/start_ran.sh
 sudo nohup python3 -u /opt/oran/ran/scripts/ran_adapter.py > /dev/null 2>&1 &
 
-# Step 3: Start Non-RT RIC on VM-1 (10.102.0.168)
-# (Follow docs/deployment/vm-01-non-rt-ric.md)
-
-# Step 4: Start Near-RT RIC on VM-2 (10.102.0.66)
-# (Follow docs/deployment/vm-02-near-rt-ric.md)
-
-# Step 5: Spawn UEs and Traffic on VM-5 (10.102.0.165)
+# Step 6: Spawn UEs and Traffic on VM-5 (10.102.0.165)
 sudo /opt/oran/ue/scripts/spawn_multi_ue.sh -s1 1 -s2 1
 sudo nohup /opt/oran/ue/scripts/trafgen.sh start 60 25 > /dev/null 2>&1 &
 
-# Step 6: Launch Collector & Logger on VM-6 (10.102.0.67)
+# Step 7: Launch Collector & Logger on VM-6 (10.102.0.67)
 python3 /opt/oran/monitoring/collector/telemetry_collector.py &
 python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 60
 ```

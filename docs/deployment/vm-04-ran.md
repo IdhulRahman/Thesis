@@ -3,8 +3,8 @@
 This document describes the deployment of **VM-4 (`oai-ran`)**, which hosts the OpenAirInterface 5G Radio Access Network (OAI 5G RAN) configured in a **split CU / multi-DU** architecture with an integrated **O-RAN E2 Agent** and **RFsimulator (rfsim)**.
 
 VM-4 interconnects three primary domains in the thesis platform:
-1. **Core Network (VM-3):** N2 (NG-AP / SCTP) to AMF and N3 (GTP-U / UDP) to multi-slice UPFs via routed Docker bridge subnet `192.168.70.0/24`.
-2. **Near-RT RIC (VM-2):** O-RAN E2 interface (E2AP over SCTP) to `ric_e2term` (`10.102.0.66:36421`).
+1. **Core Network (VM-3):** N2 (NG-AP / SCTP) to AMF and N3 (GTP-U / UDP) to multi-slice UPFs via routed Docker bridge subnet `192.168.70.0/24 via 10.102.0.246`.
+2. **Near-RT RIC (VM-2):** O-RAN E2 interface (E2AP over SCTP) to `ric_e2term` (`10.102.0.232:36421`).
 3. **UE Emulator (VM-5):** RFsimulator channel interface for software-only over-the-air communication.
 
 ```text

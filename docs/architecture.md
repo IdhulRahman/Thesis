@@ -28,11 +28,12 @@ The platform is deployed entirely on dedicated virtual machines connected across
 | Virtual Machine | Host IP Address | Functional Subsystem & Primary Services |
 |---|---|---|
 | **VM-1** (Non-RT RIC) | `10.102.0.168` | Non-RT RIC, A1 PMS v2.6.0 (`:8081`), rApp Host |
-| **VM-2** (Near-RT RIC) | `10.102.0.66` | Near-RT RIC (Dawn), A1 Mediator (`:10001`), xApp Host |
-| **VM-3** (5G Core & NWDAF) | `10.102.0.164` | OAI 5G Core Multi-Slice, 3GPP NWDAF (`:8080`), UPF Host |
+| **VM-2** (Near-RT RIC) | `10.102.0.232` | Near-RT RIC (Dawn), A1 Mediator (`:10001`), xApp Host |
+| **VM-3** (5G Core) | `10.102.0.246` | OAI 5G Core Multi-Slice Control & User Plane (UPF Host) |
 | **VM-4** (Split RAN) | `10.102.0.167` | OAI Split RAN (CU-CP, CU-UP, DU-1, DU-2), E2 Agent |
 | **VM-5** (nrUE Emulator) | `10.102.0.165` | OAI nrUE Emulator (netns: `ue1`, `ue2`), TrafGen |
 | **VM-6** (Observability) | `10.102.0.67` | Telemetry Collector (`:9100`), Prometheus TSDB, Logger |
+| **VM-07** (Standalone NWDAF) | `10.102.0.233` | 3GPP NWDAF (AnLF), Kong Gateway (`:8080`), MongoDB |
 
 For complete software versions, Git commits, Docker image tags, and custom patches, refer to the [Software & Artifact Manifest](software-manifest.md).  
 For the live operational status of each capability, see the [Implementation Status Matrix](implementation-status.md).
@@ -55,13 +56,11 @@ The diagram below reflects the **empirically validated state** of the testbed cu
 * **RAN Telemetry Adapter (`ran_adapter.py`):**  
   A lightweight Python daemon that tails physical gNB scheduler logs (`du1.log` and `du2.log`), auto-detecting carrier bandwidth per cell (`dl_carrierBandwidth` from `du_gnb*.conf`), calculating normalized instantaneous MAC PRB utilization (51 PRBs for Cell 1, 106 PRBs for Cell 2), UL-SCH SNR, MCS, and BLER, and transmitting JSON payloads to VM-6 (`POST :9100/report`) at 1.0 Hz.
 
-#### B. 5G Core Network & NWDAF Subsystem (VM-3)
+#### B. 5G Core Network Subsystem (VM-3 — `10.102.0.246`)
 * **Control Plane Network Functions:** Containerized AMF, SMF-1 (eMBB), SMF-2 (URLLC), NRF-12, UDM, UDR, AUSF, and NSSF operating under 3GPP Release 16/17 SA specifications.
 * **User Plane Functions (CUPS):**
   * **UPF-1 (`oai-upf-slice1`):** Dedicated anchor for Slice 1 (eMBB, S-NSSAI `01000001`, subnet `12.1.1.0/24`). Deploys the patched UPF `develop` image with native datapath URR support.
   * **UPF-2 (`oai-upf-slice2`):** Dedicated anchor for Slice 2 (URLLC, S-NSSAI `de00007b`, subnet `12.1.2.0/24`). Deploys the baseline `v2.1.0` image.
-* **Native 3GPP NWDAF (AnLF):**  
-  Deploys 8 microservices (`oai-nwdaf-nbi-gateway`, `oai-nwdaf-nbi-analytics`, `oai-nwdaf-nbi-events`, `oai-nwdaf-nbi-ml`, `oai-nwdaf-engine`, `oai-nwdaf-engine-ads`, `oai-nwdaf-sbi`, and MongoDB). It receives `QOS_MON` event exposure notifications from SMF-1, stores URR volume/duration records in MongoDB `qosmonlist`, and exposes `UE_COMMUNICATION` analytics via Kong Gateway at `http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics`.
 * **Core Telemetry Adapter (`core_adapter.py` v9):**  
   > [!IMPORTANT]
   > **Role Demarcation of `core_adapter.py`:**  
@@ -78,6 +77,11 @@ The diagram below reflects the **empirically validated state** of the testbed cu
 * **Telemetry Collector (`telemetry_collector.py`):** Ingests asynchronous HTTP POST reports from `trafgen.sh`, `ran_adapter.py`, and `core_adapter.py`, while concurrently polling the NWDAF NBI API (`:8080`) over HTTP GET. Exposes consolidated gauges over Prometheus `:9100/metrics`.
 * **Prometheus TSDB & Grafana:** Scrapes `:9100/metrics` at 1.0 Hz for live operator visualization.
 * **Monotonic Telemetry Recorder (`record_experiment.py`):** Scrapes `:9100/metrics` at a target cadence of 1.000 Hz using local monotonic elapsed timing, exporting the 40-column CSV dataset directly to `data/raw/<RUN_ID>/telemetry_<RUN_ID>.csv` with `manifest.json`.
+
+#### E. Standalone 3GPP NWDAF Subsystem (VM-07 — `10.102.0.233`)
+* **Disaggregated Analytics Architecture:** Operates as a dedicated standalone VM decoupled from 5GC host compute resources.
+* **Microservice Stack:** Deploys 8 OAI NWDAF containers (`oai-nwdaf-nbi-gateway`, `oai-nwdaf-nbi-analytics`, `oai-nwdaf-nbi-events`, `oai-nwdaf-nbi-ml`, `oai-nwdaf-engine`, `oai-nwdaf-engine-ads`, `oai-nwdaf-sbi`, and MongoDB).
+* **Ingestion & Exposure:** Receives `Nsmf_EventExposure` (`QOS_MON`) notifications dispatched from SMF-1 on VM-3, stores URR volume and duration records in MongoDB `qosmonlist`, and exposes standardized `UE_COMMUNICATION` analytics via Kong Gateway at `http://10.102.0.233:8080/nnwdaf-analyticsinfo/v1/analytics`.
 
 ---
 

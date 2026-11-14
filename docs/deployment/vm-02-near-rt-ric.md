@@ -36,13 +36,13 @@ At the current implementation stage, the **A1 policy distribution path** (from A
 |---|---|---|
 | VM | VM-2 | Virtual Machine index |
 | Hostname | `near-rt-ric` | Host identifier |
-| IP address | `10.102.0.66` | Static IP on thesis research subnet |
+| IP address | `10.102.0.232` | Static IP on thesis research subnet |
 | Subnet | `10.102.0.0/24` | Main inter-VM communication network |
 | Main role | Near-RT RIC | O-RAN Near-Real-Time RIC control plane |
 | Container runtime | Docker | Minimal O-RAN SC containers |
-| A1 external endpoint | `10.102.0.66:10000/TCP` | Native A1 Mediator endpoint |
-| A1 compatibility endpoint | `10.102.0.66:10001/TCP` | A1 Compatibility Shim for Non-RT RIC |
-| E2 external endpoint | `10.102.0.66:36421/SCTP` | O-RAN E2Term SCTP listening port |
+| A1 external endpoint | `10.102.0.232:10000/TCP` | Native A1 Mediator endpoint |
+| A1 compatibility endpoint | `10.102.0.232:10001/TCP` | A1 Compatibility Shim for Non-RT RIC |
+| E2 external endpoint | `10.102.0.232:36421/SCTP` | O-RAN E2Term SCTP listening port |
 
 ---
 
@@ -577,7 +577,7 @@ Check from another VM using:
 
 ```bash
 curl -i \
-  http://10.102.0.66:10000/A1-P/v2/healthcheck
+  http://10.102.0.232:10000/A1-P/v2/healthcheck
 ```
 
 Expected:

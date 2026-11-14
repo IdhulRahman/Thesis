@@ -36,7 +36,7 @@ The Near-RT RIC is deployed separately on:
 ```text
 VM-2
 Hostname : near-rt-ric
-IP       : 10.102.0.66
+IP       : 10.102.0.232
 ```
 
 ---
@@ -89,7 +89,7 @@ A1 PMS `2.6.0` is listed by O-RAN SC as the H Release version.
 | Parameter | Current Value | Classification | Customization Rules & Impact |
 |---|---|---|---|
 | `name` | `near-rt-ric-1` | `[CUSTOMIZABLE]` | Logical identifier for the target Near-RT RIC in PMS registry. |
-| `baseUrl` | `http://10.102.0.66:10001` | `[MANDATORY MATCH NEAR-RT]` | Endpoint of VM-2 A1 compatibility shim. |
+| `baseUrl` | `http://10.102.0.232:10001` | `[MANDATORY MATCH NEAR-RT]` | Endpoint of VM-2 A1 compatibility shim. |
 | `customAdapterClass` | `...OscA1Client` | `[FIXED / ARCHITECTURE]` | Client adapter required to communicate with OSC A1 Mediator. |
 | `managedElementIds` | `["oai-cu-cp", ...]` | `[CUSTOMIZABLE]` | Target RAN network function identifiers managed by this RIC. |
 | `A1_PMS_HTTP_PORT` | `8081` | `[FIXED / ARCHITECTURE]` | Northbound REST API port of A1 PMS container. |
@@ -197,7 +197,7 @@ Before starting PMS, verify that VM-1 can reach the A1 compatibility endpoint on
 
 ```bash
 curl -i \
-  http://10.102.0.66:10001/a1-p/healthcheck
+  http://10.102.0.232:10001/a1-p/healthcheck
 ```
 
 Expected:
@@ -228,7 +228,7 @@ Use the following configuration:
     "ric": [
       {
         "name": "near-rt-ric-1",
-        "baseUrl": "http://10.102.0.66:10001",
+        "baseUrl": "http://10.102.0.232:10001",
         "customAdapterClass": "org.onap.ccsdk.oran.a1policymanagementservice.clients.OscA1Client",
         "managedElementIds": [
           "oai-cu-cp",
@@ -590,7 +590,7 @@ Check:
 
 ```bash
 curl -i \
-  http://10.102.0.66:10001/a1-p/healthcheck
+  http://10.102.0.232:10001/a1-p/healthcheck
 ```
 
 Then inspect:

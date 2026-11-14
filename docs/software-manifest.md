@@ -11,17 +11,18 @@ All virtual machines operate within the dedicated inter-VM subnet `10.102.0.0/24
 | VM ID | Hostname | Management IP | Primary Subsystem | Host Hardware Allocation |
 |---|---|---:|---|---|
 | **VM-1** | `nonrt-ric` | `10.102.0.168` | O-RAN Non-RT RIC, A1 PMS v2.6.0, rApp Execution Environment | 4 vCPU, 8 GB RAM |
-| **VM-2** | `near-rt-ric` | `10.102.0.66` | O-RAN Near-RT RIC (O-RAN SC i-release), A1 Mediator, E2Term, xApp | 4 vCPU, 8 GB RAM |
-| **VM-3** | `oai-core` | `10.102.0.164` | OAI 5G Core Multi-Slice, 3GPP NWDAF Stack, Core Adapter v9 | 8 vCPU, 16 GB RAM |
+| **VM-2** | `near-rt-ric` | `10.102.0.232` | O-RAN Near-RT RIC (O-RAN SC i-release), A1 Mediator, E2Term, xApp | 4 vCPU, 8 GB RAM |
+| **VM-3** | `oai-core` | `10.102.0.246` | OAI 5G Core Multi-Slice Control & User Plane, Core Adapter v9 | 8 vCPU, 16 GB RAM |
 | **VM-4** | `oai-ran` | `10.102.0.167` | OAI Split RAN (CU + DU-1 + DU-2 + FlexRIC E2 Agent), RAN Adapter | 8 vCPU, 16 GB RAM |
 | **VM-5** | `ue-emulator` | `10.102.0.165` | OAI nrUE Multi-Instance Emulator (`ue1`, `ue2` netns), TrafGen | 4 vCPU, 8 GB RAM |
 | **VM-6** | `monitoring-data` | `10.102.0.67` | Prometheus TSDB, Grafana, Telemetry Collector, Monotonic Logger | 4 vCPU, 8 GB RAM |
+| **VM-07** | `oai-nwdaf` | `10.102.0.233` | Standalone 3GPP NWDAF (AnLF Microservices Stack, Kong :8080) | 4 vCPU, 8 GB RAM |
 
 ---
 
 ## 2. Software Versions, Repositories & Commit Baselines
 
-### 2.1 5G Core Network & Analytics (VM-3)
+### 2.1 5G Core Network Subsystem (VM-3 — `10.102.0.246`)
 
 | Component | Upstream Repository | Target Branch / Tag | Pinned Commit Hash | Deployed Artifact / Container Image |
 |---|---|---|---|---|
@@ -34,6 +35,12 @@ All virtual machines operate within the dedicated inter-VM subnet `10.102.0.0/24
 | **UDM / UDR / AUSF / NSSF** | `openairinterface/oai-cn5g-*` | `v2.1.0` | Various | Official images: `oaisoftwarealliance/oai-*:v2.1.0` |
 | **Database** | MySQL | `8.0` | `mysql:8.0` | Official container with custom provisioning script |
 | **External DN** | Ubuntu 22.04 base | LTS | `trf-gen-cn5g:latest` | Container IP `192.168.70.145` (iperf3 server `:5201` & ICMP target) |
+| **Core Adapter Daemon** | In-house Python daemon | v9.0.0 | Repository HEAD | Host process (`scripts/core_adapter.py`) |
+
+### 2.2 Standalone 3GPP NWDAF Subsystem (VM-07 — `10.102.0.233`)
+
+| Component | Upstream Repository | Target Branch / Tag | Pinned Commit Hash | Deployed Artifact / Container Image |
+|---|---|---|---|---|
 | **NWDAF Engine** | `openairinterface/oai-cn5g-nwdaf` | `develop` | `9d82b75` | Official image: `oaisoftwarealliance/oai-nwdaf-engine:develop` |
 | **NWDAF NBI Analytics** | `openairinterface/oai-cn5g-nwdaf` | `develop` | `9d82b75` | Official image: `oaisoftwarealliance/oai-nwdaf-nbi-analytics:develop` |
 | **NWDAF NBI Events** | `openairinterface/oai-cn5g-nwdaf` | `develop` | `9d82b75` | Official image: `oaisoftwarealliance/oai-nwdaf-nbi-events:develop` |
@@ -42,7 +49,6 @@ All virtual machines operate within the dedicated inter-VM subnet `10.102.0.0/24
 | **NWDAF SBI** | `openairinterface/oai-cn5g-nwdaf` | `develop` | `9d82b75` | Official image: `oaisoftwarealliance/oai-nwdaf-sbi:develop` |
 | **NWDAF Gateway** | Kong API Gateway | `3.3.0` | `kong:3.3.0` | Reverse proxy exposing port `8080` (HTTP) and `8001` (Admin) |
 | **NWDAF Datastore** | MongoDB | `4.4` | `mongo:4.4` | Port `27017`, stores database `testing` and collection `smf` |
-| **Core Adapter Daemon** | In-house Python daemon | v9.0.0 | Repository HEAD | Host process (`scripts/core_adapter.py`) |
 
 ### 2.2 O-RAN Radio Access Network (VM-4)
 

@@ -24,13 +24,13 @@ The deployment follows official OpenAirInterface guidelines from `oai-cn5g-fed` 
 |---|---|---|
 | VM | VM-3 | Virtual Machine index |
 | Hostname | `oai-5gc` | Host identifier |
-| IP address | `10.102.0.164` | Static IP on thesis research subnet |
+| IP address | `10.102.0.246` | Static IP on thesis research subnet |
 | Subnet | `10.102.0.0/24` | Main inter-VM communication network |
 | Main role | 5G Core Network (Multi-Slice) | Multi-slice 3GPP 5GC Control & User Plane |
 | Container runtime | Docker & Docker Compose | Containerized Network Functions (NF) |
-| Recommended resources | 4 vCPU, 8 GB RAM, 30 GB Disk | Host compute allocation |
-| N2 external endpoint | `10.102.0.164:38412/SCTP` | AMF NG-AP interface published to VM-3 host |
-| N3 external endpoint | `192.168.70.0/24` via `10.102.0.164` | Multi-UPF routed Docker bridge network |
+| Recommended resources | 8 vCPU, 16 GB RAM, 40 GB Disk | Host compute allocation |
+| N2 external endpoint | `10.102.0.246:38412/SCTP` | AMF NG-AP interface published to VM-3 host |
+| N3 external endpoint | `192.168.70.0/24` via `10.102.0.246` | Multi-UPF routed Docker bridge network |
 
 ---
 
@@ -49,8 +49,13 @@ The deployment uses official container images from the OpenAirInterface Software
 | UDR | `v2.1.0` | `oaisoftwarealliance/oai-udr:v2.1.0` | Official release image |
 | AUSF | `v2.1.0` | `oaisoftwarealliance/oai-ausf:v2.1.0` | Official release image |
 | NSSF | `v2.1.0` | `oaisoftwarealliance/oai-nssf:v2.1.0` | Official release image |
-| NWDAF | `v2.1.0` / Rel-17 | `oaisoftwarealliance/oai-nwdaf:v2.1.0` | 8 microservices stack + Kong API Gateway |
 | Database | `8.0` | `mysql:8.0` | 5G subscriber database |
+| External DN | Ubuntu 22.04 base | LTS | `trf-gen-cn5g:latest` | Container IP `192.168.70.145` (iperf3 server `:5201` & ICMP target) |
+| Core Adapter Daemon | In-house Python daemon | v9.0.0 | Repository HEAD | Host process (`scripts/core_adapter.py`) |
+
+> [!NOTE]
+> **Disaggregated NWDAF Architecture:**  
+> The 3GPP NWDAF microservice stack is now decoupled from the 5G Core and runs on dedicated standalone **VM-07 (`10.102.0.233`)**. See [VM-07 Deployment Guide](vm-07-nwdaf.md) for NWDAF installation and Kong Gateway configuration.
 
 ---
 
@@ -276,89 +281,9 @@ EOF
 
 ---
 
-## 9. Integration of NWDAF Microservices & Full Stack Startup
+## 9. 5G Core Multi-Slice Startup & Inter-VM Exposure
 
-### Step 1: Merge NWDAF into Core Compose (`docker-compose-slicing-basic-nrf.yaml`)
-To avoid network key collisions (`public_net` duplication and `nwdaf_net` resolution), run this automated merge script:
-
-```bash
-cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
-
-python3 - << 'EOF'
-fed_file = "docker-compose-slicing-basic-nrf.yaml"
-nwdaf_file = "/opt/oran/5gc/oai-cn5g-nwdaf/docker-compose/docker-compose-nwdaf-cn-http1.yaml"
-
-with open(fed_file, "r") as f:
-    fed_text = f.read()
-
-with open(nwdaf_file, "r") as f:
-    nwdaf_text = f.read()
-
-# Set absolute path for kong declarative configuration
-nwdaf_text = nwdaf_text.replace("./conf/kong.yml", "/opt/oran/5gc/oai-cn5g-nwdaf/docker-compose/conf/kong.yml")
-nwdaf_text = nwdaf_text.replace("192.168.70.132", "192.168.70.138")
-nwdaf_text = nwdaf_text.replace('"8001:8001"', '"8001:8001"\n            - "8080:8000"')
-
-# Extract services from NWDAF compose
-nwdaf_services = nwdaf_text.split("\nnetworks:\n")[0].split("services:\n")[1]
-
-# Split fed compose services and networks
-fed_parts = fed_text.split("\nnetworks:\n")
-fed_services = fed_parts[0]
-fed_networks = fed_parts[1]
-
-# Append ONLY nwdaf_net (retaining existing public_net)
-nwdaf_net_def = """
-    nwdaf_net:
-        name: oai-nwdaf-net
-        ipam:
-            config:
-                - subnet: 192.168.74.0/24
-"""
-
-merged_compose = fed_services + "\n" + nwdaf_services + "\nnetworks:\n" + fed_networks.rstrip() + "\n" + nwdaf_net_def
-
-with open(fed_file, "w") as f:
-    f.write(merged_compose)
-
-print("Merged 8 NWDAF microservices into docker-compose-slicing-basic-nrf.yaml.")
-EOF
-
-# Validate syntax
-sudo docker compose -f docker-compose-slicing-basic-nrf.yaml config > /dev/null && echo "YAML SYNTAX VALID"
-```
-
-### Step 2: Configure Kong Gateway Path-Based Routing
-Configure `/opt/oran/5gc/oai-cn5g-nwdaf/docker-compose/conf/kong.yml` without restrictive host filters:
-
-```yaml
-_format_version: '1.1'
-_transform: true
-
-services:
-- name: oai-nwdaf-nbi-analytics
-  url: http://192.168.74.151:8080/nnwdaf-analyticsinfo/v1/analytics
-  routes:
-    - name: oai-nwdaf-nbi-analytics-route
-      paths:
-      - /nnwdaf-analyticsinfo/v1/analytics
-
-- name: oai-nwdaf-nbi-events
-  url: http://192.168.74.152:8080/nnwdaf-eventssubscription/v1
-  routes:
-    - name: oai-nwdaf-nbi-events-route
-      paths:
-      - /nnwdaf-eventssubscription/v1
-
-- name: oai-nwdaf-nbi-ml
-  url: http://192.168.74.153:8080/nnwdaf-mlmodelprovision/v1
-  routes:
-    - name: oai-nwdaf-nbi-ml-route
-      paths:
-      - /nnwdaf-mlmodelprovision/v1
-```
-
-### Step 3: Launch Full 25-Container Stack (with Patched Overrides)
+### Step 1: Launch 5GC Slicing Stack (with Patched Overrides)
 
 The validated deployment applies two Docker Compose override files:
 1. `deploy/compose.amf-nrf-uri.yaml` (targets `oai_amf`, using `oai-amf:thesis-nrf-uri-v1` for dynamic NRF registration).
@@ -367,17 +292,17 @@ The validated deployment applies two Docker Compose override files:
 ```bash
 cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
 
-# Start MySQL database first
+# 1. Start MySQL database first
 sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d mysql
 
-# Wait until MySQL is healthy
+# 2. Wait until MySQL is healthy
 until [ "$(sudo docker inspect -f '{{.State.Health.Status}}' mysql 2>/dev/null)" = "healthy" ]; do
   echo "Waiting for MySQL database to initialize..."
   sleep 3
 done
 echo "MySQL is healthy."
 
-# Launch remaining Core & NWDAF containers with overrides applied:
+# 3. Launch remaining Core containers with overrides applied:
 sudo docker compose \
   -f docker-compose-slicing-basic-nrf.yaml \
   -f compose.amf-nrf-uri.yaml \
@@ -385,43 +310,17 @@ sudo docker compose \
   up -d
 ```
 
-### Step 4: Configure `oai-nwdaf-sbi` for Multi-Slice Core Endpoints
+### Step 2: Inter-VM Routing & External Service Exposure
+With host IP forwarding enabled on VM-3 (`10.102.0.246`), external testbed nodes communicate with 5GC components:
+* **VM-4 (Split RAN):** Connects to AMF N2 over SCTP on `10.102.0.246:38412` and routes N3 GTP-U packets to UPF-1 (`192.168.70.142`) and UPF-2 (`192.168.70.143`) via `192.168.70.0/24 via 10.102.0.246`.
+* **VM-07 (Standalone NWDAF):** Reaches NRF (`192.168.70.136:8080`) and UDR (`192.168.70.137:8080`) via static route `192.168.70.0/24 via 10.102.0.246`, while SMF-1 on VM-3 dispatches `Nsmf_EventExposure` HTTP/2 notifications to VM-07 (`10.102.0.233`).
+* **VM-5 (nrUE Emulator):** Reaches Data Network (`192.168.70.145`) and UPF endpoints via static route `192.168.70.0/24 via 10.102.0.246`.
+* **VM-6 (Observability):** Ingests UPF kernel qdisc backlog and drops pushed by `core_adapter.py` running on VM-3 host.
 
-> **Required for multi-slice deployments.** The default `oai-nwdaf-sbi` image ships with single-slice SBI endpoints (port 80, HTTP/1.1) that do not match the multi-slice OAI CN5G architecture. Without this fix, `oai-nwdaf-sbi` will continuously fail to create AMF/SMF event subscriptions, leaving MongoDB `testing.amf` and `testing.smf` permanently empty.
-
-In `docker-compose-slicing-basic-nrf.yaml`, update the `oai-nwdaf-sbi` service environment variables:
-
-```yaml
-oai-nwdaf-sbi:
-    environment:
-        - AMF_IP_ADDR=http://192.168.70.138:8080
-        - AMF_HTTP_VERSION=2
-        - SMF_IP_ADDR=http://192.168.70.139:8080
-        - SMF_HTTP_VERSION=2
-```
-
-Key differences from defaults:
-| Variable | Default (Single-Slice) | Corrected (Multi-Slice) | Reason |
-|---|---|---|---|
-| `AMF_IP_ADDR` | `http://192.168.70.138` (port 80) | `http://192.168.70.138:8080` | OAI AMF SBI listens on 8080, not 80 |
-| `AMF_HTTP_VERSION` | `1` | `2` | 3GPP TS 29.500 mandates HTTP/2 for SBI |
-| `SMF_IP_ADDR` | `http://192.168.70.133` (old single-slice) | `http://192.168.70.139:8080` | Multi-slice SMF-1 is `oai-smf-slice1` at `.139` |
-| `SMF_HTTP_VERSION` | `1` | `2` | Same HTTP/2 requirement |
-
-After editing, force-recreate to apply:
 ```bash
-cd /opt/oran/5gc/oai-cn5g-fed/docker-compose
-sudo docker compose -f docker-compose-slicing-basic-nrf.yaml up -d --force-recreate oai-nwdaf-sbi
+# Verify all 12 5GC containers are Up (healthy):
+sudo docker compose -f docker-compose-slicing-basic-nrf.yaml ps
 ```
-
-Verify successful AMF & SMF event subscription handshake in logs:
-```bash
-sudo docker logs --tail 30 oai-nwdaf-sbi | grep -E "201 Created|subscription|error"
-# Expected: HTTP/2.0 201 Created with Location header
-```
-
-> [!NOTE]
-> **Single SMF Endpoint Scope:** The current OAI compose configuration for `oai-nwdaf-sbi` provides a single `SMF_IP_ADDR` environment variable pointing to SMF-1 (`oai-smf-slice1` at `192.168.70.139:8080`). Consequently, `oai-nwdaf-sbi` actively subscribes to and ingests event notifications from Slice 1 SMF. Ingestion for SMF-2 (`oai-smf-slice2` at `192.168.70.140:8080` for Slice 2 URLLC) requires either multi-SMF dynamic discovery or multiple SBI consumer endpoints, which remains an open validation scope.
 
 ---
 
@@ -438,7 +337,7 @@ All acceptance checks have passed on VM-3:
 2. **AMF Listening on N2 SCTP Port [VALIDATED]:**
    ```bash
    sudo docker exec oai-amf netstat -l --sctp || sudo docker exec oai-amf cat /proc/net/sctp/eps
-   # Result: 192.168.70.138:38412 LISTEN (and 10.102.0.164:38412 on host)
+   # Result: 192.168.70.138:38412 LISTEN (and 10.102.0.246:38412 on host)
    ```
 
 3. **Multi-Slice UPF IP Endpoints [VALIDATED]:**
