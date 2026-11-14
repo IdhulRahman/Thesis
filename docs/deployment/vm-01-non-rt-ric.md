@@ -602,7 +602,7 @@ docker logs --since=5m policy-agent-container
 The final deployment should use:
 
 ```text
-baseUrl            = http://10.102.0.66:10001
+baseUrl            = http://10.102.0.232:10001
 customAdapterClass = ...OscA1Client
 ```
 
@@ -667,7 +667,7 @@ sudo chown -R 999:1000 /opt/oran/nonrt/a1pms/database
 ## 22. Final VM-1 Cross-Domain Data Path
 
 ```text
-VM-3 (5GC / NWDAF)             VM-6 (Prometheus TSDB / RAN KPM)
+VM-3 (5GC) / VM-07 (NWDAF)             VM-6 (Prometheus TSDB / RAN KPM)
         │ Nnwdaf HTTP/2                        │ HTTP Metrics Pull
         └───────────────┬──────────────────────┘
                         ▼
@@ -682,7 +682,7 @@ VM-3 (5GC / NWDAF)             VM-6 (Prometheus TSDB / RAN KPM)
                         │
                   OscA1Client
                         ▼
-                10.102.0.66:10001
+                10.102.0.232:10001
                         │
                A1 compatibility shim
                         │
@@ -701,7 +701,7 @@ In the research architecture design, VM-1 is designated as the Non-RT RIC coordi
 
 > [!NOTE]
 > **Operational Testbed Status vs. Phase B Evaluation Design:**  
-> On the currently operational testbed, VM-1 operates the validated A1 Policy Management Service container (`:8081`) and accesses the A1 compatibility shim hosted on VM-2 (`10.102.0.66:10001`). Autonomous rApp classification loops and programmatic policy dispatch are defined as **Planned Phase B research specifications**. In current telemetry recording runs, no automated rApp closed loop operates in the background. The matrix below defines the planned operational modes and A1 policy payloads designed for subsequent Phase B comparative evaluation.
+> On the currently operational testbed, VM-1 operates the validated A1 Policy Management Service container (`:8081`) and accesses the A1 compatibility shim hosted on VM-2 (`10.102.0.232:10001`). Autonomous rApp classification loops and programmatic policy dispatch are defined as **Planned Phase B research specifications**. In current telemetry recording runs, no automated rApp closed loop operates in the background. The matrix below defines the planned operational modes and A1 policy payloads designed for subsequent Phase B comparative evaluation.
 
 | Baseline ID | Evaluation Mode | Planned rApp Operational State & Behavior | Planned A1 Policy Payload Dispatched |
 |---|---|---|---|

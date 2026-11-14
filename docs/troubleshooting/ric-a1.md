@@ -83,7 +83,7 @@ The PMS configuration must use:
 ```json
 {
   "name": "near-rt-ric-1",
-  "baseUrl": "http://10.102.0.66:10001",
+  "baseUrl": "http://10.102.0.232:10001",
   "customAdapterClass": "org.onap.ccsdk.oran.a1policymanagementservice.clients.OscA1Client"
 }
 ```
@@ -95,7 +95,7 @@ PMS
  │
  │ OscA1Client
  ▼
-10.102.0.66:10001
+10.102.0.232:10001
  │
  ▼
 A1 compatibility shim
@@ -158,7 +158,7 @@ org.onap.ccsdk.oran.a1policymanagementservice.clients.OscA1Client
 and:
 
 ```text
-baseUrl = http://10.102.0.66:10001
+baseUrl = http://10.102.0.232:10001
 ```
 
 The compatibility shim only maps URI paths. It does not rewrite the policy JSON.
@@ -390,7 +390,7 @@ works.
 Use the compatibility shim on:
 
 ```text
-10.102.0.66:10001
+10.102.0.232:10001
 ```
 
 Examples:
@@ -1020,7 +1020,7 @@ Port             : 8081
 RIC ID           : near-rt-ric-1
 RIC state        : AVAILABLE
 Policy type      : 20008
-A1 target        : http://10.102.0.66:10001
+A1 target        : http://10.102.0.232:10001
 Client           : OscA1Client
 ```
 
@@ -1044,13 +1044,13 @@ A1 Mediator commit:
 09a757b4fd63198d8690d50b52bfd04552d47f1f
 
 A1 API:
-10.102.0.66:10000
+10.102.0.232:10000
 
 A1 compatibility API:
-10.102.0.66:10001
+10.102.0.232:10001
 
 E2:
-10.102.0.66:36421/SCTP
+10.102.0.232:36421/SCTP
 
 Python xApp RMR:
 4560

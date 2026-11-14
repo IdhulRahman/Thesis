@@ -802,7 +802,8 @@ def poll_external_nfs():
                 "event-id": "UE_COMMUNICATION",
                 "ana-req": ana_req
             })
-            url = f"http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics?{query}"
+            nwdaf_host = os.environ.get("NWDAF_HOST", "10.102.0.233")
+            url = f"http://{nwdaf_host}:8080/nnwdaf-analyticsinfo/v1/analytics?{query}"
             req = urllib.request.Request(
                 url,
                 headers={"User-Agent": "Thesis-Collector/1.0"}

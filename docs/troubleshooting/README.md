@@ -10,7 +10,7 @@ To ensure maintainability and eliminate unmanageable monolithic files, troublesh
 | [`e2-networking.md`](e2-networking.md) | E2Term, E2Mgr, SCTP 36421, DBaaS Redis, inter-VM networking | VM-2 & VM-4 |
 | [`ran-ue.md`](ran-ue.md) | OAI gNB CU/DU, F1-U, SIMDE/GCC, Softmodem, nrUE namespaces | VM-4 & VM-5 |
 | [`5g-core.md`](5g-core.md) | 5GC NFs, MySQL subscriber schemas, Slicing YAML, AMF, UPF URR | VM-3 |
-| [`nwdaf.md`](nwdaf.md) | OAI NWDAF SBI/NBI, Kong Gateway, MongoDB `qosmonlist`, telemetry | VM-3 & VM-6 |
+| [`nwdaf.md`](nwdaf.md) | OAI NWDAF SBI/NBI, Kong Gateway, MongoDB `qosmonlist`, telemetry | VM-07 & VM-6 |
 
 ---
 
@@ -86,7 +86,7 @@ The table below maps all historical Case numbers from the monolithic log to thei
 | **Case 50** | [`5g-core.md`](5g-core.md) | `SMF N4/PFCP 1-Second Timeout After Manual `up` | SMF N4/PFCP 1-Second Timeout After Manual `upfs:` Configuration Edit |
 | **Case 51** | [`5g-core.md`](5g-core.md) | `OAI AMF Automated NRF Registration Failure (M` | OAI AMF Automated NRF Registration Failure (Missing `/{nfInstanceId}` in Dynamic Resource URI) |
 | **Case 52** | [`5g-core.md`](5g-core.md) | `OAI UPF N4/PFCP Session Establishment Silent ` | OAI UPF N4/PFCP Session Establishment Silent Drop (Unsupported 3GPP TS 29.244 IE Type 62 `Measurement Method`) |
-| **Case 33** | [`nwdaf.md`](nwdaf.md) | `Kong API Gateway 404 Not Found on Physical Ho` | Kong API Gateway 404 Not Found on Physical Host IP (`http://10.102.0.164:8080`) |
+| **Case 33** | [`nwdaf.md`](nwdaf.md) | `Kong API Gateway 404 Not Found on Physical Ho` | Kong API Gateway 404 Not Found on Physical Host IP (`http://10.102.0.246:8080`) |
 | **Case 44** | [`nwdaf.md`](nwdaf.md) | `Static NWDAF SliceLoadLevel (5.00%) During Co` | Static NWDAF SliceLoadLevel (5.00%) During Core UPF Impairment / Fault Injection |
 | **Case 47** | [`nwdaf.md`](nwdaf.md) | `OAI NWDAF SBI Subscription `connection refuse` | OAI NWDAF SBI Subscription `connection refused` on Multi-Slice Core |
 | **Case 48** | [`nwdaf.md`](nwdaf.md) | `OAI NWDAF Analytics `"missing Network Perform` | OAI NWDAF Analytics `"missing Network Performance Data"` vs Hardcoded Relative Ratio |

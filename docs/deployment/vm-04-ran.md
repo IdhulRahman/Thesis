@@ -9,7 +9,7 @@ VM-4 interconnects three primary domains in the thesis platform:
 
 ```text
                ┌────────────────────────────────────────────────────────┐
-               │              VM-2 Near-RT RIC (10.102.0.66)            │
+               │              VM-2 Near-RT RIC (10.102.0.232)            │
                │                   ric_e2term :36421                    │
                └───────────────────────────▲────────────────────────────┘
                                            │
@@ -21,7 +21,7 @@ VM-4 interconnects three primary domains in the thesis platform:
 │   ┌───────────────────────────────────────────────────────────────┐   │
 │   │                 Centralized Unit (CU)                         │   │
 │   │  - RRC / PDCP / SDAP                                          │   │
-│   │  - Integrated OAI E2 Agent (points to 10.102.0.66:36421)      │   │
+│   │  - Integrated OAI E2 Agent (points to 10.102.0.232:36421)      │   │
 │   │  - N2 NG-AP (SCTP) & N3 GTP-U (UDP)                           │   │
 │   └───┬───────────────────────────────────────────────────────┬───┘   │
 │       │ F1-C (SCTP) / F1-U (GTP)      │ F1-C (SCTP) / F1-U (GTP)      │
@@ -50,7 +50,7 @@ VM-4 interconnects three primary domains in the thesis platform:
 | Subnet | `10.102.0.0/24` | Main inter-VM communication network |
 | Main role | 5G RAN (CU + 2 DUs/Cells + E2 Agent) | 3GPP Split CU-DU & O-RAN E2 Node |
 | Recommended resources | 8 vCPU, 16 GB RAM, 50 GB Disk | CPU cores allocated to softmodem threads |
-| Target RIC endpoint | `10.102.0.66:36421/SCTP` | VM-2 Near-RT RIC `ric_e2term` |
+| Target RIC endpoint | `10.102.0.232:36421/SCTP` | VM-2 Near-RT RIC `ric_e2term` |
 | Target Core AMF | `192.168.70.138:38412/SCTP` | VM-3 AMF via route `192.168.70.0/24` |
 | Target Core UPF-1 | `192.168.70.142:2152/UDP` | Slice 1 eMBB user-plane gateway |
 | Target Core UPF-2 | `192.168.70.143:2152/UDP` | Slice 2 Low-Latency user-plane gateway |
@@ -130,10 +130,10 @@ Use this guide when adapting configuration parameters for custom experiments:
 | `physCellId` | `1` (DU-1), `2` (DU-2) | `[CUSTOMIZABLE]` | Physical Cell ID (0–1007). Must remain distinct between cells in same coverage area. |
 | `nr_cellid` | `12345678L`, `11111111L`| `[CUSTOMIZABLE]` | 36-bit NR Cell Identity. Must remain distinct for handover and RIC steering identification. |
 | `serverport` (rfsim) | `4043` (DU-1), `4044` (DU-2) | `[CUSTOMIZABLE]` | RFsim TCP server port. Must match UE connection argument on VM-5. |
-| `amf_ip_address` | `192.168.70.138` | `[CUSTOMIZABLE]` | AMF container IP reachable via static route `192.168.70.0/24 via 10.102.0.164` (or `10.102.0.164` if host port forwarding). |
+| `amf_ip_address` | `192.168.70.138` | `[CUSTOMIZABLE]` | AMF container IP reachable via static route `192.168.70.0/24 via 10.102.0.246` (or `10.102.0.246` if host port forwarding). |
 | `GNB_IPV4_ADDRESS_FOR_NG_AMF` | `10.102.0.167` | `[CUSTOMIZABLE]` | VM-4 local interface IP for N2 SCTP traffic. |
 | `GNB_IPV4_ADDRESS_FOR_NGU` | `10.102.0.167` | `[CUSTOMIZABLE]` | VM-4 local interface IP for N3 GTP-U traffic to UPF. |
-| `near_ric_ip_addr` | `10.102.0.66` | `[CUSTOMIZABLE]` | VM-2 Near-RT RIC IP where E2Term port 36421 is reachable. |
+| `near_ric_ip_addr` | `10.102.0.232` | `[CUSTOMIZABLE]` | VM-2 Near-RT RIC IP where E2Term port 36421 is reachable. |
 | `local_s_portd` / `remote_s_portd` | `2153` | `[FIXED / ARCHITECTURE]` | F1-U GTP-U UDP port. Kept at 2153 per 3GPP/OAI default. |
 | `GNB_PORT_FOR_S1U` | `2152` | `[FIXED / ARCHITECTURE]` | 3GPP standard N3 GTP-U port (UDP 2152). |
 | `sm_dir` | `/usr/local/lib/flexric/`| `[FIXED / ARCHITECTURE]` | Path where compiled Service Model `.so` plugins are installed. |
@@ -183,23 +183,23 @@ echo "sctp" | sudo tee -a /etc/modules-load.d/sctp.conf
 ```
 
 ### Step 2: Configure Static Route to VM-3 5GC Bridge Subnet
-VM-4 must reach the OAI 5GC containers (`192.168.70.0/24`) hosted on VM-3 (`10.102.0.164`):
+VM-4 must reach the OAI 5GC containers (`192.168.70.0/24`) hosted on VM-3 (`10.102.0.246`):
 
 ```bash
-# Add route immediately (interface is auto-selected based on gateway 10.102.0.164)
-sudo ip route add 192.168.70.0/24 via 10.102.0.164
+# Add route immediately (interface is auto-selected based on gateway 10.102.0.246)
+sudo ip route add 192.168.70.0/24 via 10.102.0.246
 
 # Persist route across reboots
-echo "up ip route add 192.168.70.0/24 via 10.102.0.164" | sudo tee -a /etc/network/interfaces.d/5gc-route || true
+echo "up ip route add 192.168.70.0/24 via 10.102.0.246" | sudo tee -a /etc/network/interfaces.d/5gc-route || true
 ```
 
 ### Step 3: Test Inter-VM Reachability
 ```bash
 # Test reachability to VM-2 Near-RT RIC
-ping -c 2 10.102.0.66
+ping -c 2 10.102.0.232
 
 # Test reachability to VM-3 5GC Host
-ping -c 2 10.102.0.164
+ping -c 2 10.102.0.246
 
 # Test routed reachability to VM-3 AMF Container
 ping -c 2 192.168.70.138
@@ -369,7 +369,7 @@ gNBs =
         SCTP_OUTSTREAMS = 2;
     };
 
-    # [CUSTOMIZABLE] AMF IPv4 endpoint (direct container IP via route 192.168.70.0/24 or host IP 10.102.0.164)
+    # [CUSTOMIZABLE] AMF IPv4 endpoint (direct container IP via route 192.168.70.0/24 or host IP 10.102.0.246)
     amf_ip_address = ({ ipv4 = "192.168.70.138"; });
 
     # [CUSTOMIZABLE] Network interfaces for N2 (AMF) and N3 (UPF)
@@ -401,7 +401,7 @@ log_config :
 
 # [MANDATORY MATCH RIC] O-RAN E2 Agent pointing to VM-2 Near-RT RIC
 e2_agent = {
-  near_ric_ip_addr = "10.102.0.66";              # [CUSTOMIZABLE] VM-2 Near-RT RIC IP
+  near_ric_ip_addr = "10.102.0.232";              # [CUSTOMIZABLE] VM-2 Near-RT RIC IP
   sm_dir = "/usr/local/lib/flexric/";            # [FIXED] Service Model directory
 };
 ```
@@ -621,7 +621,7 @@ Start the components in sequence:
 ```bash
 cd /opt/oran/ran/openairinterface5g/cmake_targets/ran_build/build
 sudo ./nr-softmodem -O /opt/oran/ran/conf/cu_gnb.conf \
-  --e2_agent.near_ric_ip_addr 10.102.0.66 \
+  --e2_agent.near_ric_ip_addr 10.102.0.232 \
   --e2_agent.sm_dir /usr/local/lib/flexric/ \
   2>&1 | tee /opt/oran/ran/cu.log
 ```
@@ -739,7 +739,7 @@ All acceptance criteria have been verified on VM-4:
    ```
 
 4. **E2 Connection to Near-RT RIC Established [VALIDATED]:**
-   Querying the Near-RT RIC E2 inventory on VM-2 (`10.102.0.66`):
+   Querying the Near-RT RIC E2 inventory on VM-2 (`10.102.0.232`):
    ```bash
    curl -s http://10.0.2.11:3800/v1/e2t/list | jq .
    # Output:

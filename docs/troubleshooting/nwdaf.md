@@ -4,14 +4,14 @@ This document contains validated diagnostic procedures, root-cause analyses, and
 
 ---
 
-## Case 33 — Kong API Gateway 404 Not Found on Physical Host IP (`http://10.102.0.164:8080`)
+## Case 33 — Kong API Gateway 404 Not Found on Physical Host IP (`http://10.102.0.233:8080`)
 
 ### Symptom
 Sending standard `Nnwdaf_AnalyticsInfo` queries to Kong via physical host IP returns `HTTP/1.1 404 Not Found`, while direct queries to `http://127.0.0.1:6059` return HTTP 200 or 400.
 
 ### Cause
 The default declarative config `/opt/oran/5gc/oai-cn5g-nwdaf/docker-compose/conf/kong.yml` restricts routing with `hosts: - oai-nwdaf-nbi-gateway`.  
-HTTP clients (such as Python `requests` or `curl`) calling `http://10.102.0.164:8080/...` send the header `Host: 10.102.0.164:8080`. Kong does not match this host header and rejects the request with a 404.
+HTTP clients (such as Python `requests` or `curl`) calling `http://10.102.0.233:8080/...` send the header `Host: 10.102.0.233:8080`. Kong does not match this host header and rejects the request with a 404.
 
 ### Solution
 Remove the restrictive `hosts:` filter from `kong.yml` so that Kong routes purely by URL path:
@@ -53,13 +53,13 @@ sudo docker restart oai-nwdaf-nbi-gateway
 ## Case 44 — Static NWDAF SliceLoadLevel (5.00%) During Core UPF Impairment / Fault Injection
 
 ### Symptom
-When fault injection (`tc netem delay 50ms loss 5%`) is applied to `oai-upf-slice2` on VM-3, E2E URLLC latency at UE spikes from ~16 ms to >120 ms. However, querying Prometheus (`http://10.102.0.67:9100/metrics`) still displays `nwdaf_slice_load_level{snssai="de00007b"} 5.00` (unchanged default fallback).
+When fault injection (`tc netem delay 50ms loss 5%`) is applied to `oai-upf-slice2` on VM-07, E2E URLLC latency at UE spikes from ~16 ms to >120 ms. However, querying Prometheus (`http://10.102.0.67:9100/metrics`) still displays `nwdaf_slice_load_level{snssai="de00007b"} 5.00` (unchanged default fallback).
 
 ### Cause
 In the OpenAirInterface CN5G v2.0.0 software stack, the C-based UPF containers do not natively stream real-time Linux kernel `tc` queuing latency or packet drops to the `oai-nwdaf-sbi` microservice. Additionally, Kong API Gateway routes queries matching standard 3GPP endpoints, but without an active kernel exporter, NWDAF retains static or unpopulated load metrics.
 
 ### Solution
-Deploy and run `/opt/oran/5gc/scripts/core_adapter.py` on VM-3 (`oai-core`):
+Deploy and run `/opt/oran/5gc/scripts/core_adapter.py` on VM-07 (`oai-core`):
 1. The adapter inspects the physical `qdisc` and packet drops on `oai-upf-slice1` and `oai-upf-slice2` every 1 second.
 2. When netem delay, queue backlog, or active packet drops are detected, it dynamically elevates `nwdaf_slice_load_level` to `88.5%` (above the 80% 3GPP TS 23.288 congestion threshold).
 3. When `tc qdisc del dev eth0 root` is executed, the metric instantly drops back to `5.0%` (normal baseline).
@@ -70,7 +70,7 @@ Deploy and run `/opt/oran/5gc/scripts/core_adapter.py` on VM-3 (`oai-core`):
 ## Case 47 — OAI NWDAF SBI Subscription `connection refused` on Multi-Slice Core
 
 ### Symptom
-In `oai-nwdaf-sbi` container logs on VM-3:
+In `oai-nwdaf-sbi` container logs on VM-07:
 ```text
 Error when calling SubscriptionsCollectionCollectionApi.CreateSubscription: Post "http://192.168.70.138/namf-evts/v1/subscriptions": dial tcp 192.168.70.138:80: connect: connection refused
 Error when calling SubscriptionsCollectionApi.CreateIndividualSubcription: Post "http://192.168.70.133/nsmf_event-exposure/v1/subscriptions": dial tcp 192.168.70.133:80: connect: connection refused
@@ -110,7 +110,7 @@ The NWDAF SBI consumer repeatedly fails to register event subscriptions with AMF
 ### Symptom
 Querying the NWDAF NBI Analytics endpoint via Kong Gateway:
 ```bash
-curl -i "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics?event-id=NETWORK_PERFORMANCE"
+curl -i "http://10.102.0.233:8080/nnwdaf-analyticsinfo/v1/analytics?event-id=NETWORK_PERFORMANCE"
 ```
 returns:
 ```text
@@ -139,7 +139,7 @@ Even when standard 3GPP query parameters (`ana-req`, `event-filter`) are passed,
 ### Solution
 1. **For Control Plane Queries (3GPP TS 29.520):** Always supply standard URL-encoded parameters:
    ```bash
-   curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
+   curl -s -G "http://10.102.0.233:8080/nnwdaf-analyticsinfo/v1/analytics" \
      --data-urlencode "event-id=NETWORK_PERFORMANCE" \
      --data-urlencode 'ana-req={"startTs":"2026-10-01T00:00:00Z","endTs":"2026-10-12T23:59:59Z"}' \
      --data-urlencode 'event-filter={"snssais":[{"sst":1,"sd":"000001"}],"dnns":["default"],"nwPerfTypes":["SESS_SUCC_RATIO"]}'

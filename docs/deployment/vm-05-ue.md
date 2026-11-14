@@ -34,7 +34,7 @@ VM-5 emulates multi-slice, multi-instance 5G Standalone (SA) user equipments in 
                                      │ N2 (38412/SCTP) & N3 (2152/UDP)
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         VM-3: OAI 5G Core (10.102.0.164)                     │
+│                         VM-3: OAI 5G Core (10.102.0.246)                     │
 │   - AMF (N2 Control Plane)         - UPF-1: 192.168.70.142 (Slice 1)        │
 │   - SMF-1 & SMF-2                  - UPF-2: 192.168.70.143 (Slice 2)        │
 │   - MySQL (Subscriber Database)    - NSSF (Slice Selection & Routing)       │
@@ -177,13 +177,13 @@ sudo apt update && sudo apt install -y \
 
 # Verify network connectivity to VM-4 (RAN) and VM-3 (5GC)
 ping -c 2 10.102.0.167
-ping -c 2 10.102.0.164
+ping -c 2 10.102.0.246
 ```
 
 ### Step 2: Configure Routing to 5GC Bridge Subnet
 Allow VM-5 to route packets to the container network (`192.168.70.0/24`) via VM-3:
 ```bash
-sudo ip route add 192.168.70.0/24 via 10.102.0.164
+sudo ip route add 192.168.70.0/24 via 10.102.0.246
 
 # Verify route to AMF
 ping -c 2 192.168.70.138

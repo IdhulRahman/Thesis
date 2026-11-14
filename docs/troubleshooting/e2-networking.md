@@ -231,9 +231,9 @@ sudo docker compose up -d e2mgr submgr rtmgr_sim
 ## Case 36 — E2Term SCTP Port 36421 Inaccessible from External RAN Node (`Connection refused`)
 
 ### Symptom
-When VM-4 (`oai-ran`) starts CU (`cu_gnb.conf`) and initiates an E2 connection toward Near-RT RIC (`10.102.0.66:36421`):
+When VM-4 (`oai-ran`) starts CU (`cu_gnb.conf`) and initiates an E2 connection toward Near-RT RIC (`10.102.0.232:36421`):
 ```text
-[E2AP] Failed to connect to Near-RT RIC at 10.102.0.66:36421 (Connection refused)
+[E2AP] Failed to connect to Near-RT RIC at 10.102.0.232:36421 (Connection refused)
 [E2AP] Reconnecting in 5 seconds...
 ```
 Checking SCTP listening sockets on VM-2:
@@ -253,7 +253,7 @@ In `oran-sc-ric/docker-compose.yml`, the `ports:` mapping for `e2term` is commen
     #ports:
     #  - "36421:36421/sctp"
 ```
-Because the port is not published to the host, external SCTP packets arriving at VM-2's physical network interface (`10.102.0.66:36421`) are rejected at the host kernel.
+Because the port is not published to the host, external SCTP packets arriving at VM-2's physical network interface (`10.102.0.232:36421`) are rejected at the host kernel.
 
 ### Solution
 Uncomment the `ports:` definition under `e2term` in `/opt/oran/nearrt/oran-sc-ric/docker-compose.yml`:

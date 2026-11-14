@@ -13,7 +13,7 @@ This directory contains the authoritative integration specifications and validat
 |---|---|---|---|---|:---:|
 | [`a1-integration.md`](a1-integration.md) | **O-RAN A1** | VM-1 (Non-RT) $\to$ VM-2 (Near-RT) | REST HTTP/1.1 (`:10001`) & RMR (`:4560`) | O-RAN.WG2.A1AP v03.01 | **`Validated`** |
 | [`e2-integration.md`](e2-integration.md) | **O-RAN E2** | VM-4 (Split RAN) $\leftrightarrow$ VM-2 (Near-RT) | E2AP over SCTP (`:36421`) | O-RAN.WG3.E2AP v02.03 | **`Validated` (E2Setup)** |
-| [`nwdaf-integration.md`](nwdaf-integration.md) | **3GPP NWDAF** | VM-3 (5GC) $\to$ VM-6 (Collector) | N4 PFCP, SBA HTTP/2, REST NBI (`:8080`) | 3GPP TS 23.288 / TS 29.520 | **`Validated` (Channel E)** |
+| [`nwdaf-integration.md`](nwdaf-integration.md) | **3GPP NWDAF** | VM-07 (NWDAF) $\to$ VM-6 (Collector) | N4 PFCP, SBA HTTP/2, REST NBI (`:8080`) | 3GPP TS 23.288 / TS 29.520 | **`Validated` (Channel E)** |
 
 ---
 
@@ -58,7 +58,7 @@ The E2 path connects the OAI gNB Centralized Unit (CU) to the Near-RT RIC, provi
                                      └──────────────────────┘
 ```
 
-### 2.3 NWDAF & Core Telemetry Path (VM-3 $\to$ VM-6)
+### 2.3 NWDAF & Core Telemetry Path (VM-3/VM-07 $\to$ VM-6)
 Exposes standardized 3GPP user-plane communication analytics (`UE_COMMUNICATION`) from the 5G Core datapath alongside high-frequency host telemetry:
 ```text
  5G Core Datapath (VM-3)             Monitoring Host (VM-6)

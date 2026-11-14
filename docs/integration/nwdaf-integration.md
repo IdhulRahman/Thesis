@@ -2,7 +2,7 @@
 
 **Authoritative Specification:** Single Source of Truth for NWDAF Integration  
 **Standard References:** 3GPP TS 23.288, TS 29.520, TS 28.552 (Release 17 Baseline / Release 19 Context)  
-**Target Environment:** VM-3 (`oai-core`: 5G Core & NWDAF Host) and VM-6 (`monitoring-data`: Telemetry Collector)  
+**Target Environment:** VM-07 (`oai-nwdaf`: Standalone 3GPP NWDAF Host) and VM-3 (`oai-core`: 5G Core Host) and VM-6 (`monitoring-data`: Telemetry Collector)  
 **System Role:** Service-Based Analytics Exposure & Native User-Plane Telemetry Ingestion
 
 ---
@@ -61,7 +61,7 @@ The testbed implements and empirically validates the complete native 3GPP teleme
 ## 3. Supported Analytics Capabilities & Semantic Limitations
 
 ### 3.1 `UE_COMMUNICATION` (3GPP TS 29.520 §5.1.6.3.2) — **Validated**
-* **NBI Endpoint:** `GET http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics?event-id=UE_COMMUNICATION`
+* **NBI Endpoint:** `GET http://10.102.0.233:8080/nnwdaf-analyticsinfo/v1/analytics?event-id=UE_COMMUNICATION`
 * **Query Parameters:** URL-encoded `ana-req` with `startTs` and `endTs` ISO-8601 timestamps.
 * **Payload Structure:**
   ```json
@@ -88,7 +88,7 @@ The testbed implements and empirically validates the complete native 3GPP teleme
   > In the upstream OAI engine (`internal/engine/ue_communication.go`), `commDur` is calculated via `totalDuration += report.Duration` across all reports in the query window. Because reports are emitted periodically every 30 seconds, this sums overlapping intervals over extended runs (e.g., >8000s). Thus, `nwdaf_comm_duration_sec` serves as a **monotonic URR event-accumulation counter**, rather than an exact physical session elapsed time.
 
 ### 3.2 `NETWORK_PERFORMANCE` (3GPP TS 29.520 §5.1.6.3.10) — **Validated with Upstream Limitation**
-* **NBI Endpoint:** `GET http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics?event-id=NETWORK_PERFORMANCE`
+* **NBI Endpoint:** `GET http://10.102.0.233:8080/nnwdaf-analyticsinfo/v1/analytics?event-id=NETWORK_PERFORMANCE`
 * **Query Filters:** Requires `event-filter` containing `snssais`, `dnns`, and `nwPerfTypes` set to `["SESS_SUCC_RATIO"]`.
 * **Observed Response:** Returns HTTP 200 with dynamic `absoluteNum: 1` reflecting actual PDU session document counts from MongoDB `testing.smf`.
 * **Upstream Code Limitation (`network_performance.go`):**  
@@ -112,7 +112,7 @@ The testbed implements and empirically validates the complete native 3GPP teleme
 ### 4.1 Live NBI Verification (from VM-3 or VM-6)
 Execute an HTTP GET query through the Kong API Gateway:
 ```bash
-curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
+curl -s -G "http://10.102.0.233:8080/nnwdaf-analyticsinfo/v1/analytics" \
   --data-urlencode "event-id=UE_COMMUNICATION" \
   --data-urlencode 'ana-req={"startTs":"2026-10-01T00:00:00Z","endTs":"2026-10-31T23:59:59Z"}' | jq .
 ```
@@ -127,7 +127,7 @@ sudo docker exec -it oai-nwdaf-database mongo testing --eval \
 **Expected Output:** MongoDB document under `testing.smf` containing array `qosmonlist` with multiple `CustomUsageReport` entries populated with live volume and duration counters.
 
 ### 4.3 Container Stack Health
-Confirm all 8 NWDAF microservices on VM-3 are healthy:
+Confirm all 8 NWDAF microservices on VM-07 are healthy:
 ```bash
 sudo docker ps --filter "name=oai-nwdaf" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 ```

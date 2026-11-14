@@ -7,7 +7,7 @@ This document contains validated diagnostic procedures, root-cause analyses, and
 ## Case 23b — VM-4 Cannot Reach VM-3 5GC Containers (100% Packet Loss on 192.168.70.x)
 
 ### Symptom
-On VM-4 (`10.102.0.167`), `ping 10.102.0.164` (VM-3 host) succeeds with 0% packet loss, but `ping 192.168.70.138` (AMF container) fails with 100% packet loss:
+On VM-4 (`10.102.0.167`), `ping 10.102.0.246` (VM-3 host) succeeds with 0% packet loss, but `ping 192.168.70.138` (AMF container) fails with 100% packet loss:
 
 ```text
 PING 192.168.70.138 (192.168.70.138) 56(84) bytes of data.
@@ -17,8 +17,8 @@ PING 192.168.70.138 (192.168.70.138) 56(84) bytes of data.
 
 ### Cause
 Four distinct factors can block external routed traffic between VM-4 and the VM-3 5GC containers:
-1. **Missing Static Route on VM-4:** If `192.168.70.0/24 via 10.102.0.164` is not present in VM-4's routing table (`ip route show`), VM-4 falls back to its default gateway, dropping the packets before reaching VM-3.
-2. **Accidental Static Route on VM-3 Host:** If `ip route add 192.168.70.0/24 via 10.102.0.164` was mistakenly executed on VM-3 itself, a duplicate conflicting route (`192.168.70.0/24 via 10.102.0.164 dev ens33`) is created that takes precedence over `192.168.70.0/24 dev demo-oai`. This loops traffic back to `ens33` causing `Destination Host Unreachable`.
+1. **Missing Static Route on VM-4:** If `192.168.70.0/24 via 10.102.0.246` is not present in VM-4's routing table (`ip route show`), VM-4 falls back to its default gateway, dropping the packets before reaching VM-3.
+2. **Accidental Static Route on VM-3 Host:** If `ip route add 192.168.70.0/24 via 10.102.0.246` was mistakenly executed on VM-3 itself, a duplicate conflicting route (`192.168.70.0/24 via 10.102.0.246 dev ens33`) is created that takes precedence over `192.168.70.0/24 dev demo-oai`. This loops traffic back to `ens33` causing `Destination Host Unreachable`.
 3. **Docker `FORWARD` Filter Chain & Bridge Policy:** Docker defaults the `FORWARD` iptables chain policy to `DROP`. Unless explicitly accepted at rule position 1 of `FORWARD` or permitted in `DOCKER-USER`, Docker drops routed ingress packets between `ens33` and `demo-oai`.
 4. **Docker `raw` Table PREROUTING Anti-Spoofing Rule (Root Cause for Zero FORWARD Packets):** When creating user-defined bridge networks, Docker daemon installs anti-spoofing packet filtering rules in the netfilter `raw` table:
    ```text
@@ -33,7 +33,7 @@ Four distinct factors can block external routed traffic between VM-4 and the VM-
 #### On VM-4 (`oai-ran`):
 Ensure the static route to VM-3 5GC is present:
 ```bash
-sudo ip route add 192.168.70.0/24 via 10.102.0.164
+sudo ip route add 192.168.70.0/24 via 10.102.0.246
 ip route show | grep 192.168.70
 ```
 
@@ -56,7 +56,7 @@ sudo iptables -I FORWARD 2 -i demo-oai -o ens33 -j ACCEPT
 sudo iptables -t nat -I POSTROUTING -o demo-oai -j MASQUERADE
 
 # 4. Remove any accidental static route on VM-3 itself if present
-sudo ip route del 192.168.70.0/24 via 10.102.0.164 2>/dev/null || true
+sudo ip route del 192.168.70.0/24 via 10.102.0.246 2>/dev/null || true
 ```
 
 ---
@@ -262,7 +262,7 @@ ping -c 2 192.168.70.138
 # Output:
 # 2 packets transmitted, 0 received, 100% packet loss, time 1020ms
 ```
-However, ping from VM-4 to the physical host VM-3 (`10.102.0.164`) succeeds with 0% packet loss.
+However, ping from VM-4 to the physical host VM-3 (`10.102.0.246`) succeeds with 0% packet loss.
 
 ### Cause
 By default on Ubuntu and Docker:
@@ -271,7 +271,7 @@ By default on Ubuntu and Docker:
 3. **UFW / Firewall Rules:** Active firewall configurations reject forwarded inter-subnet packets by default.
 
 ### Solution
-Apply the following routing and forwarding configuration on **VM-3 (`10.102.0.164`)**:
+Apply the following routing and forwarding configuration on **VM-3 (`10.102.0.246`)**:
 
 ```bash
 # 1. Disable UFW if active
@@ -294,7 +294,7 @@ sudo iptables -t nat -I POSTROUTING 2 -s 192.168.70.0/24 -j MASQUERADE
 
 On **VM-4 (`10.102.0.167`)**, ensure the static route exists:
 ```bash
-sudo ip route replace 192.168.70.0/24 via 10.102.0.164
+sudo ip route replace 192.168.70.0/24 via 10.102.0.246
 ping -c 2 192.168.70.138
 # Expected: 2 packets transmitted, 2 received, 0% packet loss
 ```
@@ -321,16 +321,16 @@ Pass the E2 agent parameters explicitly via command-line arguments when launchin
 cd /opt/oran/ran/openairinterface5g/cmake_targets/ran_build/build
 
 sudo ./nr-softmodem -O /opt/oran/ran/conf/cu_gnb.conf \
-  --e2_agent.near_ric_ip_addr 10.102.0.66 \
+  --e2_agent.near_ric_ip_addr 10.102.0.232 \
   --e2_agent.sm_dir /usr/local/lib/flexric/ \
   2>&1 | tee /opt/oran/ran/cu.log
 ```
 
 Expected output verifying active E2 initialization:
 ```text
-After RCconfig_NR_E2agent /usr/local/lib/flexric/ 10.102.0.66
+After RCconfig_NR_E2agent /usr/local/lib/flexric/ 10.102.0.232
 [E2 NODE]: mcc = 208 mnc = 95 mnc_digit = 2 nb_id = 3584
-[E2 NODE]: Args 10.102.0.66 /usr/local/lib/flexric/
+[E2 NODE]: Args 10.102.0.232 /usr/local/lib/flexric/
 ```
 
 And in `ric_e2mgr` logs on VM-2:

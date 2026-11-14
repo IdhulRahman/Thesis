@@ -1,3 +1,12 @@
+> [!WARNING]
+> **HISTORICAL ARCHIVE SNAPSHOT (October 2026):**  
+> This document records the historical 6-VM state prior to the VM crash and subsequent infrastructure reinstall.
+> As of the current production testbed:
+> - **VM-3 (5G Core):** migrated to `10.102.0.246` (pure 5GC microservices).
+> - **VM-07 (Standalone NWDAF):** newly established at `10.102.0.233` (disaggregated Kong Gateway `:8080`, MongoDB `:27017`, and AnLF microservices).
+> - **VM-2 (Near-RT RIC):** migrated to `10.102.0.232`.
+> For authoritative active guides, refer to [`docs/deployment/`](../deployment/README.md) and [`docs/architecture.md`](../architecture.md).
+
 # 3GPP NWDAF Technical Specification, Integration Guidelines, and Testbed Scope
 
 **Reference Standards:** 3GPP TS 23.288, TS 29.520, TS 28.552 (Release 19 / Release 17 Alignment)  

@@ -18,7 +18,7 @@ stty sane 2>/dev/null || true
 echo "=== 1. Starting CU in background ==="
 cd "$BIN_DIR"
 nohup sudo ./nr-softmodem -O "$CONF_DIR/cu_gnb.conf" \
-  --e2_agent.near_ric_ip_addr 10.102.0.66 \
+  --e2_agent.near_ric_ip_addr 10.102.0.232 \
   --e2_agent.sm_dir /usr/local/lib/flexric/ \
   < /dev/null > "$LOG_DIR/cu.log" 2>&1 &
 

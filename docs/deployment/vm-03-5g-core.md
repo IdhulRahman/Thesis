@@ -93,7 +93,7 @@ The deployment uses official container images from the OpenAirInterface Software
 - **Design:** Each slice runs a dedicated UPF container:
   - `oai-upf-slice1`: IP `192.168.70.142`, UDP port `2152`.
   - `oai-upf-slice2`: IP `192.168.70.143`, UDP port `2152`.
-- **Conflict Resolution:** If both UPFs published port `2152` directly on VM-3's physical IP (`10.102.0.164`), Docker would fail with `port already allocated`. Hence, user plane GTP-U packets are routed from VM-4 directly to container IPs via the Docker bridge network `192.168.70.0/24`.
+- **Conflict Resolution:** If both UPFs published port `2152` directly on VM-3's physical IP (`10.102.0.246`), Docker would fail with `port already allocated`. Hence, user plane GTP-U packets are routed from VM-4 directly to container IPs via the Docker bridge network `192.168.70.0/24`.
 
 ---
 
@@ -378,7 +378,7 @@ All acceptance checks have passed on VM-3:
 6. **NWDAF Live Telemetry Pipeline [VALIDATED]:**
    Verify the full 3GPP TS 29.520 analytics pipeline is functioning — `absoluteNum` must be `> 0`:
    ```bash
-   curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
+   curl -s -G "http://10.102.0.233:8080/nnwdaf-analyticsinfo/v1/analytics" \
      --data-urlencode "event-id=NETWORK_PERFORMANCE" \
      --data-urlencode 'ana-req={"startTs":"2026-10-01T00:00:00Z","endTs":"2026-10-15T23:59:59Z"}' \
      --data-urlencode 'event-filter={"snssais":[{"sst":1,"sd":"000001"}],"dnns":["default"],"nwPerfTypes":["SESS_SUCC_RATIO"]}' | jq '.nwPerfs[0].absoluteNum'
@@ -487,7 +487,7 @@ NWDAF is deployed natively using the official OpenAirInterface Rel-17 NWDAF impl
 
 The unified entry point for Core analytics exposure is Kong Gateway on VM-3:
 ```text
-http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics
+http://10.102.0.233:8080/nnwdaf-analyticsinfo/v1/analytics
 ```
 
 #### Query Parameters (3GPP TS 29.520 Standard)
@@ -503,7 +503,7 @@ http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics
 
 Query (using Slice 1 eMBB, DNN `default`, window Oct 1–15 2026):
 ```bash
-curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
+curl -s -G "http://10.102.0.233:8080/nnwdaf-analyticsinfo/v1/analytics" \
   --data-urlencode "event-id=NETWORK_PERFORMANCE" \
   --data-urlencode 'ana-req={"startTs":"2026-10-01T00:00:00Z","endTs":"2026-10-15T23:59:59Z"}' \
   --data-urlencode 'event-filter={"snssais":[{"sst":1,"sd":"000001"}],"dnns":["default"],"nwPerfTypes":["SESS_SUCC_RATIO"]}' | jq .
@@ -583,7 +583,7 @@ Architecturally (3GPP TS 23.288 §6.2), user-plane load analytics require teleme
 #### 3. Testbed Live Verification Evidence (Live REST Output)
 When a 3GPP TS 29.520 analytics query is executed through the VM-3 Kong Gateway:
 ```bash
-curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
+curl -s -G "http://10.102.0.233:8080/nnwdaf-analyticsinfo/v1/analytics" \
   --data-urlencode "event-id=NETWORK_PERFORMANCE" \
   --data-urlencode 'ana-req={"startTs":"2026-10-01T00:00:00Z","endTs":"2026-10-20T23:59:59Z"}' \
   --data-urlencode 'event-filter={"snssais":[{"sst":1,"sd":"000001"}],"dnns":["default"],"nwPerfTypes":["SESS_SUCC_RATIO"]}' | jq .
@@ -616,7 +616,7 @@ Actual JSON response from the system (HTTP 200 OK):
 
 To query User-Plane data volume telemetry aggregated from `qosmonlist` under 3GPP TS 29.520 §5.1.6.3.2, query `event-id=UE_COMMUNICATION`:
 ```bash
-curl -s -G "http://10.102.0.164:8080/nnwdaf-analyticsinfo/v1/analytics" \
+curl -s -G "http://10.102.0.233:8080/nnwdaf-analyticsinfo/v1/analytics" \
   --data-urlencode "event-id=UE_COMMUNICATION" \
   --data-urlencode 'ana-req={"startTs":"2026-10-01T00:00:00Z","endTs":"2026-10-20T23:59:59Z"}' | jq .
 ```

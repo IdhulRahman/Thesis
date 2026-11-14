@@ -12,7 +12,7 @@
 Telemetry is ingested across five architectural domains into the centralized collector on VM-6 (`10.102.0.67`):
 
 ```text
- [ VM-5: nrUE (ue1 / ue2) ]     [ VM-4: Split RAN ]          [ VM-3: 5G Core & NWDAF ]
+ [ VM-5: nrUE (ue1 / ue2) ]     [ VM-4: Split RAN ]          [ VM-3: 5GC ] [ VM-07: NWDAF ]
    (iperf3 / ping canary)         (gNB DU Scheduler Logs)      (UPF Container eth0 & NBI :8080)
          │                               │                            │
          ▼                               ▼                            ▼
@@ -95,14 +95,14 @@ The table below provides a concise, single-view index of all 40 columns in the C
 | **10**| `e2e_slice2_rtt_ms` | E2E Service KPI | VM-5 `ue2` | Float (ms) | ICMP round-trip latency SLA (URLLC) |
 | **11**| `e2e_slice2_loss_pct` | E2E Service KPI | VM-5 `ue2` | Float (%) | Canary packet loss percentage (URLLC) |
 | **12**| `e2e_probe_freshness` | E2E Service KPI | VM-5 `ue2` | Boolean (0/1) | Probe health: valid UE-2 RTT reply $\le 3.5\text{ s}$ |
-| **13**| `nwdaf_load_embb` | 3GPP NWDAF Metric | VM-3 NWDAF | Float (%) | Standard Slice Load Level (strict NaN) |
-| **14**| `nwdaf_load_urllc` | 3GPP NWDAF Metric | VM-3 NWDAF | Float (%) | Standard Slice Load Level (strict NaN) |
-| **15**| `nwdaf_comm_ul_bytes` | 3GPP NWDAF Metric | VM-3 NWDAF | Integer (Bytes) | Cumulative UL user-plane volume |
-| **16**| `nwdaf_comm_dl_bytes` | 3GPP NWDAF Metric | VM-3 NWDAF | Integer (Bytes) | Cumulative DL user-plane volume |
-| **17**| `nwdaf_comm_duration_sec` | 3GPP NWDAF Metric | VM-3 NWDAF | Float (s) | Cumulative URR report window duration |
-| **18**| `nwdaf_comm_vol_std_bytes`| 3GPP NWDAF Metric | VM-3 NWDAF | Float (Bytes) | URR session volume standard deviation |
-| **19**| `nwdaf_comm_freshness` | 3GPP NWDAF Metric | VM-3 NWDAF | Boolean (0/1) | NWDAF tuple value change $\le 45\text{ s}$ |
-| **20**| `nwdaf_api_status` | 3GPP NWDAF Metric | VM-3 Kong | Boolean (0/1) | HTTP connectivity to Kong Gateway (:8080) |
+| **13**| `nwdaf_load_embb` | 3GPP NWDAF Metric | VM-07 NWDAF | Float (%) | Standard Slice Load Level (strict NaN) |
+| **14**| `nwdaf_load_urllc` | 3GPP NWDAF Metric | VM-07 NWDAF | Float (%) | Standard Slice Load Level (strict NaN) |
+| **15**| `nwdaf_comm_ul_bytes` | 3GPP NWDAF Metric | VM-07 NWDAF | Integer (Bytes) | Cumulative UL user-plane volume |
+| **16**| `nwdaf_comm_dl_bytes` | 3GPP NWDAF Metric | VM-07 NWDAF | Integer (Bytes) | Cumulative DL user-plane volume |
+| **17**| `nwdaf_comm_duration_sec` | 3GPP NWDAF Metric | VM-07 NWDAF | Float (s) | Cumulative URR report window duration |
+| **18**| `nwdaf_comm_vol_std_bytes`| 3GPP NWDAF Metric | VM-07 NWDAF | Float (Bytes) | URR session volume standard deviation |
+| **19**| `nwdaf_comm_freshness` | 3GPP NWDAF Metric | VM-07 NWDAF | Boolean (0/1) | NWDAF tuple value change $\le 45\text{ s}$ |
+| **20**| `nwdaf_api_status` | 3GPP NWDAF Metric | VM-07 Kong | Boolean (0/1) | HTTP connectivity to Kong Gateway (:8080) |
 | **21**| `estimated_load_embb` | Real OAM / Derived | VM-3 UPF-1 | Float (%) | Interface throughput proxy ($C_{\text{norm}}=25\text{ Mbps}$) |
 | **22**| `estimated_load_urllc` | Real OAM / Derived | VM-3 UPF-2 | Float (%) | Interface throughput proxy ($C_{\text{norm}}=5\text{ Mbps}$) |
 | **23**| `upf_backlog_bytes_embb` | Real OAM (Kernel) | VM-3 UPF-1 | Integer (Bytes) | Linux qdisc socket buffer queue depth |
@@ -154,14 +154,14 @@ This category strictly encompasses standard 3GPP TS 23.288 / TS 29.520 Analytics
 
 | Col | CSV Column Name | Prometheus Identifier | Source & Host | Ingestion Channel | Unit & Type | Extraction Logic & Mathematical Formulation | Missing / Stale Rule | Metric Role |
 |:---:|---|---|---|---|---|---|---|---|
-| **13**| `nwdaf_load_embb` | `nwdaf_slice_load_level{snssai="01000001"}` | VM-3 NWDAF :8080 | 3GPP NBI | Float (%) | Standard 3GPP TS 23.288 / TS 29.520 Slice Load Level for eMBB | Strictly emits `NaN` (unsupported upstream) | Standard Slice Load |
-| **14**| `nwdaf_load_urllc` | `nwdaf_slice_load_level{snssai="de00007b"}` | VM-3 NWDAF :8080 | 3GPP NBI | Float (%) | Standard 3GPP TS 23.288 / TS 29.520 Slice Load Level for URLLC | Strictly emits `NaN` (unsupported upstream) | Standard Slice Load |
-| **15**| `nwdaf_comm_ul_bytes`| `nwdaf_comm_ul_bytes` | VM-3 NWDAF :8080 | 3GPP NBI | Integer (Bytes) | Standard 3GPP TS 23.288 §6.7 cumulative uplink user-plane volume | Retains last value | AnLF Traffic Volume |
-| **16**| `nwdaf_comm_dl_bytes`| `nwdaf_comm_dl_bytes` | VM-3 NWDAF :8080 | 3GPP NBI | Integer (Bytes) | Standard 3GPP TS 23.288 §6.7 cumulative downlink user-plane volume | Retains last value | AnLF Traffic Volume |
-| **17**| `nwdaf_comm_duration_sec`| `nwdaf_comm_duration_sec` | VM-3 NWDAF :8080 | 3GPP NBI | Float (s) | Cumulative sum of ingested URR report window durations | Retains last value | AnLF Event Counter |
-| **18**| `nwdaf_comm_vol_std_bytes`| `nwdaf_comm_vol_std_bytes` | VM-3 NWDAF :8080 | 3GPP NBI | Float (Bytes) | Standard deviation of volume across ingested URR session reports | Retains last value | AnLF Volume Variance |
-| **19**| `nwdaf_comm_freshness` | `nwdaf_comm_freshness` | VM-3 NWDAF :8080 | VM-6 Collector | Boolean (0/1) | Indicator: `1` if NWDAF volume tuple changed within 45s, else `0` | Drops to `0` when values unchanged | AnLF Data Freshness |
-| **20**| `nwdaf_api_status` | `nwdaf_api_status` | VM-3 NWDAF :8080 | VM-6 Collector | Boolean (0/1) | HTTP connectivity to Kong Gateway (`:8080/nnwdaf-analyticsinfo/...`) | `1` = OK, `0` = Unreachable | AnLF Service Health |
+| **13**| `nwdaf_load_embb` | `nwdaf_slice_load_level{snssai="01000001"}` | VM-07 NWDAF :8080 | 3GPP NBI | Float (%) | Standard 3GPP TS 23.288 / TS 29.520 Slice Load Level for eMBB | Strictly emits `NaN` (unsupported upstream) | Standard Slice Load |
+| **14**| `nwdaf_load_urllc` | `nwdaf_slice_load_level{snssai="de00007b"}` | VM-07 NWDAF :8080 | 3GPP NBI | Float (%) | Standard 3GPP TS 23.288 / TS 29.520 Slice Load Level for URLLC | Strictly emits `NaN` (unsupported upstream) | Standard Slice Load |
+| **15**| `nwdaf_comm_ul_bytes`| `nwdaf_comm_ul_bytes` | VM-07 NWDAF :8080 | 3GPP NBI | Integer (Bytes) | Standard 3GPP TS 23.288 §6.7 cumulative uplink user-plane volume | Retains last value | AnLF Traffic Volume |
+| **16**| `nwdaf_comm_dl_bytes`| `nwdaf_comm_dl_bytes` | VM-07 NWDAF :8080 | 3GPP NBI | Integer (Bytes) | Standard 3GPP TS 23.288 §6.7 cumulative downlink user-plane volume | Retains last value | AnLF Traffic Volume |
+| **17**| `nwdaf_comm_duration_sec`| `nwdaf_comm_duration_sec` | VM-07 NWDAF :8080 | 3GPP NBI | Float (s) | Cumulative sum of ingested URR report window durations | Retains last value | AnLF Event Counter |
+| **18**| `nwdaf_comm_vol_std_bytes`| `nwdaf_comm_vol_std_bytes` | VM-07 NWDAF :8080 | 3GPP NBI | Float (Bytes) | Standard deviation of volume across ingested URR session reports | Retains last value | AnLF Volume Variance |
+| **19**| `nwdaf_comm_freshness` | `nwdaf_comm_freshness` | VM-07 NWDAF :8080 | VM-6 Collector | Boolean (0/1) | Indicator: `1` if NWDAF volume tuple changed within 45s, else `0` | Drops to `0` when values unchanged | AnLF Data Freshness |
+| **20**| `nwdaf_api_status` | `nwdaf_api_status` | VM-07 NWDAF :8080 | VM-6 Collector | Boolean (0/1) | HTTP connectivity to Kong Gateway (`:8080/nnwdaf-analyticsinfo/...`) | `1` = OK, `0` = Unreachable | AnLF Service Health |
 
 #### Technical Details & Semantics:
 * **Native AnLF Ingestion Pipeline:** Sourced from `components/oai-nwdaf-engine/internal/engine/ue_communication.go`. UPF generates periodic PFCP Session Usage Reports (URR msg 56) every 30 seconds to SMF, which exposes them to `oai-nwdaf-sbi` and stores them in MongoDB `testing.smf`. The engine aggregates cumulative UL/DL volume and calculates volume standard deviation via `math.Sqrt(ulVolVariance)`.

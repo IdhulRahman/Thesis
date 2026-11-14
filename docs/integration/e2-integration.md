@@ -20,7 +20,7 @@ The validated end-to-end E2 path is:
                             │ E2AP over SCTP (Port 36421)
                             ▼
 ┌────────────────────────────────────────────────────────┐
-│ VM-2 Near-RT RIC (10.102.0.66)                         │
+│ VM-2 Near-RT RIC (10.102.0.232)                         │
 │   ├── ric_e2term (SCTP termination & ASN.1 codec)      │
 │   │     │                                              │
 │   │     │ RMR (Msg Type 12001: E2_SETUP_REQ)           │
@@ -42,7 +42,7 @@ The validated end-to-end E2 path is:
 | Component | VM | IP / Interface | Role in E2 Path |
 |---|---|---|---|
 | OAI gNB CU E2 Agent | VM-4 | `10.102.0.167` | Generates E2SetupRequest, encodes E2SM telemetry, executes E2SM-RC control. |
-| `ric_e2term` | VM-2 | `10.102.0.66:36421/SCTP` | Terminates E2 SCTP association, decodes ASN.1 E2AP, forwards via RMR. |
+| `ric_e2term` | VM-2 | `10.102.0.232:36421/SCTP` | Terminates E2 SCTP association, decodes ASN.1 E2AP, forwards via RMR. |
 | `ric_e2mgr` | VM-2 | `10.0.2.11:3800` (HTTP) | Manages NodeB lifecycle, validates E2Setup, updates RNIB database. |
 | `ric_dbaas` | VM-2 | `10.0.2.12:6379` (Redis) | Radio Network Information Base (RNIB) storing NodeB identities and SMs. |
 | `ric_submgr` | VM-2 | `10.0.2.13` | Coordinates xApp E2 subscriptions to RAN nodes. |
@@ -116,7 +116,7 @@ The compiled and installed Service Models on VM-4 (`/usr/local/lib/flexric/`) pr
 
 | Parameter | Current Value | Classification | Customization Rules & Impact |
 |---|---|---|---|
-| `near_ric_ip_addr` | `10.102.0.66` | `[CUSTOMIZABLE]` | VM-2 IP where `ric_e2term` port 36421 is reachable from VM-4. |
+| `near_ric_ip_addr` | `10.102.0.232` | `[CUSTOMIZABLE]` | VM-2 IP where `ric_e2term` port 36421 is reachable from VM-4. |
 | `gNB_ID` | `0xe00` (3584) | `[CUSTOMIZABLE]` | gNodeB identifier. Affects RAN name `gnb_208_095_00000e00`. |
 | `sm_dir` | `/usr/local/lib/flexric/` | `[FIXED / ARCHITECTURE]` | Path where compiled `*_sm.so` plugins are installed on VM-4. |
 | `E2TERM_SCTP_PORT` | `36421` | `[FIXED / ARCHITECTURE]` | O-RAN standard E2AP SCTP port exposed on VM-2 host. |
@@ -169,7 +169,7 @@ The E2 Agent configuration block embedded in the CU configuration:
 ```hcl
 # [MANDATORY MATCH RIC] O-RAN E2 Agent Configuration
 e2_agent = {
-  near_ric_ip_addr = "10.102.0.66";              # [CUSTOMIZABLE] Near-RT RIC IP
+  near_ric_ip_addr = "10.102.0.232";              # [CUSTOMIZABLE] Near-RT RIC IP
   sm_dir = "/usr/local/lib/flexric/";            # [FIXED] Location of compiled Service Models
 };
 ```

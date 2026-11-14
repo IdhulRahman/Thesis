@@ -1057,7 +1057,7 @@ This path has been validated with a policy created through A1 PMS on VM-1 and en
 The Near-RT RIC exposes E2 through:
 
 ```text
-10.102.0.66:36421/SCTP
+10.102.0.232:36421/SCTP
 ```
 
 This endpoint terminates O-RAN E2AP traffic from the OAI gNB CU on VM-4 (`10.102.0.167`).
@@ -1337,7 +1337,7 @@ newgrp docker
 VM-1 A1 PMS
       │
       ▼
-10.102.0.66:10001
+10.102.0.232:10001
 A1 compatibility shim
       │
       ▼
@@ -1357,7 +1357,7 @@ VM-4 OAI RAN
       │
       │ SCTP / E2
       ▼
-10.102.0.66:36421
+10.102.0.232:36421
       │
       ▼
 E2Term

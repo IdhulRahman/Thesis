@@ -36,8 +36,8 @@ To support empirical evaluation of cross-domain coordination and record synchron
 └───────────────────┴───────────────────┴────────────────────┴───────────────────────────┘
 ```
 
-### 2.1 Domain 1: 5G Core Network & NWDAF (VM-3 — `10.102.0.164`)
-Ingested via Core Research Telemetry Adapter (`core_adapter.py` v9) and 3GPP Rel-17 `Nnwdaf` REST API (`http://10.102.0.164:8080`):
+### 2.1 Domain 1: 5G Core Network (VM-3 — `10.102.0.246`) & NWDAF (VM-07 — `10.102.0.233`)
+Ingested via Core Research Telemetry Adapter (`core_adapter.py` v9) and 3GPP Rel-17 `Nnwdaf` REST API (`http://10.102.0.233:8080`):
 
 > **Core Metrics Validity & Semantic Audit Note:**
 > 1. Physical user-plane buffer queue dynamics and packet drops are sampled directly from the Linux kernel using `core_adapter.py` v9 (adhering to 3GPP PM TS 32.401 & TS 28.552).
@@ -85,7 +85,7 @@ In earlier standalone prototypes, O-RAN FlexRIC E2 Agent (`E2SM-KPM v2.03` over 
 | `ran_rlc_buffer_occupancy` | E2SM-KPM (RLC layer) | Bytes | Radio scheduling queue depth. |
 | `ran_rlc_packet_delay_ms` | E2SM-KPM (RLC layer) | Milliseconds (`ms`) | Radio interface scheduling latency. |
 
-### 2.3 Domain 3: O-RAN Near-RT & Non-RT RIC (VM-1 — `10.102.0.168` & VM-2 — `10.102.0.66`)
+### 2.3 Domain 3: O-RAN Near-RT & Non-RT RIC (VM-1 — `10.102.0.168` & VM-2 — `10.102.0.232`)
 Collector gauge endpoints in `telemetry_collector.py` allocate telemetry interface placeholders for RIC intelligence:
 
 | Metric Name | Source Component | Data Type | Implementation Status & Role |
@@ -138,7 +138,7 @@ Ingested directly from the automated multi-slice traffic generator (`trafgen.sh`
 │   │       * VM-3: core_adapter.py (Netlink tc qdisc backlog/drops & /proc/net/dev) │   │
 │   │       * VM-4: ran_adapter.py (DU-1 / DU-2 scheduler ASCII log tailing)         │   │
 │   │       * VM-5: trafgen.sh (iperf3 offered load & canary ICMP RTT)               │   │
-│   │   - Directly polls VM-3 Kong Gateway (:8080) for 3GPP NWDAF UE_COMMUNICATION   │   │
+│   │   - Directly polls VM-07 Kong Gateway (:8080) for 3GPP NWDAF UE_COMMUNICATION   │   │
 │   │   - Exposes consolidated Prometheus gauges on :9100/metrics                    │   │
 │   └────────────────────────────────────────────────────────────────────────────────┘   │
 └────────────────────────────────────────────────────────────────────────────────────────┘

@@ -11,8 +11,8 @@ This directory contains the operational daemons, automation scripts, fault injec
 
 | Host Node | Host IP | Script File | Architectural Role | Execution Mode & Output |
 |---|---|---|---|---|
-| **VM-3** | `10.102.0.164` | [`core_adapter.py`](core_adapter.py) | Reads Linux kernel `tc qdisc` backlog and packet drops from UPF containers via Netlink. | Continuous daemon (1.0 Hz); pushes JSON to VM-6 `:9100/report` and archives local JSONL. |
-| **VM-3** | `10.102.0.164` | [`receiver_iperf.sh`](receiver_iperf.sh) | Dedicated one-off receiver manager for `oai-ext-dn` container to capture ground-truth delivered goodput and UDP loss JSON. | Bash utility; exports to `data/raw/<RUN_ID>/receiver_<SESSION_ID>.json`. |
+| **VM-3** | `10.102.0.246` | [`core_adapter.py`](core_adapter.py) | Reads Linux kernel `tc qdisc` backlog and packet drops from UPF containers via Netlink. | Continuous daemon (1.0 Hz); pushes JSON to VM-6 `:9100/report` and archives local JSONL. |
+| **VM-3** | `10.102.0.246` | [`receiver_iperf.sh`](receiver_iperf.sh) | Dedicated one-off receiver manager for `oai-ext-dn` container to capture ground-truth delivered goodput and UDP loss JSON. | Bash utility; exports to `data/raw/<RUN_ID>/receiver_<SESSION_ID>.json`. |
 | **VM-4** | `10.102.0.167` | [`start_ran.sh`](start_ran.sh) | Orchestrates background startup of OAI gNB CU (N2/E2), DU-1 (Cell-1 `:4043` with `-E` three-quarter sampling), and DU-2 (Cell-2 `:4044`). | Bash launcher; writes `cu.log`, `du1.log`, `du2.log`. |
 | **VM-4** | `10.102.0.167` | [`stop_ran.sh`](stop_ran.sh) | Gracefully terminates all running OAI softmodem processes on VM-4. | Bash teardown utility; kills CU and DUs. |
 | **VM-4** | `10.102.0.167` | [`rfsim_channel_control.py`](rfsim_channel_control.py) | Dynamic RF channel impairment controller over OAI softmodem Telnet (`:9090`). Controls UL/DL path loss and attenuation without restarting gNB processes. | Python CLI utility; supports `show`, `set-attenuation`, `set-raw-ploss`, `reset`, `sweep`. |

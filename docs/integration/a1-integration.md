@@ -48,8 +48,8 @@ with the example policy:
 | Component | VM | Address / Interface |
 |---|---|---|
 | A1 Policy Management Service | VM-1 | `10.102.0.168:8081` |
-| A1 Compatibility Shim | VM-2 | `10.102.0.66:10001` |
-| A1 Mediator | VM-2 | `10.102.0.66:10000` |
+| A1 Compatibility Shim | VM-2 | `10.102.0.232:10001` |
+| A1 Mediator | VM-2 | `10.102.0.232:10000` |
 | Python xApp Runtime | VM-2 | RMR `4560` |
 | DBaaS | VM-2 | Docker network `10.0.2.12:6379` |
 
@@ -262,7 +262,7 @@ Validated configuration:
     "ric": [
       {
         "name": "near-rt-ric-1",
-        "baseUrl": "http://10.102.0.66:10001",
+        "baseUrl": "http://10.102.0.232:10001",
         "customAdapterClass": "org.onap.ccsdk.oran.a1policymanagementservice.clients.OscA1Client",
         "managedElementIds": [
           "oai-cu-cp",
@@ -285,14 +285,14 @@ jq . \
 The important configuration is:
 
 ```text
-baseUrl            = http://10.102.0.66:10001
+baseUrl            = http://10.102.0.232:10001
 customAdapterClass = ...OscA1Client
 ```
 
 Do not use the direct A1 Mediator URL in the validated configuration:
 
 ```text
-http://10.102.0.66:10000/
+http://10.102.0.232:10000/
 ```
 
 because that caused PMS to select the incompatible parser path during synchronization.
@@ -943,7 +943,7 @@ verify that the PMS configuration uses:
 
 ```text
 customAdapterClass = ...OscA1Client
-baseUrl            = http://10.102.0.66:10001
+baseUrl            = http://10.102.0.232:10001
 ```
 
 ---
@@ -954,7 +954,7 @@ Verify the compatibility endpoint:
 
 ```bash
 curl -s \
-  http://10.102.0.66:10001/a1-p/policytypes \
+  http://10.102.0.232:10001/a1-p/policytypes \
   | jq
 ```
 
