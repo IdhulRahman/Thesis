@@ -23,3 +23,8 @@
   - 15 referensi terverifikasi dengan pembagian kolom seimbang di Halaman 6: Referensi [1]--[7] di kolom kiri dan [8]--[15] di kolom kanan menggunakan `\IEEEtriggeratref{8}`.
   - Bebas dari compiler warning (*undefined reference `tab:features` telah dihapus; underfull hbox badness 10000 telah diselesaikan dengan notasi slash compact*).
   - Mengakomodasi 6 poin perbaikan dosen secara objektif dan proporsional.
+
+## 4. Peran Agent AI & Alur Kerja Pengguna
+- Agent AI HANYA memandu (guidance), memvalidasi output, dan mencatat progres/troubleshooting.
+- Dilarang keras melakukan SSH langsung ke VM atau mencari private SSH key/kredensial pada host pengguna.
+- Seluruh eksekusi di VM dilakukan secara langsung oleh Pengguna (User-driven execution).

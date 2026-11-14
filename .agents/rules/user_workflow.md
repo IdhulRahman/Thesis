@@ -62,5 +62,26 @@ End with what changed or was found, why it matters, how it was verified, and any
 
 ## 16. Prioritize GitHub cURL for VM Deployment
 
-When guiding the user to update, synchronize, or deploy scripts, configuration files, and tools on the testbed virtual machines (VM-1 through VM-6), always prioritize downloading the authoritative files directly from the user's GitHub repository using `curl` (e.g., `curl -sSL https://raw.githubusercontent.com/IdhulRahman/Thesis/main/<path> -o <target_path>`) over local `scp` or manual copy-pasting. Ensure the relevant changes are committed and pushed to GitHub first before providing the `curl` commands, and include necessary permission flags (e.g., `chmod +x`).
+When guiding the user to update, synchronize, or deploy scripts, configuration files, and tools on the testbed virtual machines (VM-1 through VM-7), always prioritize downloading the authoritative files directly from the user's GitHub repository using `curl` (e.g., `curl -sSL https://raw.githubusercontent.com/IdhulRahman/Thesis/main/<path> -o <target_path>`) over local `scp` or manual copy-pasting. Ensure the relevant changes are committed and pushed to GitHub first before providing the `curl` commands, and include necessary permission flags (e.g., `chmod +x`).
+
+## 17. Strict Prohibition on Direct VM Access and Host Credential Probing
+
+1. **Role Separation (User-Driven Execution & AI Guidance):**
+   The AI agent acts strictly as an interactive advisor, technical guide, and documentation/troubleshooting recorder. The user directly executes all commands on their own terminals and virtual machines.
+2. **No Direct SSH Access:**
+   The AI agent MUST NEVER execute direct `ssh` connections to target VMs (`vm-1` through `vm-7`, jump hosts, or testbed nodes) or attempt automated background remote logins.
+3. **Absolute Protection of Host Integrity & Secrets:**
+   The AI agent MUST NEVER search for, inspect, extract, generate, or tamper with SSH private keys, credentials, tokens, or private environment files on the user's local host machine. Respect system integrity at all times.
+
+## 18. Meticulous Progress & Troubleshooting Documentation
+
+1. **Continuous Progress Tracking:**
+   The AI agent must guide the user step-by-step through deployment procedures and track the completion status of each phase.
+2. **Recording Troubles & Solutions:**
+   Whenever an error, mismatch, bug, or service failure occurs during installation or execution, the AI agent must systematically document:
+   - Specific symptom, logs, and error messages reported by the user.
+   - Root cause analysis based on official standards (3GPP/O-RAN) and codebase logic.
+   - Exact resolution steps applied.
+   - Relevant updates to the project troubleshooting catalog (`docs/troubleshooting/`) and deployment notes.
+
 
