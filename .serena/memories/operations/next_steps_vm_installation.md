@@ -113,3 +113,25 @@ VM-3 (Core), VM-07 (NWDAF), dan VM-2 (Near-RT RIC) baru saja diinstal ulang (*fr
    ```bash
    python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 60 --notes "Uji Validasi 7 VM Baru"
    ```
+
+## Status Eksekusi Live (15 November 2026)
+### VM-3 (5G Core Multi-Slice: 10.102.0.246) — STATUS: OPERATIONAL (BERHASIL)
+1. **Host & Kernel:** Docker CE, Compose v2, SCTP/GTP kernel modules aktif, sysctl net.ipv4.ip_forward=1 aktif & persisten.
+2. **Database:** Pre-provisioning 50 UE (IMSI 208950000000001 s/d 050) pada database/oai_db2.sql sukses.
+3. **Penyelarasan Slicing (Case #40/#49):**
+   - conf/nssf_slice_config.yaml: Dipetakan ke Slice 1 (SST 1, SD 000001) dan Slice 2 (SST 222, SD 00007B) dengan nrfNfMgtUri dan TAC 40960.
+   - conf/slicing_base_config.yaml: Ditambahkan nrf under nfs, daftar plmn_support_list dibersihkan dari slice tutorial lama (128/130).
+   - conf/slicing_slice1_config.yaml: Subnet 12.1.1.0/24, SST 1, SD 000001.
+   - conf/slicing_slice2_config.yaml: Subnet 12.1.2.0/24, SST 222, SD 00007B, DNN lowlatency.
+   - docker-compose-slicing-basic-nrf.yaml: Routing oai-ext-dn diperbarui ke 12.1.1.0/24 dan 12.1.2.0/24.
+4. **Patching AMF (Case #51):**
+   - Git submodule component/oai-amf diperbarui secara rekursif (termasuk build/common-build).
+   - Patch 0001-fix-amf-nrf-resource-uri.patch diterapkan pada src/amf-app/amf_app.cpp.
+   - Docker image oai-amf:thesis-nrf-uri-v1 berhasil di-build dan di-deploy via compose.amf-nrf-uri.yaml.
+   - AMF terdaftar sukses ke NRF (HTTP 201 Created, HeartBeat timer: 10).
+   - SCTP Port 38412 listening pada 192.168.70.138:38412.
+5. **Host Telemetry Daemon:**
+   - `scripts/core_adapter.py` v9 diunduh ke `/opt/oran/5gc/scripts/core_adapter.py`.
+   - Daemon aktif berjalan di background (PID terverifikasi via `ps aux`).
+
+Status saat ini: Lanjut ke **FASE 2: Bring-Up VM-07 (Standalone 3GPP NWDAF: 10.102.0.233)**.

@@ -1,0 +1,144 @@
+version: '3.8'
+
+services:
+    mongodb:
+        image: mongo:4.4
+        container_name: oai-nwdaf-mongodb
+        restart: always
+        ports:
+            - "27017:27017"
+        environment:
+            - MONGO_INITDB_DATABASE=testing
+        networks:
+            nwdaf_net:
+                ipv4_address: 192.168.74.150
+
+    oai-nwdaf-engine:
+        image: oaisoftwarealliance/oai-nwdaf-engine:develop
+        container_name: oai-nwdaf-engine
+        depends_on:
+            - mongodb
+        ports:
+            - "6063:8080"
+        environment:
+            - MONGODB_URI=mongodb://192.168.74.150:27017
+            - MONGODB_DATABASE_NAME=testing
+            - MONGODB_COLLECTION_NAME_AMF=amf
+            - MONGODB_COLLECTION_NAME_SMF=smf
+            - ENGINE_NUM_OF_UE_ROUTE=/network_performance/num_of_ue
+            - ENGINE_SESS_SUCC_RATIO_ROUTE=/network_performance/sess_succ_ratio
+            - ENGINE_UE_COMMUNICATION_ROUTE=/ue_communication
+            - ENGINE_UE_MOBILITY_ROUTE=/ue_mobility
+            - SERVER_ADDR=0.0.0.0:8080
+        networks:
+            nwdaf_net:
+                ipv4_address: 192.168.74.155
+
+    oai-nwdaf-nbi-analytics:
+        image: oaisoftwarealliance/oai-nwdaf-nbi-analytics:develop
+        container_name: oai-nwdaf-nbi-analytics
+        depends_on:
+            - oai-nwdaf-engine
+        ports:
+            - "6059:8080"
+        environment:
+            - ENGINE_URI=http://192.168.74.155:8080
+            - ENGINE_NUM_OF_UE_ROUTE=/network_performance/num_of_ue
+            - ENGINE_SESS_SUCC_RATIO_ROUTE=/network_performance/sess_succ_ratio
+            - ENGINE_UE_COMMUNICATION_ROUTE=/ue_communication
+            - ENGINE_UE_MOBILITY_ROUTE=/ue_mobility
+            - SERVER_ADDR=0.0.0.0:8080
+        networks:
+            nwdaf_net:
+                ipv4_address: 192.168.74.151
+
+    oai-nwdaf-nbi-events:
+        image: oaisoftwarealliance/oai-nwdaf-nbi-events:develop
+        container_name: oai-nwdaf-nbi-events
+        depends_on:
+            - oai-nwdaf-engine
+        ports:
+            - "6060:8080"
+        environment:
+            - ENGINE_URI=http://192.168.74.155:8080
+            - ENGINE_NUM_OF_UE_ROUTE=/network_performance/num_of_ue
+            - ENGINE_SESS_SUCC_RATIO_ROUTE=/network_performance/sess_succ_ratio
+            - ENGINE_UE_COMMUNICATION_ROUTE=/ue_communication
+            - ENGINE_UE_MOBILITY_ROUTE=/ue_mobility
+            - SERVER_ADDR=0.0.0.0:8080
+        networks:
+            nwdaf_net:
+                ipv4_address: 192.168.74.152
+
+    oai-nwdaf-nbi-ml:
+        image: oaisoftwarealliance/oai-nwdaf-nbi-ml:develop
+        container_name: oai-nwdaf-nbi-ml
+        ports:
+            - "6061:8080"
+        environment:
+            - SERVER_ADDR=0.0.0.0:8080
+        networks:
+            nwdaf_net:
+                ipv4_address: 192.168.74.153
+
+    oai-nwdaf-sbi:
+        image: oaisoftwarealliance/oai-nwdaf-sbi:develop
+        container_name: oai-nwdaf-sbi
+        depends_on:
+            - mongodb
+        ports:
+            - "6062:8080"
+        environment:
+            - AMF_IP_ADDR=http://192.168.70.138:8080
+            - AMF_HTTP_VERSION=2
+            - AMF_SUBSCR_ROUTE=/namf-evts/v1
+            - AMF_API_ROUTE=/test/amf
+            - AMF_NOTIFY_CORRELATION_ID=string
+            - AMF_NOTIFICATION_ID=1
+            - AMF_NOTIFICATION_FORWARD_ROUTE=/sbi/notification/amf
+            - SMF_IP_ADDR=http://192.168.70.139:8080
+            - SMF_HTTP_VERSION=2
+            - SMF_SUBSCR_ROUTE=/nsmf_event-exposure/v1
+            - SMF_API_ROUTE=/test/smf
+            - SMF_NOTIFY_CORRELATION_ID=string
+            - SMF_NOTIFICATION_ID=2
+            - SMF_NOTIFICATION_FORWARD_ROUTE=/sbi/notification/smf
+            - MONGODB_URI=mongodb://192.168.74.150:27017
+            - MONGODB_DATABASE_NAME=testing
+            - MONGODB_COLLECTION_NAME_AMF=amf
+            - MONGODB_COLLECTION_NAME_SMF=smf
+            - EVENT_NOTIFY_URI=http://10.102.0.233:6062
+            - SERVER_ADDR=0.0.0.0:8080
+        networks:
+            nwdaf_net:
+                ipv4_address: 192.168.74.154
+
+    oai-nwdaf-nbi-gateway:
+        image: kong:3.3.0
+        container_name: oai-nwdaf-nbi-gateway
+        depends_on:
+            - oai-nwdaf-nbi-analytics
+            - oai-nwdaf-nbi-events
+        ports:
+            - "8080:8000"
+            - "8001:8001"
+        environment:
+            - KONG_DATABASE=off
+            - KONG_DECLARATIVE_CONFIG=/conf/kong.yml
+            - KONG_PROXY_ACCESS_LOG=/dev/stdout
+            - KONG_ADMIN_ACCESS_LOG=/dev/stdout
+            - KONG_PROXY_ERROR_LOG=/dev/stderr
+            - KONG_ADMIN_ERROR_LOG=/dev/stderr
+            - KONG_ADMIN_LISTEN=0.0.0.0:8001
+        volumes:
+            - ./conf/kong.yml:/conf/kong.yml:ro
+        networks:
+            nwdaf_net:
+                ipv4_address: 192.168.74.156
+
+networks:
+    nwdaf_net:
+        name: oai-nwdaf-net
+        ipam:
+            config:
+                - subnet: 192.168.74.0/24
