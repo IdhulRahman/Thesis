@@ -49,7 +49,7 @@ VM-4 interconnects three primary domains in the thesis platform:
 | IP address | `10.102.0.167` | Static IP on thesis research subnet |
 | Subnet | `10.102.0.0/24` | Main inter-VM communication network |
 | Main role | 5G RAN (CU + 2 DUs/Cells + E2 Agent) | 3GPP Split CU-DU & O-RAN E2 Node |
-| Recommended resources | 8 vCPU, 16 GB RAM, 50 GB Disk | CPU cores allocated to softmodem threads |
+| Recommended resources | 8 vCPU, 6 GB RAM, 44 GB Disk | CPU cores allocated to softmodem threads |
 | Target RIC endpoint | `10.102.0.232:36421/SCTP` | VM-2 Near-RT RIC `ric_e2term` |
 | Target Core AMF | `192.168.70.138:38412/SCTP` | VM-3 AMF via route `192.168.70.0/24` |
 | Target Core UPF-1 | `192.168.70.142:2152/UDP` | Slice 1 eMBB user-plane gateway |

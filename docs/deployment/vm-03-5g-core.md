@@ -28,7 +28,7 @@ The deployment follows official OpenAirInterface guidelines from `oai-cn5g-fed` 
 | Subnet | `10.102.0.0/24` | Main inter-VM communication network |
 | Main role | 5G Core Network (Multi-Slice) | Multi-slice 3GPP 5GC Control & User Plane |
 | Container runtime | Docker & Docker Compose | Containerized Network Functions (NF) |
-| Recommended resources | 8 vCPU, 16 GB RAM, 40 GB Disk | Host compute allocation |
+| Recommended resources | 4 vCPU, 6 GB RAM, 44 GB Disk | Host compute allocation |
 | N2 external endpoint | `10.102.0.246:38412/SCTP` | AMF NG-AP interface published to VM-3 host |
 | N3 external endpoint | `192.168.70.0/24` via `10.102.0.246` | Multi-UPF routed Docker bridge network |
 

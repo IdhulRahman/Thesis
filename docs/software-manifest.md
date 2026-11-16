@@ -10,13 +10,13 @@ All virtual machines operate within the dedicated inter-VM subnet `10.102.0.0/24
 
 | VM ID | Hostname | Management IP | Primary Subsystem | Host Hardware Allocation |
 |---|---|---:|---|---|
-| **VM-1** | `nonrt-ric` | `10.102.0.168` | O-RAN Non-RT RIC, A1 PMS v2.6.0, rApp Execution Environment | 4 vCPU, 8 GB RAM |
-| **VM-2** | `near-rt-ric` | `10.102.0.232` | O-RAN Near-RT RIC (O-RAN SC i-release), A1 Mediator, E2Term, xApp | 4 vCPU, 8 GB RAM |
-| **VM-3** | `oai-core` | `10.102.0.246` | OAI 5G Core Multi-Slice Control & User Plane, Core Adapter v9 | 8 vCPU, 16 GB RAM |
-| **VM-4** | `oai-ran` | `10.102.0.167` | OAI Split RAN (CU + DU-1 + DU-2 + FlexRIC E2 Agent), RAN Adapter | 8 vCPU, 16 GB RAM |
-| **VM-5** | `ue-emulator` | `10.102.0.165` | OAI nrUE Multi-Instance Emulator (`ue1`, `ue2` netns), TrafGen | 4 vCPU, 8 GB RAM |
-| **VM-6** | `monitoring-data` | `10.102.0.67` | Prometheus TSDB, Grafana, Telemetry Collector, Monotonic Logger | 4 vCPU, 8 GB RAM |
-| **VM-07** | `oai-nwdaf` | `10.102.0.233` | Standalone 3GPP NWDAF (AnLF Microservices Stack, Kong :8080) | 4 vCPU, 8 GB RAM |
+| **VM-1** | `nonrt-ric` | `10.102.0.168` | O-RAN Non-RT RIC, A1 PMS v2.6.0, rApp Execution Environment | 2 vCPU, 4 GB RAM, 44 GB Disk |
+| **VM-2** | `near-rt-ric` | `10.102.0.232` | O-RAN Near-RT RIC (O-RAN SC i-release), A1 Mediator, E2Term, xApp | 2 vCPU, 4 GB RAM, 44 GB Disk |
+| **VM-3** | `oai-core` | `10.102.0.246` | OAI 5G Core Multi-Slice Control & User Plane, Core Adapter v9 | 4 vCPU, 6 GB RAM, 44 GB Disk |
+| **VM-4** | `oai-ran` | `10.102.0.167` | OAI Split RAN (CU + DU-1 + DU-2 + FlexRIC E2 Agent), RAN Adapter | 8 vCPU, 6 GB RAM, 44 GB Disk |
+| **VM-5** | `ue-emulator` | `10.102.0.165` | OAI nrUE Multi-Instance Emulator (`ue1`, `ue2` netns), TrafGen | 4 vCPU, 4 GB RAM, 44 GB Disk |
+| **VM-6** | `monitoring-data` | `10.102.0.67` | Prometheus TSDB, Grafana, Telemetry Collector, Monotonic Logger | 2 vCPU, 4 GB RAM, 44 GB Disk |
+| **VM-07** | `oai-nwdaf` | `10.102.0.233` | Standalone 3GPP NWDAF (AnLF Microservices Stack, Kong :8080) | 2 vCPU, 4 GB RAM, 44 GB Disk |
 
 ---
 

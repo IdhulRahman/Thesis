@@ -53,7 +53,7 @@ VM-5 emulates multi-slice, multi-instance 5G Standalone (SA) user equipments in 
 | **Subnet** | `10.102.0.0/24` | Main inter-VM communication network |
 | **Main Role** | 5G nrUE Multi-Instance Emulator | Standalone multi-UE and multi-slice traffic generator |
 | **Operating System** | Ubuntu 22.04 LTS (Kernel 5.15+) | Standard LTS Linux environment |
-| **Hardware Sizing** | 4 vCPU, 8 GB RAM, 30 GB Disk | Recommended host compute allocation |
+| **Hardware Sizing** | 4 vCPU, 4 GB RAM, 44 GB Disk | Recommended host compute allocation |
 | **RAN Target Host** | `10.102.0.167` (VM-4) | Host IP where DU-1 and DU-2 softmodems listen |
 | **Cell-1 RFsim Target** | `10.102.0.167:4043/TCP` | DU-1 RFsimulator socket endpoint |
 | **Cell-2 RFsim Target** | `10.102.0.167:4044/TCP` | DU-2 RFsimulator socket endpoint |

@@ -17,7 +17,7 @@ This document provides the complete architecture, telemetry inventory, and deplo
 | **Default Gateway** | `10.102.0.1` | Gateway to hypervisor/campus routing |
 | **Main Role** | Centralized Telemetry, TSDB & Experiment Logger | Cross-domain observability, SLA tracking, and visualization |
 | **Core Software** | Prometheus v2.45+, Grafana v10+, Python 3.10+ | Time-series database, dashboarding, and automated scrapers |
-| **Hardware Sizing** | 4 vCPU, 8 GB RAM, 40 GB Disk | Compute and persistent disk allocation |
+| **Hardware Sizing** | 2 vCPU, 4 GB RAM, 44 GB Disk | Compute and persistent disk allocation |
 
 ---
 

@@ -40,7 +40,7 @@ VM-6: Telemetry Collector (10.102.0.67:9100)
 | Subnet | `10.102.0.0/24` | Main inter-VM communication network |
 | Main role | Standalone 3GPP NWDAF (AnLF) | Service-Based Analytics Logical Function |
 | Container runtime | Docker & Docker Compose | Containerized NWDAF microservices |
-| Recommended resources | 4 vCPU, 8 GB RAM, 30 GB Disk | Host compute allocation |
+| Recommended resources | 2 vCPU, 4 GB RAM, 44 GB Disk | Host compute allocation |
 | Northbound NBI endpoint | `http://10.102.0.233:8080` | Kong API Gateway exposing `Nnwdaf_AnalyticsInfo` |
 | Kong Admin endpoint | `http://10.102.0.233:8001` | Kong internal administration port |
 | MongoDB Datastore | `10.102.0.233:27017` | Persistent analytics datastore |

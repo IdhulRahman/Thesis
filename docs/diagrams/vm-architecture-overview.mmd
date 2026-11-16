@@ -6,7 +6,7 @@ flowchart TD
     %% ----------------------------------------------------
     %% VM-5: nrUE Softmodem Emulator
     %% ----------------------------------------------------
-    subgraph VM5 ["<b>VM-5: User Equipment (UEs)</b><br/>IP: 10.102.0.165 • 4 vCPU, 8 GB RAM"]
+    subgraph VM5 ["<b>VM-5: User Equipment (UEs)</b><br/>IP: 10.102.0.165 • 4 vCPU, 4 GB RAM"]
         UE1["UE-1 (eMBB, SST=1, SD=0x01)<br/>netns: ue1 | IP: 12.1.1.2"]
         UE2["UE-2 (URLLC, SST=2, SD=0x7b)<br/>netns: ue2 | IP: 12.1.2.2"]
         TRAFGEN["Traffic Generator (iperf3 / ping)"]
@@ -17,7 +17,7 @@ flowchart TD
     %% ----------------------------------------------------
     %% VM-4: OAI Split RAN
     %% ----------------------------------------------------
-    subgraph VM4 ["<b>VM-4: O-RAN Radio Access Network (gNodeB)</b><br/>IP: 10.102.0.167 • 8 vCPU, 16 GB RAM"]
+    subgraph VM4 ["<b>VM-4: O-RAN Radio Access Network (gNodeB)</b><br/>IP: 10.102.0.167 • 8 vCPU, 6 GB RAM"]
         ODU["O-DU (Cell-1 :4043 & Cell-2 :4044)<br/>OAI RFSim Servers"]
         CUCP["O-CU-CP (RRC/NGAP)"]
         CUUP["O-CU-UP (PDCP/SDAP/GTP-U)"]
@@ -30,7 +30,7 @@ flowchart TD
     %% ----------------------------------------------------
     %% VM-3: 5G Core Network
     %% ----------------------------------------------------
-    subgraph VM3 ["<b>VM-3: 5G Core Network (Multi-Slice 5GC)</b><br/>IP: 10.102.0.246 • 8 vCPU, 16 GB RAM"]
+    subgraph VM3 ["<b>VM-3: 5G Core Network (Multi-Slice 5GC)</b><br/>IP: 10.102.0.246 • 4 vCPU, 6 GB RAM"]
         subgraph CP_5GC ["5GC Control Plane NFs"]
             AMF["AMF (Mobility)"]
             SMF["SMF (Session)"]
@@ -54,7 +54,7 @@ flowchart TD
     %% ----------------------------------------------------
     %% VM-07: Standalone 3GPP NWDAF
     %% ----------------------------------------------------
-    subgraph VM7 ["<b>VM-07: Standalone 3GPP NWDAF (AnLF)</b><br/>IP: 10.102.0.233 • 4 vCPU, 8 GB RAM"]
+    subgraph VM7 ["<b>VM-07: Standalone 3GPP NWDAF (AnLF)</b><br/>IP: 10.102.0.233 • 2 vCPU, 4 GB RAM"]
         NWDAF_ENG["NWDAF Engine & SBI (:6062/:6063)"]
         KONG_GW["Kong API Gateway (:8080)"]
         MONGO_DB["MongoDB (testing.smf / qosmonlist)"]
@@ -65,7 +65,7 @@ flowchart TD
     %% ----------------------------------------------------
     %% VM-2: O-RAN Near-RT RIC
     %% ----------------------------------------------------
-    subgraph VM2 ["<b>VM-2: Near-RT RIC</b><br/>IP: 10.102.0.232 • 4 vCPU, 8 GB RAM"]
+    subgraph VM2 ["<b>VM-2: Near-RT RIC</b><br/>IP: 10.102.0.232 • 2 vCPU, 4 GB RAM"]
         E2T["E2 Termination (E2T)"]
         A1M["A1 Mediator"]
         XAPP["Diagnostic xApp (Inference Engine)"]
@@ -79,7 +79,7 @@ flowchart TD
     %% ----------------------------------------------------
     %% VM-1: O-RAN Non-RT RIC & SMO
     %% ----------------------------------------------------
-    subgraph VM1 ["<b>VM-1: Non-RT RIC & SMO</b><br/>IP: 10.102.0.168 • 4 vCPU, 8 GB RAM"]
+    subgraph VM1 ["<b>VM-1: Non-RT RIC & SMO</b><br/>IP: 10.102.0.168 • 2 vCPU, 4 GB RAM"]
         SMO["SMO Platform (Service Management & Orchestration)"]
         A1_PMS["A1 Policy Management Service"]
         RAPP["Diagnostic rApp / Offline Model Training"]
@@ -90,7 +90,7 @@ flowchart TD
     %% ----------------------------------------------------
     %% VM-6: Observability / Telemetry Platform
     %% ----------------------------------------------------
-    subgraph VM6 ["<b>VM-6: Observability Host</b><br/>IP: 10.102.0.67 • 4 vCPU, 8 GB RAM"]
+    subgraph VM6 ["<b>VM-6: Observability Host</b><br/>IP: 10.102.0.67 • 2 vCPU, 4 GB RAM"]
         COLLECTOR["Metrics Exporter & Collector"]
         PROM["Prometheus TSDB (1.0 Hz)"]
         GRAF["Grafana Dashboard"]
