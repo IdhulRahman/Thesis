@@ -153,6 +153,20 @@ services:
     - name: oai-nwdaf-nbi-ml-route
       paths:
       - /nnwdaf-mlmodelprovision/v1
+
+- name: oai-nwdaf-sbi-smf
+  url: http://192.168.74.154:8080/test/smf
+  routes:
+    - name: oai-nwdaf-sbi-smf-route
+      paths:
+      - /test/smf
+
+- name: oai-nwdaf-sbi-amf
+  url: http://192.168.74.154:8080/test/amf
+  routes:
+    - name: oai-nwdaf-sbi-amf-route
+      paths:
+      - /test/amf
 ```
 
 ### 5.2 Standalone Docker Compose (`docker-compose-nwdaf-standalone.yaml`)
@@ -247,8 +261,6 @@ services:
         container_name: oai-nwdaf-sbi
         depends_on:
             - mongodb
-        ports:
-            - "6062:8080"
         environment:
             - AMF_IP_ADDR=http://192.168.70.138:8080
             - AMF_HTTP_VERSION=2
@@ -282,10 +294,12 @@ services:
             - oai-nwdaf-nbi-events
         ports:
             - "8080:8000"
+            - "6062:8002"
             - "8001:8001"
         environment:
             - KONG_DATABASE=off
             - KONG_DECLARATIVE_CONFIG=/conf/kong.yml
+            - KONG_PROXY_LISTEN=0.0.0.0:8000, 0.0.0.0:8002 http2
             - KONG_PROXY_ACCESS_LOG=/dev/stdout
             - KONG_ADMIN_ACCESS_LOG=/dev/stdout
             - KONG_PROXY_ERROR_LOG=/dev/stderr

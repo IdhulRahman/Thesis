@@ -24,3 +24,17 @@ services:
     - name: oai-nwdaf-nbi-ml-route
       paths:
       - /nnwdaf-mlmodelprovision/v1
+
+- name: oai-nwdaf-sbi-smf
+  url: http://192.168.74.154:8080/test/smf
+  routes:
+    - name: oai-nwdaf-sbi-smf-route
+      paths:
+      - /test/smf
+
+- name: oai-nwdaf-sbi-amf
+  url: http://192.168.74.154:8080/test/amf
+  routes:
+    - name: oai-nwdaf-sbi-amf-route
+      paths:
+      - /test/amf
