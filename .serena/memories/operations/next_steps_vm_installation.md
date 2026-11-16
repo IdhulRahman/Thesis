@@ -130,8 +130,80 @@ VM-3 (Core), VM-07 (NWDAF), dan VM-2 (Near-RT RIC) baru saja diinstal ulang (*fr
    - Docker image oai-amf:thesis-nrf-uri-v1 berhasil di-build dan di-deploy via compose.amf-nrf-uri.yaml.
    - AMF terdaftar sukses ke NRF (HTTP 201 Created, HeartBeat timer: 10).
    - SCTP Port 38412 listening pada 192.168.70.138:38412.
-5. **Host Telemetry Daemon:**
+5. **Implementasi Native 3GPP Rel-16 URR PoC pada UPF-1:**
+   - Image `oai-upf:poc-develop-ie43-compat-v1` dibangun dari commit upstream `c51cae2` dengan patch `0001-fix-upf-pfcp-ie43-rel16-compat.patch` (clamping IE 43 ke 6 oktet).
+   - `enable_usage_reporting: yes` diaktifkan di SMF-1 dan `enable_urr: yes` di UPF-1.
+   - UPF-1 periodic reporting loop (30s) terbukti memancarkan N4 Session Report Request (`msg type 56`), SMF-1 memetakan ke Event 98 `QOS_MON`, dan mentransmisikan notifikasi HTTP/2 ke NWDAF.
+6. **Host Telemetry Daemon:**
    - `scripts/core_adapter.py` v9 diunduh ke `/opt/oran/5gc/scripts/core_adapter.py`.
    - Daemon aktif berjalan di background (PID terverifikasi via `ps aux`).
 
-Status saat ini: Lanjut ke **FASE 2: Bring-Up VM-07 (Standalone 3GPP NWDAF: 10.102.0.233)**.
+### VM-07 (Standalone 3GPP NWDAF: 10.102.0.233) — STATUS: OPERATIONAL (BERHASIL)
+1. **Host Routing & Netfilter Ingress:**
+   - Rute statis `192.168.70.0/24 via 10.102.0.246` aktif dan dipersistensikan via systemd `5gc-route.service`.
+   - VM-3 netfilter di-bypass (raw PREROUTING anti-spoofing + FORWARD + MASQUERADE) sehingga ping dan HTTP/2 tembus ke NRF (`192.168.70.136`).
+2. **Microservices Stack (7 Kontainer Up & Healthy):**
+   - `oai-nwdaf-mongodb`, `oai-nwdaf-sbi`, `oai-nwdaf-engine`, `oai-nwdaf-nbi-analytics`, `oai-nwdaf-nbi-events`, `oai-nwdaf-nbi-ml`, dan `oai-nwdaf-nbi-gateway` (Kong 3.3.0).
+3. **Penyelarasan SBI & Subscription (Case #33 & Case #47):**
+   - `oai-nwdaf-sbi` berhasil terhubung ke MongoDB `testing` dan mendaftarkan event subscription ke AMF (`192.168.70.138:8080`) via HTTP/2 (`HTTP/2.0 201 Created`).
+   - Berhasil mendaftarkan event subscription ke SMF-1 (`192.168.70.139:8080`) untuk event `PDU_SES_EST`, `UE_IP_CH`, `PLMN_CH`, `DDDS`, `PDU_SES_REL`, dan `QOS_MON`.
+   - `EVENT_NOTIFY_URI` terkonfigurasi ke `http://10.102.0.233:6062`.
+4. **Kong Gateway HTTP/2 Termination (Terobosan Arsitektur SBI):**
+   - Mengatasi limitasi Go `http.ListenAndServe` internal `oai-nwdaf-sbi` yang hanya mendukung HTTP/1.1.
+   - Port 6062 dialihkan ke Kong Gateway (`8002 http2`) dengan rute ke `oai-nwdaf-sbi:8080/test/smf` via HTTP/1.1.
+   - SMF-1 memancarkan notifikasi QoS Monitoring / URR periodik via native HTTP/2 dan menerima `HTTP/2 200 OK`.
+   - Ingesti MongoDB terbukti 100% aktif: dokumen `testing.smf` berhasil mengakumulasi byte riil dari UPF-1 (`qosmonlist` berisi >55 MB / 38,000 paket).
+5. **Verifikasi Northbound API (NBI):**
+   - Query `http://127.0.0.1:8080/nnwdaf-analyticsinfo/v1/analytics?event-id=UE_COMMUNICATION` menghasilkan `HTTP/1.1 200 OK` dengan payload JSON valid.
+
+### VM-2 (O-RAN Near-RT RIC: 10.102.0.232) — STATUS: OPERATIONAL (BERHASIL)
+1. **Host & Modul Kernel:**
+   - Modul kernel `sctp` aktif dan persisten di `/etc/modules`.
+2. **Platform Minimal O-RAN SC (7 Kontainer Up):**
+   - `ric_dbaas` (Redis 5.0.9 / DBAAS 0.5.7 - Fix Case #28), `ric_rtmgr_sim`, `ric_e2mgr` (keepalive timeout tuned 3600s - Fix Case #29), `ric_e2term` (SCTP port 36421 exposed - Fix Case #36), `ric_submgr`, `ric_appmgr`, `python_xapp_runner`.
+3. **A1 Mediation & Compatibility Layer (2 Kontainer Up):**
+   - `ric_a1mediator` running pada port 10000 dengan RMR route table `local.rt`.
+   - Baseline A1 Policy Type 20008 terdaftar (`HTTP/1.1 201 Created`).
+   - `a1-compat` (NGINX reverse proxy) running pada port 10001, respons healthcheck `HTTP/1.1 200 OK` dan policy query `[ 20008 ]`.
+4. **Golden State Verification:**
+   - Socket SCTP `36421` listening pada `0.0.0.0:36421`.
+   - Seluruh 9 kontainer platform dan mediation aktif (`Up`).
+
+Status saat ini: Lanjut ke **FASE 4: Penyelarasan Rute & Uji Interkoneksi RAN & UE (VM-4: `10.102.0.167` & VM-5: `10.102.0.165`)**.
+
+
+### VM-4 (Split RAN: 10.102.0.167) & VM-5 (nrUE: 10.102.0.165) — STATUS: OPERATIONAL (BERHASIL)
+1. **VM-4 Split RAN:**
+   - CU, DU-1 (RFsim :4043, Telnet :9090, -E, 51 PRB, Cell ID 12345678, PCI 1), dan DU-2 (RFsim :4044, 106 PRB, Cell ID 11111111, PCI 2) aktif berjalan.
+   - N2 association ke AMF sukses (`associated AMF 1`).
+   - O-RAN E2 Setup sukses terhubung ke Near-RT RIC VM-2 (`10.102.0.232:36421`), 8 FlexRIC Service Models terdaftar ke DBaaS.
+   - `ran_adapter.py` aktif melacak metrik radio uplink gNodeB.
+2. **VM-5 nrUE Multi-Instance:**
+   - Multi-UE netns isolation (`ue1`, `ue2`) aktif dan terverifikasi.
+   - UE-1 (Slice 1 - eMBB, IMSI 208950000000001) terhubung ke DU-1 (:4043), 5GMM-REGISTERED, PDU Session ID 10 aktif, IP `12.1.1.2/24` pada `oaitun_ue1`.
+   - UE-2 (Slice 2 - URLLC, IMSI 208950000000002) terhubung ke DU-2 (:4044), 5GMM-REGISTERED, PDU Session ID 10 aktif, IP `12.1.2.3/24` pada `oaitun_ue1`.
+   - **Canary Ping End-to-End ke EXT-DN (192.168.70.145):**
+     - Slice 1: 0% packet loss (RTT avg ~33 ms).
+     - Slice 2: 0% packet loss (RTT avg ~22.7 ms).
+
+### VM-6 (Monitoring & TSDB: 10.102.0.67) — STATUS: OPERATIONAL (BERHASIL)
+1. **Stack Pemantauan:**
+   - Prometheus v2.47.0 (`:9090`) dan Grafana v10.1.0 (`:3000`) aktif berjalan via Docker Compose.
+   - `telemetry_collector.py` daemon aktif (port `:9100`), scrape target Prometheus berstatus `UP` (1.000 Hz cadence).
+2. **Uji Validasi Eksperimen S1 (Baseline Light Load):**
+   - Run ID: `EXP_S1_20261116_132744` (Durasi: 60.7 detik, 60 sampel telemetri).
+   - Scrape Status: 60/60 sukses (0 gagal, 100% telemetry coverage).
+   - Arsip NWDAF NBI Riil: 15 poll responses sukses di-query dan disimpan ke `nwdaf_raw_poll_responses.jsonl` (0 gagal).
+   - Hasil Metrik Jaringan:
+     - Slice 1 (eMBB): Throughput mean 15.00 Mbps (100% target rate), RTT mean 46.42 ms, Packet loss 1.0%.
+     - Slice 2 (URLLC): RTT mean 17.14 ms (< 20 ms SLA threshold), Packet loss 0.0%.
+     - RAN Cell-1: PRB usage avg 91.9%, MCS avg 28.0, BLER 0.00%, SNR 26.2 dB.
+     - UPF-1 Core: Backlog 0 B, Drops 0 pkt.
+3. **Hardening Lifecycle UE (Graceful Teardown):**
+   - `stop_multi_ue.sh` diperbarui menggunakan graceful shutdown dua tahap (`SIGINT` -> sleep 2 -> `SIGKILL`) untuk mencegah orphaned bearer F1-U (Case 41) pada DU-1 gNodeB.
+
+---
+
+## Kesimpulan Status Akhir
+Seluruh 7 Virtual Machine (VM-2 Near-RT RIC, VM-3 5G Core, VM-4 Split RAN, VM-5 nrUE, VM-6 Monitoring & TSDB, VM-07 Standalone NWDAF) **RESMI 100% PULIH, OPERASIONAL, DAN TERINTEGRASI END-TO-END PASCA-CRASH**. Sistem siap untuk kampanye pengambilan dataset eksperimen S1 hingga S10.
+
