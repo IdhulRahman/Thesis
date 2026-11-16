@@ -68,7 +68,7 @@ This directory contains the operational daemons, automation scripts, fault injec
    *Runs continuously until operator terminates with `Ctrl+C`. Safely flushes and closes CSV and writes manifest. Recommended when post-fault recovery duration is open-ended.*
 
 ### CLI Automation Capabilities & Implementation Gaps
-* **Preset Resolution in `record_experiment.py` (`CANONICAL_PRESETS`):** Defines canonical presets for `S1`, `S2`, `S3`, `S4`, `S5`, `S6`, `S7`, `S8`, `S9`, `RECOVERY`, and `CLEAR`.
+* **Preset Resolution in `record_experiment.py` (`CANONICAL_PRESETS`):** Defines canonical presets for `S1`, `S2`, `S3`, `S4`, `S5`, `S6`, `S7`, `S8`, and `S9`.
 * **RF Control CLI Capabilities (`rfsim_channel_control.py`):** Supports `show`, `set-attenuation`, `set-raw-ploss`, `reset`, and `sweep`.
   * *Implementation Gap 1:* `rfsim_channel_control.py` lacks a CLI subcommand (`set-noise-power`) to dynamically adjust `noise_power_dB` over Telnet.
   * *Implementation Gap 2:* The `reset` subcommand only restores `path_loss_dB` (to $0.0\text{ dB}$ Profile 1 baseline); it does **not** restore `noise_power_dB`.

@@ -178,7 +178,6 @@ class TestSimplifiedTelemetryRecorder(unittest.TestCase):
             ("S7", "S7_CORE_QUEUE_TBF", "CORE", "UPF-1_Slice-1"),
             ("S8", "S8_JOINT_SOFT", "JOINT", "Cell-1+UPF-1"),
             ("S9", "S9_JOINT_OVERLOAD", "JOINT", "Cell-1+UPF-1"),
-            ("CLEAR", "CLEAR_FAULT", "BASELINE", "NONE"),
             ("CUSTOM_EXP", "CUSTOM_EXP", "CUSTOM", "NONE"),
         ]
         for inp, exp_canon, exp_dom, exp_comp in cases:

@@ -56,8 +56,6 @@ CANONICAL_PRESETS = {
     "S7": ("S7_CORE_QUEUE_TBF", "CORE", "UPF-1_Slice-1"),
     "S8": ("S8_JOINT_SOFT", "JOINT", "Cell-1+UPF-1"),
     "S9": ("S9_JOINT_OVERLOAD", "JOINT", "Cell-1+UPF-1"),
-    "RECOVERY": ("RECOVERY_TRANSITION", "BASELINE", "NONE"),
-    "CLEAR": ("CLEAR_FAULT", "BASELINE", "NONE"),
 }
 
 PROM_LINE_RE = re.compile(r'^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+([^\s]+)(?:\s+\d+)?$')

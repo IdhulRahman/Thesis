@@ -3,7 +3,7 @@
 **Authoritative Specification:** Single Source of Truth for Scenario Definitions, Treatment Parameters, and Response Hypotheses  
 **Target Architecture:** VM-5 (UE Emulation), VM-4 (Split RAN), VM-3 (UPF Core Host), VM-6 (Telemetry Collector & Recorder)  
 **Classification Target Classes:** `BASELINE`, `RAN`, `CORE`, `JOINT`  
-**Treatment Scenario Identifiers:** `S1`, `S2`, `S3`, `S4`, `S5`, `S6`, `S7`, `S8`, `S9`, `CLEAR`
+**Treatment Scenario Identifiers:** `S1`, `S2`, `S3`, `S4`, `S5`, `S6`, `S7`, `S8`, `S9`
 
 ---
 
@@ -31,7 +31,7 @@ The experimental Scenario IDs serve as **treatment scenario identifiers** to sys
 * **`RAN` Target Class:** Evaluated under `S3` (Soft Radio Degradation via mild attenuation), `S4` (Hard Radio Channel Degradation via heavy attenuation), and `S5` (Hard Radio Capacity Overload under clean channel).
 * **`CORE` Target Class:** Evaluated under `S6` (Soft UPF egress rate limiting) and `S7` (Hard UPF egress rate limiting via binding Token Bucket Filter).
 * **`JOINT` Target Class:** Evaluated under `S8` (Simultaneous soft radio + soft core impairment) and `S9` (Simultaneous active radio degradation and binding core transport throttling).
-* **Operational Reset Action (`CLEAR`):** `CLEAR` is an **operational reset and baseline recovery procedure**, NOT an additional training class.
+* **Inter-Scenario Reset Policy:** System resets (removing TBF rate limiters, resetting RF attenuation to 0.0 dB, stopping residual traffic) are strictly operational maintenance procedures executed between runs; they do not constitute experimental recording classes.
 
 ### 1.1 Treatment Metadata vs. Multi-Phase Ground-Truth Labeling
 
@@ -55,7 +55,6 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 
 | Scenario ID | Treatment Identifier | Target Class | Severity | Physical Target Component | Planned Treatment Mechanism | Candidate Calibration Values *(Proposed, Pending Calibration)* | Hypothesized Response & Evidence to Examine |
 |---|---|:---:|:---:|---|---|---|---|
-| **`CLEAR`** | `CLEAR_FAULT` | *Action Only* | — | All components | Operational baseline restoration | Remove TBF; reset RF attenuation to 0.0 dB; traffic nominal | Sender–receiver match, UPF backlog 0 B, radio link nominal. |
 | **`S1`** | `S1_NORMAL_LIGHT` | `BASELINE` | — | None (Reference) | Light baseline traffic on reference channel | Offered load $\approx 5\text{ Mbps}$, reference channel, no Core limiter | Throughput parity, stable RTT, zero UPF backlog. |
 | **`S2`** | `S2_NORMAL_HIGH` | `BASELINE` | — | None (Reference) | Higher baseline traffic without bottleneck | Offered load $\approx 10\text{–}12\text{ Mbps}$, reference channel, no Core limiter | Traffic fully served, elevated PRB grant proxy, zero UPF backlog. |
 | **`S3`** | `S3_RAN_SOFT` | `RAN` | Soft | DU-1 Uplink (`rfsimu_channel_ue0`) | Soft radio channel degradation via mild attenuation | Fixed load ($\approx 10\text{ Mbps}$), injected UL attenuation ($4\text{–}6\text{ dB}$) | Moderate SNR drop, MCS 22–24, PRB elevated to 57–65%, mild goodput dip. UPF backlog 0 B. |
@@ -309,10 +308,10 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 
 ---
 
-### 3.10 Operational Reset Procedure (`CLEAR`)
+## 4. Operational Reset & Inter-Scenario Cleanup Procedure
 
 1. **Objective:** Deterministically restore all radio, Core, and traffic components to the unperturbed baseline state between experimental runs.
-2. **Operational Scope:** `CLEAR` is strictly an operational recovery procedure and maintenance action; **it is NOT a machine learning training class**.
+2. **Operational Scope:** This reset sequence is strictly an operational recovery procedure and maintenance action executed between experiment runs; **it is NOT a machine learning training class and is not recorded by the telemetry collector**.
 3. **Execution Commands:**
    ```bash
    # 1. VM-3: Remove all qdisc rate limiting on UPF-1
@@ -326,38 +325,38 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 
 ---
 
-## 4. Recommended Data Collection Sequence
+## 5. Recommended Data Collection Sequence
 
-The following sequence is recommended for each full dataset collection run. Always execute `CLEAR` before each scenario to guarantee a known baseline state.
+The following sequence is recommended for each full dataset collection run. Always execute the operational reset procedure before each scenario to guarantee a clean baseline state.
 
-| Order | Scenario | Command | Notes |
+| Order | Step Type | Action / Command | Purpose |
 |:---:|---|---|---|
-| 1 | `CLEAR` | Reset all | Restore baseline before recording |
-| 2 | `S1` | `record_experiment.py S1 --duration 180` | BASELINE light |
-| 3 | `CLEAR` | Reset all | Between each scenario |
-| 4 | `S2` | `record_experiment.py S2 --duration 180` | BASELINE high |
-| 5 | `CLEAR` | Reset all | |
-| 6 | `S3` | `record_experiment.py S3 --duration 180` | RAN soft |
-| 7 | `CLEAR` | Reset all | |
-| 8 | `S4` | `record_experiment.py S4 --duration 180` | RAN hard-RF |
-| 9 | `CLEAR` | Reset all | |
-| 10 | `S5` | `record_experiment.py S5 --duration 180` | RAN hard-load |
-| 11 | `CLEAR` | Reset all | |
-| 12 | `S6` | `record_experiment.py S6 --duration 180` | CORE soft |
-| 13 | `CLEAR` | Reset all | |
-| 14 | `S7` | `record_experiment.py S7 --duration 180` | CORE hard |
-| 15 | `CLEAR` | Reset all | |
-| 16 | `S8` | `record_experiment.py S8 --duration 180` | JOINT soft |
-| 17 | `CLEAR` | Reset all | |
-| 18 | `S9` | `record_experiment.py S9 --duration 180` | JOINT hard |
-| 19 | `CLEAR` | Reset all | Final cleanup |
+| 1 | *Reset* | Run operational reset commands | Ensure unperturbed initial condition |
+| 2 | **Record S1** | `record_experiment.py S1 --duration 180` | `BASELINE` light load (~5 Mbps) |
+| 3 | *Reset* | Run operational reset commands | Clear residual buffers |
+| 4 | **Record S2** | `record_experiment.py S2 --duration 180` | `BASELINE` high load (~10–12 Mbps) |
+| 5 | *Reset* | Run operational reset commands | Clear residual buffers |
+| 6 | **Record S3** | `record_experiment.py S3 --duration 180` | `RAN` soft attenuation (4–6 dB) |
+| 7 | *Reset* | Run operational reset commands | Reset RF attenuation to 0.0 dB |
+| 8 | **Record S4** | `record_experiment.py S4 --duration 180` | `RAN` hard RF attenuation (10–12 dB) |
+| 9 | *Reset* | Run operational reset commands | Reset RF attenuation to 0.0 dB |
+| 10 | **Record S5** | `record_experiment.py S5 --duration 180` | `RAN` capacity overload (18–20 Mbps) |
+| 11 | *Reset* | Run operational reset commands | Stop overload traffic |
+| 12 | **Record S6** | `record_experiment.py S6 --duration 180` | `CORE` soft rate shaping (TBF 8.5 Mbps) |
+| 13 | *Reset* | Run operational reset commands | Remove UPF TBF |
+| 14 | **Record S7** | `record_experiment.py S7 --duration 180` | `CORE` hard rate shaping (TBF 5 Mbps) |
+| 15 | *Reset* | Run operational reset commands | Remove UPF TBF |
+| 16 | **Record S8** | `record_experiment.py S8 --duration 180` | `JOINT` soft (4–6 dB + TBF 8.5M) |
+| 17 | *Reset* | Run operational reset commands | Reset RF and remove UPF TBF |
+| 18 | **Record S9** | `record_experiment.py S9 --duration 180` | `JOINT` hard (8–10 dB + TBF 4M) |
+| 19 | *Reset* | Run operational reset commands | Final cleanup |
 
 > [!NOTE]
-> Each scenario should produce ~180 samples at 1 Hz. For `S4` and `S7`, an optional extended recording (`--duration 240`) may be used to capture post-fault recovery, with offline temporal segmentation applied during preprocessing.
+> Each scenario produces ~180 samples at 1 Hz. For `S4` and `S7`, an optional extended recording (`--duration 240`) may be used to capture post-fault recovery, with offline temporal segmentation applied during preprocessing.
 
 ---
 
-## 5. Multi-Slice Context & Canary Isolation Policy
+## 6. Multi-Slice Context & Canary Isolation Policy
 
 The experimental testbed operates a dual-slice architecture:
 * **Slice 1 (eMBB):** Serving cell DU-1 (Cell-1, Port 4043, 51 PRBs, 20 MHz); Core UPF-1 (`oai-upf-slice1`, SST 1, SD 0x000001); generates primary data workload.
@@ -369,12 +368,12 @@ Impact on Slice 2 canary latency is continuously measured and tracked. If degrad
 
 ---
 
-## 6. Identified Implementation Gaps (Scripts & Automation)
+## 7. Identified Implementation Gaps (Scripts & Automation)
 
 To support the revised scenario framework, the following implementation status and tooling considerations are formally documented:
 
 1. **Scenario Presets in `record_experiment.py`:**
-   * *Status:* Fully aligned. `CANONICAL_PRESETS` in `scripts/record_experiment.py` directly defines `S1`, `S2`, `S3`, `S4`, `S5`, `S6`, `S7`, `S8`, `S9`, `RECOVERY`, and `CLEAR`.
+   * *Status:* Fully aligned. `CANONICAL_PRESETS` in `scripts/record_experiment.py` directly defines `S1`, `S2`, `S3`, `S4`, `S5`, `S6`, `S7`, `S8`, and `S9`.
 
 2. **Dynamic Noise Parameter Control in `rfsim_channel_control.py`:**
    * *Gap:* `rfsim_channel_control.py` parses `noise_power_dB` during `show`, but lacks a CLI subcommand (`set-noise-power`) to adjust `noise_power_dB` dynamically via Telnet.

@@ -274,7 +274,6 @@ The table below outlines the revised canonical scenario registry detailed in [do
 
 | Scenario ID | Treatment Identifier | Target Class | Severity | Physical Target Component | Injection Mechanism | Hypothesized Behavioral Signature *(Nominal Candidate Dynamics)* |
 |---|---|:---:|:---:|---|---|---|
-| **`CLEAR`** | `CLEAR_FAULT` | *Action Only* | — | All components | Operational baseline restoration | Reset TBF; reset RF attenuation to 0.0 dB; offered load nominal; UPF backlog 0 B; radio link nominal. |
 | **`S1`** | `S1_NORMAL_LIGHT` | `BASELINE` | — | None (Reference) | Light baseline traffic | Offered load candidate $\approx 5\text{ Mbps}$, proxy grant PUSCH nominal, UPF backlog $0\text{ B}$, nominal RTT (candidate $< 25\text{ ms}$ baseline comparator), loss $0\%$. |
 | **`S2`** | `S2_NORMAL_HIGH` | `BASELINE` | — | None (Reference) | Higher non-congested traffic | Offered load candidate $\approx 10\text{–}12\text{ Mbps}$, proxy grant PUSCH elevated, UPF backlog $0\text{ B}$, RTT $< 30\text{ ms}$, loss $0\%$. |
 | **`S3`** | `S3_RAN_SOFT` | `RAN` | Soft | DU-1 UL (`rfsimu_channel_ue0`) | Mild RF channel attenuation | Moderate load $\approx 10\text{ Mbps}$, mild attenuation ($4\text{–}6\text{ dB}$). Moderate SNR drop, MCS 22–24, PRB 57–65%, mild goodput dip. UPF backlog $0\text{ B}$. |
@@ -286,4 +285,4 @@ The table below outlines the revised canonical scenario registry detailed in [do
 | **`S9`** | `S9_JOINT_OVERLOAD` | `JOINT` | Hard | DU-1 UL + UPF-1 Egress | Simultaneous active radio and Core stress | S4 degraded radio channel plus binding TBF ($R_{\text{TBF}} < R_{\text{arr}}$). Both radio degradation signatures and UPF queue backlog appear simultaneously. |
 
 > [!NOTE]
-> All scenario identifiers `S1` through `S9`, `RECOVERY`, and `CLEAR` are natively registered in `CANONICAL_PRESETS` in `scripts/record_experiment.py`. Column names in the CSV dataset are strictly `upf_backlog_bytes_embb` and `upf_drops_embb`.
+> All scenario identifiers `S1` through `S9` are natively registered in `CANONICAL_PRESETS` in `scripts/record_experiment.py`. Column names in the CSV dataset are strictly `upf_backlog_bytes_embb` and `upf_drops_embb`.
