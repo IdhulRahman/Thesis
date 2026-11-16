@@ -68,14 +68,12 @@ This directory contains the operational daemons, automation scripts, fault injec
    *Runs continuously until operator terminates with `Ctrl+C`. Safely flushes and closes CSV and writes manifest. Recommended when post-fault recovery duration is open-ended.*
 
 ### CLI Automation Capabilities & Implementation Gaps
-* **Preset Resolution in `record_experiment.py` (`CANONICAL_PRESETS`):** Defines `S1`, `S2`, `S3`, `S6`, `S9`, `S10_A`, `S10_B`, `RECOVERY`, and `CLEAR`.
-  * *Implementation Gap 1:* Scenario `S4` (`S4_RAN_DEGRADATION`) is not registered in `CANONICAL_PRESETS`. When executed, `resolve_scenario_metadata()` falls back to `event_domain="CUSTOM"` and `event_component="NONE"`. Furthermore, the CLI currently lacks override flags (such as `--domain`) to specify metadata manually.
-  * *Implementation Gap 2:* Scenario `S10` multi-phase dynamic labeling across sequential state transitions is not supported; the recorder stamps static `event_scenario` and `event_domain` values across the entire file.
+* **Preset Resolution in `record_experiment.py` (`CANONICAL_PRESETS`):** Defines canonical presets for `S1`, `S2`, `S3`, `S4`, `S5`, `S6`, `S7`, `S8`, `S9`, `RECOVERY`, and `CLEAR`.
 * **RF Control CLI Capabilities (`rfsim_channel_control.py`):** Supports `show`, `set-attenuation`, `set-raw-ploss`, `reset`, and `sweep`.
-  * *Implementation Gap 3:* `rfsim_channel_control.py` lacks a CLI subcommand (`set-noise-power`) to dynamically adjust `noise_power_dB` over Telnet.
-  * *Implementation Gap 4:* The `reset` subcommand only restores `path_loss_dB` (to $0.0\text{ dB}$ Profile 1 baseline); it does **not** restore `noise_power_dB`.
+  * *Implementation Gap 1:* `rfsim_channel_control.py` lacks a CLI subcommand (`set-noise-power`) to dynamically adjust `noise_power_dB` over Telnet.
+  * *Implementation Gap 2:* The `reset` subcommand only restores `path_loss_dB` (to $0.0\text{ dB}$ Profile 1 baseline); it does **not** restore `noise_power_dB`.
 * **Traffic Generator Tooling (`trafgen.sh`):**
-  * *Implementation Gap 5:* In `scripts/trafgen.sh`, parameter `DURATION` simultaneously determines the runtime of `iperf3 -u` (`-t "$DURATION"`), the display loop, and the ping probe packet counts. When the display loop finishes, `trafgen.sh` explicitly waits for the iperf3 process (`wait "$IPERF_PID" 2>/dev/null || sleep 1`) before executing `cleanup()`. A single extended `trafgen.sh` duration works when evaluating post-release recovery under ongoing traffic; however, observing quiescent channel recovery after traffic stops requires an independent ping probe executed outside `trafgen.sh`.
+  * *Implementation Gap 3:* In `scripts/trafgen.sh`, parameter `DURATION` simultaneously determines the runtime of `iperf3 -u` (`-t "$DURATION"`), the display loop, and the ping probe packet counts. When the display loop finishes, `trafgen.sh` explicitly waits for the iperf3 process (`wait "$IPERF_PID" 2>/dev/null || sleep 1`) before executing `cleanup()`. A single extended `trafgen.sh` duration works when evaluating post-release recovery under ongoing traffic; however, observing quiescent channel recovery after traffic stops requires an independent ping probe executed outside `trafgen.sh`.
 
 ### Post-Recording Statistical Analysis
 To inspect statistical distributions of the recorded run:

@@ -371,11 +371,10 @@ Impact on Slice 2 canary latency is continuously measured and tracked. If degrad
 
 ## 6. Identified Implementation Gaps (Scripts & Automation)
 
-To support the revised scenario framework without modifying code during this documentation phase, the following implementation gaps are formally documented:
+To support the revised scenario framework, the following implementation status and tooling considerations are formally documented:
 
-1. **Scenario Preset Gap in `record_experiment.py` (`scripts/record_experiment.py` lines 49–59):**
-   * *Gap:* `CANONICAL_PRESETS` currently contains entries for `S1`, `S2`, `S3`, `S6`, `S9`, `RECOVERY`, and `CLEAR` (with the old ID mapping). Scenarios `S3` through `S8` under the revised numbering, plus `S10_A` and `S10_B` presets that are no longer used, are misaligned with the current scenario IDs.
-   * *Impact:* Running `record_experiment.py` with any unregistered scenario ID falls back to `event_domain = "CUSTOM"` and `event_component = "NONE"`. The presets must be updated on VM-6 to match the new scenario IDs: `S1`, `S2`, `S3`, `S4`, `S5`, `S6`, `S7`, `S8`, `S9`, `CLEAR`.
+1. **Scenario Presets in `record_experiment.py`:**
+   * *Status:* Fully aligned. `CANONICAL_PRESETS` in `scripts/record_experiment.py` directly defines `S1`, `S2`, `S3`, `S4`, `S5`, `S6`, `S7`, `S8`, `S9`, `RECOVERY`, and `CLEAR`.
 
 2. **Dynamic Noise Parameter Control in `rfsim_channel_control.py`:**
    * *Gap:* `rfsim_channel_control.py` parses `noise_power_dB` during `show`, but lacks a CLI subcommand (`set-noise-power`) to adjust `noise_power_dB` dynamically via Telnet.

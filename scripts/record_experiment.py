@@ -49,14 +49,13 @@ HEADERS = [
 CANONICAL_PRESETS = {
     "S1": ("S1_NORMAL_LIGHT", "BASELINE", "NONE"),
     "S2": ("S2_NORMAL_HIGH", "BASELINE", "NONE"),
-    "S3": ("S3_RAN_OVERLOAD", "RAN", "DU-1_Cell-1"),
-    "S5": ("S5_RAN_SOFT", "RAN", "DU-1_Cell-1"),
-    "S6": ("S6_CORE_QUEUE_TBF", "CORE", "UPF-1_Slice-1"),
-    "S7": ("S7_CORE_SOFT", "CORE", "UPF-1_Slice-1"),
+    "S3": ("S3_RAN_SOFT", "RAN", "DU-1_Cell-1"),
+    "S4": ("S4_RAN_DEGRADATION", "RAN", "DU-1_Cell-1"),
+    "S5": ("S5_RAN_OVERLOAD", "RAN", "DU-1_Cell-1"),
+    "S6": ("S6_CORE_SOFT", "CORE", "UPF-1_Slice-1"),
+    "S7": ("S7_CORE_QUEUE_TBF", "CORE", "UPF-1_Slice-1"),
     "S8": ("S8_JOINT_SOFT", "JOINT", "Cell-1+UPF-1"),
     "S9": ("S9_JOINT_OVERLOAD", "JOINT", "Cell-1+UPF-1"),
-    "S10_A": ("S10_A_RELEASE_RAN", "CORE", "UPF-1_Slice-1"),
-    "S10_B": ("S10_B_RELEASE_CORE", "BASELINE", "NONE"),
     "RECOVERY": ("RECOVERY_TRANSITION", "BASELINE", "NONE"),
     "CLEAR": ("CLEAR_FAULT", "BASELINE", "NONE"),
 }
@@ -303,14 +302,14 @@ Contoh Penggunaan:
   1. Interaktif:
      python3 record_experiment.py
   2. CLI Langsung:
-     python3 record_experiment.py S1 --duration 60 --notes "Baseline ringan 10M"
-     python3 record_experiment.py S3 --duration 60 --notes "Kandidat overload 80M"
-     python3 record_experiment.py S6 --duration 60 --notes "Kandidat TBF Core 12M"
+     python3 record_experiment.py S1 --duration 180 --notes "Baseline ringan 5M"
+     python3 record_experiment.py S3 --duration 180 --notes "RAN Soft Attenuation 5dB"
+     python3 record_experiment.py S7 --duration 180 --notes "Core Hard TBF 5M"
   3. Durasi Tanpa Batas (Manual Stop via Ctrl+C):
      python3 record_experiment.py S1 --duration 0
         """
     )
-    parser.add_argument("scenario", nargs="?", default=None, help="Nama skenario eksperimen (misal: S1, S3, S6, atau custom)")
+    parser.add_argument("scenario", nargs="?", default=None, help="Nama skenario eksperimen (misal: S1, S3, S7, atau custom)")
     parser.add_argument("-d", "--duration", type=int, default=None, help="Durasi perekaman dalam detik (default: 60, isi 0 untuk manual Ctrl+C)")
     parser.add_argument("-n", "--notes", default="", help="Catatan kondisi eksperimen (opsional)")
     parser.add_argument("-r", "--run-id", default=None, help="ID unik eksperimen (otomatis jika tidak diisi)")
@@ -324,7 +323,7 @@ Contoh Penggunaan:
     if scen_input is None:
         if sys.stdin.isatty():
             try:
-                val = input("Masukkan nama skenario (misal: S1, S3, S6) [S1]: ").strip()
+                val = input("Masukkan nama skenario (misal: S1, S3, S7) [S1]: ").strip()
                 scen_input = val if val else "S1"
             except (KeyboardInterrupt, EOFError):
                 print("\nDibatalkan.")

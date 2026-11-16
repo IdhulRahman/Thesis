@@ -171,11 +171,14 @@ class TestSimplifiedTelemetryRecorder(unittest.TestCase):
             ("S1", "S1_NORMAL_LIGHT", "BASELINE", "NONE"),
             ("s1", "S1_NORMAL_LIGHT", "BASELINE", "NONE"),
             ("S2", "S2_NORMAL_HIGH", "BASELINE", "NONE"),
-            ("S3", "S3_RAN_OVERLOAD", "RAN", "DU-1_Cell-1"),
-            ("S6", "S6_CORE_QUEUE_TBF", "CORE", "UPF-1_Slice-1"),
+            ("S3", "S3_RAN_SOFT", "RAN", "DU-1_Cell-1"),
+            ("S4", "S4_RAN_DEGRADATION", "RAN", "DU-1_Cell-1"),
+            ("S5", "S5_RAN_OVERLOAD", "RAN", "DU-1_Cell-1"),
+            ("S6", "S6_CORE_SOFT", "CORE", "UPF-1_Slice-1"),
+            ("S7", "S7_CORE_QUEUE_TBF", "CORE", "UPF-1_Slice-1"),
+            ("S8", "S8_JOINT_SOFT", "JOINT", "Cell-1+UPF-1"),
             ("S9", "S9_JOINT_OVERLOAD", "JOINT", "Cell-1+UPF-1"),
-            ("S10_A", "S10_A_RELEASE_RAN", "CORE", "UPF-1_Slice-1"),
-            ("S10_B", "S10_B_RELEASE_CORE", "BASELINE", "NONE"),
+            ("CLEAR", "CLEAR_FAULT", "BASELINE", "NONE"),
             ("CUSTOM_EXP", "CUSTOM_EXP", "CUSTOM", "NONE"),
         ]
         for inp, exp_canon, exp_dom, exp_comp in cases:
