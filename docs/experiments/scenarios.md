@@ -33,19 +33,21 @@ The experimental Scenario IDs serve as **treatment scenario identifiers** to sys
 * **`JOINT` Target Class:** Evaluated under `S8` (Simultaneous soft radio + soft core impairment) and `S9` (Simultaneous active radio degradation and binding core transport throttling).
 * **Inter-Scenario Reset Policy:** System resets (removing TBF rate limiters, resetting RF attenuation to 0.0 dB, stopping residual traffic) are strictly operational maintenance procedures executed between runs; they do not constitute experimental recording classes.
 
-### 1.1 Treatment Metadata vs. Multi-Phase Ground-Truth Labeling
+### 1.1 Treatment Metadata vs. Multi-Phase Ground-Truth Labeling (600-Second Nominal Protocol)
 
 The scenario and domain labels recorded in the raw telemetry CSV (`event_scenario`, `event_domain`, `event_component`) represent **experimental treatment metadata** assigned at recorder invocation (e.g., `event_domain = "CORE"` for Scenario S7).
 
-When single-fault scenarios (S4, S5, S7, S9) are recorded with an extended duration to capture post-fault recovery (e.g., `--duration 240` where the fault is released at $t = 180\text{ s}$):
-* **Raw Recorder Behavior:** The recorder assigns the initial preset label statically across all 240 seconds.
-* **Physical Temporal Regimes:** The recording actually spans three distinct physical phases:
-  1. *Active Disturbance Phase ($t \in [0, 180\text{ s}]$):* Impairment is actively applied; system displays domain-specific bottleneck signatures.
-  2. *Transient Drainage / Recovery Phase ($t \in [180\text{ s}, 180 + T_{\text{recovery}}]$):* Impairment is physically released, but residual packets queued in socket buffers, RLC entities, or UPF qdiscs drain gradually, and radio link adaptation stabilizes.
-  3. *Steady-State Post-Recovery Baseline Phase ($t > 180 + T_{\text{recovery}}$):* Queues are empty, receiver throughput matches offered load, and latency returns to nominal SLA bounds.
+Under the nominal **600-second experimental protocol** (`record_experiment.py <SCENARIO> --duration 600`), traffic generation on VM-5 is framed for **660 seconds** (`trafgen.sh start 660 <rate>`) and launched $\approx 30\text{ s}$ before the recorder starts. This ensures that traffic cleanly covers the entire recording window, eliminates boundary cold-starts, and allows iperf3 to complete gracefully so receiver summaries are generated.
+
+For disturbance scenarios (S3–S9), the 600-second run spans three distinct physical operational regimes under persistent traffic load:
+1. *Pre-Disturbance Baseline Phase ($t \in [0, 120\text{ s}]$):* Reference traffic is actively flowing, but no fault or disturbance is applied. Ground truth: `BASELINE`.
+2. *Active Disturbance Phase ($t \in [120, 420\text{ s}]$):* The physical impairment is applied for **300 seconds** while reference traffic continues flowing. System displays domain-specific bottleneck signatures (`RAN`, `CORE`, or `JOINT`). Note: 300 seconds is strictly the duration of the disturbance, NOT the traffic generator.
+3. *Transient Drainage & Recovery Observation Phase ($t \in [420, 600\text{ s}]$):* The impairment is physically released at $t = 420\text{ s}$, while reference traffic **remains actively flowing**. Residual packets drain from socket buffers, RLC queues, or UPF qdiscs, and radio link adaptation restabilizes.
+4. *Reference Scenarios (S1 & S2):* Operate without fault injection across the entire 600 seconds, serving as unperturbed reference observations (`BASELINE`).
+
 * **Methodological Annotation Rule & Notational Demarcation:**  
-  Labels must **NOT** be automatically switched to `BASELINE` at the exact instant the fault is physically released ($t = 180\text{ s}$), because physical queue drainage requires non-zero empirical recovery time ($T_{\text{recovery}}$).  
-  $T_{\text{recovery}}$ must be determined directly from actual telemetry observations (e.g., when UPF backlog reaches 0 B, canary RTT normalizes, and receiver goodput matches offered load), rather than assuming the iperf session duration delta ($\Delta t$) as the boundary. For supervised model training and RCA evaluation, researchers must perform offline temporal segmentation using logged event timestamps combined with empirical telemetry evidence.
+  Labels must **NOT** be automatically switched to `BASELINE` at the exact instant the fault is physically released ($t = 420\text{ s}$), because physical queue drainage requires non-zero empirical recovery time ($T_{\text{recovery}}$).  
+  $T_{\text{recovery}}$ must be determined directly from actual telemetry observations (e.g., when UPF backlog reaches $0\text{ B}$, canary RTT normalizes, and receiver goodput matches offered load), rather than assuming an instantaneous state change. If recovery is not fully captured within the 180-second post-disturbance window, subsequent run durations can be extended (e.g., to 900 seconds) based on pilot evidence. For supervised model training and RCA evaluation, researchers must perform offline temporal segmentation using logged event timestamps combined with empirical telemetry evidence.
 
 ---
 
@@ -75,16 +77,17 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 2. **Initial Conditions:** Testbed restored to reference configuration (Profile 1: DU-1 51 PRBs, SCS 30 kHz, `-E`, `chanmod` active with calibrated baseline path loss $0.0\text{ dB}$ and reference noise; DU-2 active comparator; UPF-1/UPF-2 running with standard `pfifo_fast` or unshaped `tc qdisc`).
 3. **Independent Variables (Changed):** Injected offered traffic on Slice 1 set to candidate $\approx 5\text{ Mbps}$ UDP.
 4. **Controlled Variables (Maintained):** Reference radio channel parameters, unshaped Core egress, Slice 2 canary ping (100 ms interval).
-5. **Planned Execution Sequence:**
+5. **Planned Execution Sequence (600s Nominal Protocol):**
    ```bash
-   # VM-5: Launch light traffic
-   sudo /opt/oran/ue/scripts/trafgen.sh start 300 5
-   # VM-6: Record baseline dataset
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 180 --notes "S1 Normal Light Reference"
+   # Terminal 1 (VM-5 UE): Launch light traffic framed for 660s (ensuring coverage across entire 600s record)
+   sudo /opt/oran/ue/scripts/trafgen.sh start 660 5
+
+   # Terminal 2 (VM-6 Monitoring): Start recorder ~30s after traffic starts
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 600 --notes "S1 Normal Light Reference 600s"
    ```
 6. **Evidence to Collect:** Telemetry CSV (`telemetry_*.csv`), sender/receiver iperf JSON logs, UE-1 and UE-2 ping logs, SFN clock progress ratio.
 7. **Responses to Examine:** Verify sender offered rate matches receiver goodput ($G_{\text{rx}} \approx R_{\text{tx}}$); duration difference nominal ($\Delta t \approx 0$); ICMP RTT within healthy bounds (candidate $< 25\text{ ms}$); zero UPF queue backlog (`upf_backlog_bytes_embb = 0`) and zero drops; stable SFN progress.
-8. **Interpretation Boundaries:** Healthy metrics confirm baseline stability for the session, but do not guarantee immunity from transient hypervisor scheduling jitter.
+8. **Interpretation Boundaries:** Healthy metrics confirm baseline stability for the session, but do not guarantee immunity from transient hypervisor scheduling jitter. Entire 600s run is categorized as `BASELINE`.
 
 ---
 
@@ -94,16 +97,17 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 2. **Initial Conditions:** System at reference condition; previous scenario treatments cleared.
 3. **Independent Variables (Changed):** Injected offered load increased to candidate $\approx 10\text{–}12\text{ Mbps}$ UDP (calibrated below radio saturation ceiling).
 4. **Controlled Variables (Maintained):** Reference channel conditions, unshaped Core egress, Slice 2 canary probing.
-5. **Planned Execution Sequence:**
+5. **Planned Execution Sequence (600s Nominal Protocol):**
    ```bash
-   # VM-5: Launch higher non-congested traffic
-   sudo /opt/oran/ue/scripts/trafgen.sh start 300 10
-   # VM-6: Record higher baseline dataset
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S2 --duration 180 --notes "S2 Normal Higher Baseline"
+   # Terminal 1 (VM-5 UE): Launch higher non-congested traffic framed for 660s
+   sudo /opt/oran/ue/scripts/trafgen.sh start 660 10
+
+   # Terminal 2 (VM-6 Monitoring): Start recorder ~30s after traffic starts
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S2 --duration 600 --notes "S2 Normal Higher Baseline 600s"
    ```
 6. **Evidence to Collect:** Telemetry CSV, iperf sender and receiver logs, canary ping logs.
-7. **Responses to Examine:** Higher PRB grant proxy ($N_{\text{PRB}} / 51 \times 100\%$), while receiver throughput continues to match offered load without backlog accumulation at UPF ($0\text{ B}$) and without excessive duration delta ($\Delta t \approx 0$).
-8. **Interpretation Boundaries:** The label `BASELINE` is strictly conditional on future empirical results confirming that traffic demand is fully served without unserved backlog. If capacity calibration reveals queue onset at $12\text{ Mbps}$, the load must be adjusted downward.
+7. **Responses to Examine:** Higher PRB grant proxy ($N_{\text{PRB}} / 51 \times 100\%$), while receiver throughput continues to match offered load without backlog accumulation at UPF ($0\text{ B}$) and without excessive duration delta ($\Delta t \approx 0$). Entire 600s run is categorized as `BASELINE`.
+8. **Interpretation Boundaries:** The label `BASELINE` is strictly conditional on empirical results confirming that traffic demand is fully served without unserved backlog.
 
 ---
 
@@ -111,57 +115,51 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 
 1. **Objective:** Observe network behavior under mild sub-threshold radio propagation impairment that causes measurable but non-catastrophic degradation — a marginal RAN case distinguishable from baseline.
 2. **Initial Conditions:** Reference channel baseline ($0.0\text{ dB}$); fixed moderate traffic demand ($\approx 10\text{ Mbps}$) fully served under reference conditions.
-3. **Independent Variables (Changed):** Injected Uplink path attenuation on DU-1 Channel 1 (`rfsimu_channel_ue0`) at a mild level (candidate: $4\text{–}6\text{ dB}$) while maintaining reference noise power constant.
-4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$), reference noise power, Core UPF unshaped egress, Slice 2 canary probing.
-5. **Planned Execution Sequence:**
+3. **Independent Variables (Changed):** Injected Uplink path attenuation on DU-1 Channel 1 (`rfsimu_channel_ue0`) at a mild level (candidate: $4\text{–}6\text{ dB}$) during $t \in [120, 420\text{ s}]$, released at $t = 420\text{ s}$.
+4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$ continuous across 660s), reference noise power, Core UPF unshaped egress, Slice 2 canary probing.
+5. **Planned Execution Sequence (600s Continuous Protocol):**
    ```bash
-   # Terminal 1 (VM-5 UE): Launch fixed moderate traffic
-   sudo /opt/oran/ue/scripts/trafgen.sh start 300 10
+   # Terminal 1 (VM-5 UE): Launch continuous moderate traffic for 660s
+   sudo /opt/oran/ue/scripts/trafgen.sh start 660 10
 
-   # Terminal 2 (VM-4 RAN): Inject mild attenuation (candidate: 5 dB) and verify readback
+   # Terminal 2 (VM-6 Monitoring): Start recorder ~30s after traffic starts
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S3 --duration 600 --notes "S3 RAN Soft Degradation 5dB"
+
+   # Terminal 3 (VM-4 RAN at elapsed t = 120s): Inject mild attenuation (candidate: 5 dB)
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 5.0 --channel-id 1 --port 9090
-   python3 /opt/oran/ran/scripts/rfsim_channel_control.py show --port 9090
 
-   # Terminal 3 (VM-6 Monitoring): Record soft RAN degradation
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S3 --duration 180 --notes "S3 RAN Soft Degradation 5dB"
-
-   # Terminal 2 (VM-4 at completion): Restore baseline
+   # Terminal 3 (VM-4 RAN at elapsed t = 420s): Release attenuation; observe recovery until t = 600s
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
    ```
 6. **Evidence to Collect:** Telemetry CSV (NPRB, SNR, MCS, BLER), Telnet command/readback logs, iperf receiver logs.
-7. **Responses to Examine:** Moderate SNR drop (candidate ~20 dB range); MCS shifts downward but remains in mid-range (22–24); PRB grant proxy elevated to 57–65% (approaching but not exceeding saturation); mild goodput reduction (~9–9.5 Mbps). UPF backlog remains $0\text{ B}$.
-8. **Interpretation Boundaries:** The soft boundary between S3 and S4 must be empirically verified. If $5\text{ dB}$ produces the same telemetry signature as the reference (S1/S2), attenuation must be increased. The classification boundary PRB ~65% and UPF backlog $0\text{ B}$ are directional hypotheses, not rigid thresholds.
+7. **Responses to Examine:** Moderate SNR drop; MCS shifts downward (22–24); PRB grant proxy elevated to 57–65%; mild goodput reduction (~9–9.5 Mbps). UPF backlog remains $0\text{ B}$.
+8. **Interpretation Boundaries:** Temporal segmentation rules apply: $[0, 120\text{ s}]$ is Baseline, $[120, 420\text{ s}]$ is Active Soft RAN, and $[420, 600\text{ s}]$ captures drainage/recovery under persistent load.
 
 ---
 
 ### 3.4 Scenario S4 — RAN Hard Degradation (RF Impairment)
 
 1. **Objective:** Observe network behavior when air-interface performance degrades severely due to physical wireless propagation impairment under fixed moderate traffic load.
-2. **Initial Conditions:** Reference channel baseline ($0.0\text{ dB}$); fixed moderate traffic demand ($\approx 10\text{ Mbps}$) that is fully served under reference conditions.
-3. **Independent Variables (Changed):** Injected Uplink path attenuation on DU-1 Channel 1 (`rfsimu_channel_ue0`) at a hard level (candidate: $10\text{–}12\text{ dB}$) while maintaining reference noise power constant.
-4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$), reference noise power, Core UPF unshaped egress, Slice 2 canary probing.
-5. **Planned Execution Sequence & Terminal Separation:**
-   *Note on Execution Timing & Recovery:* To record both active disturbance (~180s) and recovery (~60s+), the recorder must span the combined duration (`--duration 240`) or operate in manual stop mode (`--duration 0`).
+2. **Initial Conditions:** Reference channel baseline ($0.0\text{ dB}$); fixed moderate traffic demand ($\approx 10\text{ Mbps}$) fully served under reference conditions.
+3. **Independent Variables (Changed):** Injected Uplink path attenuation on DU-1 Channel 1 (`rfsimu_channel_ue0`) at a hard level (candidate: $10\text{–}12\text{ dB}$) during $t \in [120, 420\text{ s}]$, released at $t = 420\text{ s}$.
+4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$ continuous across 660s), reference noise power, Core UPF unshaped egress, Slice 2 canary probing.
+5. **Planned Execution Sequence (600s Continuous Protocol):**
    ```bash
-   # Terminal 1 (VM-5 UE): Launch fixed moderate traffic in foreground
-   sudo /opt/oran/ue/scripts/trafgen.sh start 300 10
+   # Terminal 1 (VM-5 UE): Launch continuous moderate traffic for 660s
+   sudo /opt/oran/ue/scripts/trafgen.sh start 660 10
 
-   # Terminal 2 (VM-4 RAN): Inject hard Uplink path attenuation (candidate: 12 dB) and verify readback
+   # Terminal 2 (VM-6 Monitoring): Start recorder ~30s after traffic starts
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S4 --duration 600 --notes "S4 RAN Hard Degradation 12dB"
+
+   # Terminal 3 (VM-4 RAN at elapsed t = 120s): Inject hard Uplink attenuation (candidate: 12 dB)
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 12.0 --channel-id 1 --port 9090
-   python3 /opt/oran/ran/scripts/rfsim_channel_control.py show --port 9090
 
-   # Terminal 3 (VM-6 Monitoring): Record active disturbance and recovery window (~240s total)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S4 --duration 240 --notes "S4 RAN Hard Degradation 12dB + Recovery"
-
-   # Terminal 2 (VM-4 RAN at t = 180s): Restore path attenuation back to 0.0 dB
+   # Terminal 3 (VM-4 RAN at elapsed t = 420s): Release attenuation; observe recovery until t = 600s
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
    ```
 6. **Evidence to Collect:** Telemetry CSV (NPRB, SNR, MCS, BLER), Telnet command/readback logs, iperf receiver logs, softmodem logs.
-7. **Responses to Examine:** Decreased Uplink SNR; downward link adaptation (lower MCS index); increased BLER and HARQ retransmissions (`ulsch_rounds`); throughput deficit at receiver; zero UPF backlog ($0\text{ B}$).
-8. **Interpretation Boundaries:**
-   * Target channel model identity (`rfsimu_channel_ue0` for Channel 1 UL) must be verified via explicit readback.
-   * If severe attenuation induces softmodem assertion crashes or process termination, this must be logged as a **testbed operational boundary failure**, NOT as an acceptable training sample.
-   * **Recovery Segmentation Rule:** When recorded with an extended duration spanning treatment release at $t = 180\text{ s}$, the active degradation window ($[0, 180\text{ s}]$), transient link recovery ($[180, 180 + T_{\text{recovery}}]$), and post-recovery baseline ($> 180 + T_{\text{recovery}}$) must be partitioned offline based on logged timestamps and telemetry evidence, not assumed to switch instantaneously at $t = 180\text{ s}$.
+7. **Responses to Examine:** Decreased Uplink SNR; lower MCS index; increased BLER and HARQ retransmissions; throughput deficit at receiver; zero UPF backlog ($0\text{ B}$). Post $t = 420\text{ s}$, link adaptation recovers to baseline bounds.
+8. **Interpretation Boundaries:** If severe attenuation induces softmodem assertion crashes or process termination, this must be logged as an operational boundary failure. Recovery requires non-zero time ($T_{\text{recovery}}$) to re-converge.
 
 ---
 
@@ -169,20 +167,20 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 
 1. **Objective:** Observe radio service limitations and bottleneck signatures caused purely by traffic demand exceeding available air-interface capacity under clean/reference radio conditions.
 2. **Initial Conditions:** Reference radio channel (no added attenuation, reference noise); unshaped UPF egress.
-3. **Independent Variables (Changed):** Offered load set to a fixed saturation value selected via prior pilot calibration (candidate evaluation grid: $15, 18, 20\text{ Mbps}$).
+3. **Independent Variables (Changed):** Offered load set to a fixed saturation value (candidate: $18\text{–}20\text{ Mbps}$) during $t \in [120, 420\text{ s}]$, returning to moderate baseline load ($10\text{ Mbps}$) at $t = 420\text{ s}$.
 4. **Controlled Variables (Maintained):** Reference RF propagation parameters, Core UPF unshaped egress, Slice 2 canary probing.
-5. **Planned Execution Sequence:**
+5. **Planned Execution Sequence (600s Continuous Protocol):**
    ```bash
-   # VM-5: Launch saturation traffic (using fixed load from capacity pilot, e.g., 20 Mbps)
-   sudo /opt/oran/ue/scripts/trafgen.sh start 300 20
-   # VM-6: Record RAN overload dataset
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S5 --duration 180 --notes "S5 RAN Overload Capacity Saturation"
+   # Terminal 1 (VM-5 UE): Launch baseline traffic (10 Mbps) for 120s, ramp to overload (20 Mbps) at t = 120s, return to baseline at t = 420s
+   # Or execute multi-stage trafgen script sequence.
+   sudo /opt/oran/ue/scripts/trafgen.sh start 660 20
+
+   # Terminal 2 (VM-6 Monitoring): Start recorder ~30s after traffic starts
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S5 --duration 600 --notes "S5 RAN Overload Capacity Saturation 600s"
    ```
 6. **Evidence to Collect:** Telemetry CSV, iperf receiver delivery logs (arrival goodput), UE-1 in-band RTT logs, UE-2 cross-slice canary logs, SFN progress audit.
 7. **Responses to Examine:** Receiver throughput capped below offered load ($G_{\text{rx}} < R_{\text{tx}}$); positive receiver–sender duration difference ($\Delta t > 0$); instantaneous PRB grant proxy saturating near $100\%$ ($N_{\text{PRB}} \to 51$); Core UPF queue backlog remains zero ($0\text{ B}$).
-8. **Interpretation Boundaries:**
-   * High PRB grant proxy indicates full scheduling grant allocation per TTI, but does not alone prove a bottleneck without evidence of unserved traffic demand, latency inflation, or goodput shortfall.
-   * Under clean channel conditions, **BLER can legitimately remain low ($\approx 0\%$) and MCS remain high**, because capacity exhaustion is a scheduling volume limit, not RF corruption. Overload must not be rejected merely because BLER is low.
+8. **Interpretation Boundaries:** Capacity exhaustion is a scheduling volume limit, not RF corruption; BLER remains low ($\approx 0\%$) and MCS remains high under clean channels.
 
 ---
 
@@ -190,57 +188,51 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 
 1. **Objective:** Observe system telemetry under mild Core transport shaping where the bottleneck is real but sub-threshold — a marginal CORE case distinct from baseline.
 2. **Initial Conditions:** Radio channel at healthy reference condition; UPF-1 container running with default qdisc.
-3. **Independent Variables (Changed):** Linux Token Bucket Filter (`tbf`) configured on the egress interface of UPF-1 (`oai-upf-slice1` container `eth0`) at a mild rate.
-4. **Controlled Variables (Maintained):** Clean radio channel (51 PRBs, unity gain, reference noise), offered load ($\approx 10\text{ Mbps}$), Slice 2 canary probing.
-5. **Planned Execution Sequence:**
+3. **Independent Variables (Changed):** Linux Token Bucket Filter (`tbf`) configured on UPF-1 `eth0` at a mild rate (candidate: $8.5\text{ Mbps}$) during $t \in [120, 420\text{ s}]$, removed at $t = 420\text{ s}$.
+4. **Controlled Variables (Maintained):** Clean radio channel (51 PRBs, unity gain, reference noise), offered load ($\approx 10\text{ Mbps}$ continuous across 660s), Slice 2 canary probing.
+5. **Planned Execution Sequence (600s Continuous Protocol):**
    ```bash
-   # Terminal 1 (VM-3 Core UPF): Apply mild egress rate shaping on UPF-1 (candidate: 8.5 Mbps)
+   # Terminal 1 (VM-5 UE): Launch continuous moderate traffic for 660s
+   sudo /opt/oran/ue/scripts/trafgen.sh start 660 10
+
+   # Terminal 2 (VM-6 Monitoring): Start recorder ~30s after traffic starts
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S6 --duration 600 --notes "S6 Core Soft TBF 8.5M"
+
+   # Terminal 3 (VM-3 Core UPF at elapsed t = 120s): Apply mild egress rate shaping
    sudo docker exec oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 8500kbit burst 10kb latency 80ms
-   sudo docker exec oai-upf-slice1 tc -s qdisc show dev eth0
 
-   # Terminal 2 (VM-5 UE): Launch traffic at offered load
-   sudo /opt/oran/ue/scripts/trafgen.sh start 300 10
-
-   # Terminal 3 (VM-6 Monitoring): Record soft Core degradation
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S6 --duration 180 --notes "S6 Core Soft TBF 8.5M"
-
-   # Terminal 1 (VM-3 Core UPF at completion): Remove shaping
+   # Terminal 3 (VM-3 Core UPF at elapsed t = 420s): Remove shaping; observe recovery until t = 600s
    sudo docker exec oai-upf-slice1 tc qdisc del dev eth0 root
    ```
 6. **Evidence to Collect:** Telemetry CSV (`upf_backlog_bytes_embb`, `upf_drops_embb`), `tc -s qdisc` readback logs, iperf receiver throughput and packet loss logs, in-band RTT.
-7. **Responses to Examine:** UPF backlog stays moderate (candidate 6k–14k Bytes, below 20k threshold); RTT increases to candidate ~26–30 ms; minimal packet drops; egress rate capped near TBF rate; radio telemetry remains nominal (high SNR, high MCS, BLER $\approx 0\%$).
-8. **Interpretation Boundaries:** The soft/hard boundary (S6 vs. S7) is defined empirically by backlog magnitude and drop rate. If $8.5\text{ Mbps}$ TBF produces negligible backlog indistinguishable from baseline, the rate must be reduced.
+7. **Responses to Examine:** UPF backlog stays moderate (candidate 6k–14k Bytes); RTT increases mildly (~26–30 ms); minimal packet drops; egress rate capped near TBF rate; radio telemetry remains nominal.
+8. **Interpretation Boundaries:** UPF queue backlog and drops return to zero post $t = 420\text{ s}$ as buffers drain.
 
 ---
 
 ### 3.7 Scenario S7 — Core Hard Degradation (Binding TBF)
 
-1. **Objective:** Observe system telemetry and end-to-end performance degradation when the bottleneck resides strictly in the Core Network user plane transport queue, with a binding rate limit that causes significant backlog and drops.
+1. **Objective:** Observe system telemetry and end-to-end performance degradation when the bottleneck resides strictly in the Core Network user plane transport queue, with a binding rate limit causing significant backlog and drops.
 2. **Initial Conditions:** Radio channel at healthy reference condition; UPF-1 container running with default qdisc.
-3. **Independent Variables (Changed):** Linux Token Bucket Filter (`tbf`) configured on the egress interface of UPF-1 (`oai-upf-slice1` container `eth0`, facing EXT-DN) at a binding (hard) rate.
-4. **Controlled Variables (Maintained):** Clean radio channel (51 PRBs, unity gain, reference noise), offered load ($\approx 10\text{ Mbps}$), Slice 2 canary probing.
-5. **Planned Execution Sequence & Terminal Separation:**
-   *Note on Execution Timing & Recovery:* To record both active disturbance (~180s) and recovery (~60s+), the recorder may span the combined duration (`--duration 240`).
+3. **Independent Variables (Changed):** Linux Token Bucket Filter (`tbf`) configured on UPF-1 `eth0` at a binding rate (candidate: $5\text{ Mbps}$, latency $200\text{ ms}$) during $t \in [120, 420\text{ s}]$, removed at $t = 420\text{ s}$.
+4. **Controlled Variables (Maintained):** Clean radio channel (51 PRBs, unity gain, reference noise), offered load ($\approx 10\text{ Mbps}$ continuous across 660s), Slice 2 canary probing.
+5. **Planned Execution Sequence (600s Continuous Protocol):**
    ```bash
-   # Terminal 1 (VM-3 Core UPF): Apply binding egress rate shaping on UPF-1
+   # Terminal 1 (VM-5 UE): Launch continuous moderate traffic for 660s
+   sudo /opt/oran/ue/scripts/trafgen.sh start 660 10
+
+   # Terminal 2 (VM-6 Monitoring): Start recorder ~30s after traffic starts
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S7 --duration 600 --notes "S7 Core Hard TBF 5M"
+
+   # Terminal 3 (VM-3 Core UPF at elapsed t = 120s): Apply binding egress rate shaping
    sudo docker exec oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 5mbit burst 10kb latency 200ms
-   sudo docker exec oai-upf-slice1 tc -s qdisc show dev eth0
 
-   # Terminal 2 (VM-5 UE): Launch traffic exceeding TBF rate
-   sudo /opt/oran/ue/scripts/trafgen.sh start 300 10
-
-   # Terminal 3 (VM-6 Monitoring): Record active disturbance and recovery window
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S7 --duration 240 --notes "S7 Core Hard TBF 5M + Recovery"
-
-   # Terminal 1 (VM-3 Core UPF at t = 180s): Remove shaping to assess recovery
+   # Terminal 3 (VM-3 Core UPF at elapsed t = 420s): Remove shaping; observe queue drainage until t = 600s
    sudo docker exec oai-upf-slice1 tc qdisc del dev eth0 root
    ```
 6. **Evidence to Collect:** Telemetry CSV (`upf_backlog_bytes_embb`, `upf_drops_embb`), `tc -s qdisc` readback logs, iperf receiver throughput and packet loss logs, in-band RTT.
 7. **Responses to Examine:** UPF queue backlog accumulation (`upf_backlog_bytes_embb > 0`); surge in kernel packet drops (`upf_drops_embb`); receiver goodput throttled near TBF rate ($\approx 5\text{ Mbps}$); radio telemetry remains unconstrained (nominal PRB grant proxy, high SNR, high MCS, BLER $\approx 0\%$).
-8. **Interpretation Boundaries:**
-   * Terminology must consistently specify **UPF-host/container egress shaping**.
-   * Radio path must be independently verified as capable of serving the offered load, ensuring the bottleneck is isolated to the Core.
-   * **Recovery Segmentation Rule:** In an extended recording (e.g. 240s) where TBF is removed at $t = 180\text{ s}$, the active Core queuing phase ($[0, 180\text{ s}]$), transient UPF queue drainage ($[180, 180 + T_{\text{recovery}}]$), and post-recovery baseline ($> 180 + T_{\text{recovery}}$) must be segmented offline using logged timestamps and `upf_backlog_bytes_embb` drainage evidence, rather than assuming an immediate switch to `BASELINE` at $t = 180\text{ s}$.
+8. **Interpretation Boundaries:** Recovery segmentation rule: transient UPF queue drainage ($[420, 420 + T_{\text{recovery}}]$) must be determined empirically from `upf_backlog_bytes_embb` reaching $0\text{ B}$.
 
 ---
 
@@ -249,26 +241,27 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 1. **Objective:** Evaluate telemetry signatures when sub-threshold impairments simultaneously affect both radio and core domains — testing whether joint soft degradation is distinguishable from single-domain soft faults.
 2. **Initial Conditions:** Reference configuration; previous scenario treatments cleared.
 3. **Independent Variables (Changed):**
-   * RAN impairment: Injected Uplink path attenuation on Channel 1 at soft level (candidate: $4\text{–}6\text{ dB}$).
-   * Core impairment: Mild TBF shaping on UPF-1 `eth0` (candidate: $8\text{–}8.5\text{ Mbps}$).
-4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$), reference noise power, Slice 2 canary probing.
-5. **Planned Execution Sequence:**
+   * RAN impairment: Injected Uplink path attenuation on Channel 1 at soft level ($4\text{–}6\text{ dB}$) during $t \in [120, 420\text{ s}]$, reset at $t = 420\text{ s}$.
+   * Core impairment: Mild TBF shaping on UPF-1 `eth0` ($8\text{–}8.5\text{ Mbps}$) during $t \in [120, 420\text{ s}]$, removed at $t = 420\text{ s}$.
+4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$ continuous across 660s), reference noise power, Slice 2 canary probing.
+5. **Planned Execution Sequence (600s Continuous Protocol):**
    ```bash
-   # 1. VM-4: Apply soft radio attenuation (candidate: 5 dB)
+   # Terminal 1 (VM-5 UE): Launch continuous moderate traffic for 660s
+   sudo /opt/oran/ue/scripts/trafgen.sh start 660 10
+
+   # Terminal 2 (VM-6 Monitoring): Start recorder ~30s after traffic starts
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S8 --duration 600 --notes "S8 Joint Soft 5dB + TBF 8.5M"
+
+   # At elapsed t = 120s (VM-4 RAN & VM-3 Core): Apply simultaneous soft impairments
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 5.0 --channel-id 1 --port 9090
-   # 2. VM-3: Apply soft egress TBF (candidate: 8.5 Mbps)
    sudo docker exec oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 8500kbit burst 10kb latency 80ms
-   # 3. VM-5: Launch traffic
-   sudo /opt/oran/ue/scripts/trafgen.sh start 300 10
-   # 4. VM-6: Record joint soft degradation
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S8 --duration 180 --notes "S8 Joint Soft 5dB + TBF 8.5M"
-   # 5. Cleanup both domains
+
+   # At elapsed t = 420s (VM-4 RAN & VM-3 Core): Release both impairments; observe recovery until t = 600s
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
    sudo docker exec oai-upf-slice1 tc qdisc del dev eth0 root
    ```
 6. **Evidence to Collect:** Telemetry CSV showing concurrent radio and Core degradation features; iperf receiver logs; qdisc readback.
-7. **Responses to Examine:** Simultaneous presence of sub-threshold signatures in both domains: PRB ~58–65%, moderate SNR reduction, mild goodput dip (~8–9 Mbps), UPF backlog ~6k–14k B, RTT ~26–30 ms, minimal drops.
-8. **Interpretation Boundaries:** S8 is classified as `JOINT` only when both RAN and Core simultaneously exhibit non-baseline telemetry. If only one domain is measurably affected, the sample may be misclassified.
+7. **Responses to Examine:** Simultaneous presence of sub-threshold signatures in both domains: PRB ~58–65%, moderate SNR reduction, mild goodput dip, UPF backlog ~6k–14k B, RTT ~26–30 ms, minimal drops.
 
 ---
 
@@ -277,33 +270,33 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 1. **Objective:** Evaluate telemetry signatures and detection capabilities when distinct hard impairments simultaneously affect both the Radio Access Network and Core Network user plane.
 2. **Initial Conditions:** Reference configuration; previous scenario treatments cleared.
 3. **Independent Variables (Changed):**
-   * RAN impairment: Injected Uplink path attenuation on Channel 1 at hard level (candidate: $8\text{–}10\text{ dB}$).
-   * Core impairment: Binding egress TBF shaping on UPF-1 `eth0` (candidate: $4\text{ Mbps}$).
-4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$), reference noise power, Slice 2 canary probing.
+   * RAN impairment: Injected Uplink path attenuation on Channel 1 at hard level ($8\text{–}10\text{ dB}$) during $t \in [120, 420\text{ s}]$, reset at $t = 420\text{ s}$.
+   * Core impairment: Binding egress TBF shaping on UPF-1 `eth0` ($4\text{ Mbps}$) during $t \in [120, 420\text{ s}]$, removed at $t = 420\text{ s}$.
+4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$ continuous across 660s), reference noise power, Slice 2 canary probing.
 5. **Architectural Precedence & Binding Condition:**
    > [!IMPORTANT]
    > In Uplink data flow, packets traverse the air interface before arriving at the Core UPF:
    > $$\text{UE} \xrightarrow{\text{Air Interface (RAN)}} \text{gNodeB DU-1/CU} \xrightarrow{\text{N3 / GTP-U}} \text{UPF-1} \xrightarrow{\text{N6 / } \texttt{eth0}} \text{EXT-DN}$$
    > If radio degradation throttles delivered throughput entering the UPF to $R_{\text{arr}}$ (e.g., $7\text{ Mbps}$), an egress TBF configured at $12\text{ Mbps}$ will **never be reached**, leaving Core queue buffers empty ($0\text{ B}$) and causing the joint fault to degenerate into a single-domain RAN fault.
-   > **Binding Requirement:** The UPF TBF rate ($R_{\text{TBF}}$) must be calibrated **strictly below** the degraded radio forwarding rate ($R_{\text{arr}}$) for both bottlenecks to bind simultaneously (e.g., $R_{\text{offered}} = 10\text{ Mbps}$, radio throttles to $R_{\text{arr}} \approx 7\text{ Mbps}$, and TBF limits egress to $R_{\text{TBF}} \approx 4\text{ Mbps}$).
-6. **Planned Execution Sequence:**
+   > **Binding Requirement:** The UPF TBF rate ($R_{\text{TBF}}$) must be calibrated **strictly below** the degraded radio forwarding rate ($R_{\text{arr}}$) for both bottlenecks to bind simultaneously.
+6. **Planned Execution Sequence (600s Continuous Protocol):**
    ```bash
-   # 1. VM-4: Apply hard radio attenuation (candidate: 10 dB on UL Channel 1)
+   # Terminal 1 (VM-5 UE): Launch continuous moderate traffic for 660s
+   sudo /opt/oran/ue/scripts/trafgen.sh start 660 10
+
+   # Terminal 2 (VM-6 Monitoring): Start recorder ~30s after traffic starts
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S9 --duration 600 --notes "S9 Joint Hard Binding RAN and Core"
+
+   # At elapsed t = 120s (VM-4 RAN & VM-3 Core): Apply simultaneous hard impairments
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 10.0 --channel-id 1 --port 9090
-   # 2. VM-3: Apply binding egress TBF on UPF-1 (candidate: 4 Mbps)
    sudo docker exec oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 4mbit burst 10kb latency 200ms
-   # 3. VM-5: Launch traffic
-   sudo /opt/oran/ue/scripts/trafgen.sh start 300 10
-   # 4. VM-6: Record joint hard degradation
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S9 --duration 180 --notes "S9 Joint Hard Binding RAN and Core"
-   # 5. Cleanup both domains
+
+   # At elapsed t = 420s (VM-4 RAN & VM-3 Core): Release both impairments; observe recovery until t = 600s
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
    sudo docker exec oai-upf-slice1 tc qdisc del dev eth0 root
    ```
 7. **Evidence to Collect:** Telemetry CSV showing simultaneous radio degradation features and Core queue features; iperf receiver logs; qdisc readback.
-8. **Responses to Examine:** Simultaneous presence of:
-   * Radio domain signatures: degraded SNR, lower MCS, elevated BLER / retransmissions.
-   * Core domain signatures: non-zero UPF queue backlog (`upf_backlog_bytes_embb > 0`) and elevated packet drops.
+8. **Responses to Examine:** Simultaneous presence of radio domain signatures (degraded SNR, lower MCS, elevated BLER) and Core domain signatures (non-zero UPF queue backlog and elevated packet drops).
 9. **Interpretation Boundaries:** True Joint classification requires verified empirical evidence of binding congestion in both domains. If UPF queue remains empty, the condition is not empirically Joint.
 
 ---
@@ -325,34 +318,36 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 
 ---
 
-## 5. Recommended Data Collection Sequence
+## 5. Recommended Data Collection Sequence (600-Second Continuous Protocol)
 
-The following sequence is recommended for each full dataset collection run. Always execute the operational reset procedure before each scenario to guarantee a clean baseline state.
+The following sequence is recommended for each full dataset collection run under the **600-second continuous protocol**. Always execute the operational reset procedure before each scenario to guarantee a clean baseline state. In each run, traffic on VM-5 is framed for **660 seconds** (`trafgen.sh start 660 <rate>`) and launched $\approx 30\text{ s}$ before starting the 600-second recorder (`record_experiment.py <SCENARIO> --duration 600`), ensuring full traffic coverage across the entire run.
 
 | Order | Step Type | Action / Command | Purpose |
 |:---:|---|---|---|
 | 1 | *Reset* | Run operational reset commands | Ensure unperturbed initial condition |
-| 2 | **Record S1** | `record_experiment.py S1 --duration 180` | `BASELINE` light load (~5 Mbps) |
+| 2 | **Record S1** | `record_experiment.py S1 --duration 600` | `BASELINE` light load (5 Mbps across 600s) |
 | 3 | *Reset* | Run operational reset commands | Clear residual buffers |
-| 4 | **Record S2** | `record_experiment.py S2 --duration 180` | `BASELINE` high load (~10–12 Mbps) |
+| 4 | **Record S2** | `record_experiment.py S2 --duration 600` | `BASELINE` high load (10–12 Mbps across 600s) |
 | 5 | *Reset* | Run operational reset commands | Clear residual buffers |
-| 6 | **Record S3** | `record_experiment.py S3 --duration 180` | `RAN` soft attenuation (4–6 dB) |
+| 6 | **Record S3** | `record_experiment.py S3 --duration 600` | `RAN` soft attenuation (4–6 dB active at 120–420s) |
 | 7 | *Reset* | Run operational reset commands | Reset RF attenuation to 0.0 dB |
-| 8 | **Record S4** | `record_experiment.py S4 --duration 180` | `RAN` hard RF attenuation (10–12 dB) |
+| 8 | **Record S4** | `record_experiment.py S4 --duration 600` | `RAN` hard RF attenuation (10–12 dB active at 120–420s) |
 | 9 | *Reset* | Run operational reset commands | Reset RF attenuation to 0.0 dB |
-| 10 | **Record S5** | `record_experiment.py S5 --duration 180` | `RAN` capacity overload (18–20 Mbps) |
+| 10 | **Record S5** | `record_experiment.py S5 --duration 600` | `RAN` capacity overload (18–20 Mbps active at 120–420s) |
 | 11 | *Reset* | Run operational reset commands | Stop overload traffic |
-| 12 | **Record S6** | `record_experiment.py S6 --duration 180` | `CORE` soft rate shaping (TBF 8.5 Mbps) |
+| 12 | **Record S6** | `record_experiment.py S6 --duration 600` | `CORE` soft rate shaping (TBF 8.5 Mbps active at 120–420s) |
 | 13 | *Reset* | Run operational reset commands | Remove UPF TBF |
-| 14 | **Record S7** | `record_experiment.py S7 --duration 180` | `CORE` hard rate shaping (TBF 5 Mbps) |
+| 14 | **Record S7** | `record_experiment.py S7 --duration 600` | `CORE` hard rate shaping (TBF 5 Mbps active at 120–420s) |
 | 15 | *Reset* | Run operational reset commands | Remove UPF TBF |
-| 16 | **Record S8** | `record_experiment.py S8 --duration 180` | `JOINT` soft (4–6 dB + TBF 8.5M) |
+| 16 | **Record S8** | `record_experiment.py S8 --duration 600` | `JOINT` soft (4–6 dB + TBF 8.5M active at 120–420s) |
 | 17 | *Reset* | Run operational reset commands | Reset RF and remove UPF TBF |
-| 18 | **Record S9** | `record_experiment.py S9 --duration 180` | `JOINT` hard (8–10 dB + TBF 4M) |
+| 18 | **Record S9** | `record_experiment.py S9 --duration 600` | `JOINT` hard (8–10 dB + TBF 4M active at 120–420s) |
 | 19 | *Reset* | Run operational reset commands | Final cleanup |
 
 > [!NOTE]
-> Each scenario produces ~180 samples at 1 Hz. For `S4` and `S7`, an optional extended recording (`--duration 240`) may be used to capture post-fault recovery, with offline temporal segmentation applied during preprocessing.
+> * **Continuous Traffic Framing:** Traffic runs for 660s while the recorder captures 600 ticks (1 Hz). The 300-second window ($t \in [120, 420\text{ s}]$) is strictly the active duration of the disturbance.
+> * **Recovery Duration Extension:** If the 180-second post-disturbance observation ($t \in [420, 600\text{ s}]$) is insufficient to capture complete queue drainage and link restabilization, run duration can be extended (e.g., to 900 seconds with 840s disturbance / recovery) based on pilot evidence.
+> * **Independent Run Partitioning:** Evaluation datasets must be divided by complete, independent runs (e.g., 6 train, 2 validation, 2 test per scenario), ensuring no temporal overlap or leakage across splits.
 
 ---
 
