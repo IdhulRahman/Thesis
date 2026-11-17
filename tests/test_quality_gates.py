@@ -832,5 +832,208 @@ class TestLossNaDisplay(unittest.TestCase):
         self.assertEqual(self._fmt_loss([2.5]), "2.5 %")
 
 
+# ---------------------------------------------------------------------------
+# End-to-end integration tests using CSV fixtures on analyze_dataset.py
+# ---------------------------------------------------------------------------
+
+class TestAnalyzeDatasetIntegration(unittest.TestCase):
+    """Real end-to-end integration tests for analyze_dataset.py using synthesized CSV fixtures."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp(prefix="test_analyzer_e2e_")
+        self.script_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "scripts", "analyze_dataset.py")
+        )
+
+    def tearDown(self):
+        if os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def _write_csv(self, filename, rows):
+        path = os.path.join(self.test_dir, filename)
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=record_experiment.HEADERS)
+            writer.writeheader()
+            for r in rows:
+                full_row = {h: "NaN" for h in record_experiment.HEADERS}
+                full_row.update(r)
+                writer.writerow(full_row)
+        return path
+
+    def _run_analyzer(self, csv_path):
+        res = subprocess.run(
+            [sys.executable, self.script_path, csv_path],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return res.stdout
+
+    def _get_table_row(self, output, section_prefix, scenario):
+        sec_idx = output.find(section_prefix)
+        if sec_idx == -1:
+            return None
+        sec_text = output[sec_idx:]
+        next_idx = sec_text.find("\n--- ", len(section_prefix))
+        if next_idx != -1:
+            sec_text = sec_text[:next_idx]
+        for line in sec_text.splitlines():
+            if line.startswith(scenario):
+                return [p.strip() for p in line.split("|")]
+        return None
+
+    def test_01_partial_sla_unknown_rtt_15_loss_nan(self):
+        """When RTT=15ms (<=20ms) and Loss=NaN, SLA must be reported as Unknown (N/A), never 0.0%."""
+        rows = [{
+            "timestamp_utc": "2026-11-17T12:00:00Z",
+            "elapsed_sec": "10.0",
+            "event_scenario": "S3_RAN_SOFT",
+            "e2e_slice2_rtt_ms": "15.0",
+            "e2e_slice2_loss_pct": "NaN"
+        }]
+        csv_path = self._write_csv("test_partial_sla.csv", rows)
+        output = self._run_analyzer(csv_path)
+
+        parts = self._get_table_row(output, "--- 2. SLICE 2: URLLC", "S3_RAN_SOFT")
+        self.assertIsNotNone(parts)
+        # ['S3_RAN_SOFT', '1', '1', '0', '0', '1', '100.0%', '15.00 ms', '15.00 ms', 'N/A', 'N/A']
+        self.assertEqual(parts[1], "1")     # Total
+        self.assertEqual(parts[2], "1")     # Valid
+        self.assertEqual(parts[3], "0")     # Outage
+        self.assertEqual(parts[4], "0")     # Miss
+        self.assertEqual(parts[5], "1")     # Unk
+        self.assertEqual(parts[10], "N/A")  # SLA Viol % must be N/A, not 0.0%
+
+    def test_02_latency_violation_proven_even_if_loss_nan(self):
+        """When RTT=25ms (>20ms) and Loss=NaN, violation is proven regardless of missing loss."""
+        rows = [{
+            "timestamp_utc": "2026-11-17T12:00:00Z",
+            "elapsed_sec": "10.0",
+            "event_scenario": "S3_RAN_SOFT",
+            "e2e_slice2_rtt_ms": "25.0",
+            "e2e_slice2_loss_pct": "NaN"
+        }]
+        csv_path = self._write_csv("test_lat_violation.csv", rows)
+        output = self._run_analyzer(csv_path)
+
+        parts = self._get_table_row(output, "--- 2. SLICE 2: URLLC", "S3_RAN_SOFT")
+        self.assertIsNotNone(parts)
+        self.assertEqual(parts[5], "0")       # Unk = 0 (violation is definitive)
+        self.assertEqual(parts[10], "100.0%") # SLA Viol % = 100.0%
+
+    def test_03_loss_violation_proven_even_if_rtt_ok(self):
+        """When RTT=15ms and Loss=2.5% (>1.0%), violation is proven."""
+        rows = [{
+            "timestamp_utc": "2026-11-17T12:00:00Z",
+            "elapsed_sec": "10.0",
+            "event_scenario": "S4_RAN_DEGRADATION",
+            "e2e_slice2_rtt_ms": "15.0",
+            "e2e_slice2_loss_pct": "2.5"
+        }]
+        csv_path = self._write_csv("test_loss_violation.csv", rows)
+        output = self._run_analyzer(csv_path)
+
+        parts = self._get_table_row(output, "--- 2. SLICE 2: URLLC", "S4_RAN_DEGRADATION")
+        self.assertIsNotNone(parts)
+        self.assertEqual(parts[5], "0")       # Unk = 0
+        self.assertEqual(parts[10], "100.0%") # SLA Viol % = 100.0%
+
+    def test_04_fully_compliant_joint_sla(self):
+        """When RTT=12ms and Loss=0.5% (both <= thresholds), compliant 0.0% violation."""
+        rows = [{
+            "timestamp_utc": "2026-11-17T12:00:00Z",
+            "elapsed_sec": "10.0",
+            "event_scenario": "S1_NORMAL_LIGHT",
+            "e2e_slice2_rtt_ms": "12.0",
+            "e2e_slice2_loss_pct": "0.5"
+        }]
+        csv_path = self._write_csv("test_compliant.csv", rows)
+        output = self._run_analyzer(csv_path)
+
+        parts = self._get_table_row(output, "--- 2. SLICE 2: URLLC", "S1_NORMAL_LIGHT")
+        self.assertIsNotNone(parts)
+        self.assertEqual(parts[5], "0")     # Unk = 0
+        self.assertEqual(parts[10], "0.0%") # SLA Viol % = 0.0%
+
+    def test_05_outage_loss_100_percent(self):
+        """When Loss=100%, row is counted as outage and 100.0% SLA violation."""
+        rows = [{
+            "timestamp_utc": "2026-11-17T12:00:00Z",
+            "elapsed_sec": "10.0",
+            "event_scenario": "S5_RAN_OVERLOAD",
+            "e2e_slice2_rtt_ms": "NaN",
+            "e2e_slice2_loss_pct": "100.0"
+        }]
+        csv_path = self._write_csv("test_outage.csv", rows)
+        output = self._run_analyzer(csv_path)
+
+        parts = self._get_table_row(output, "--- 2. SLICE 2: URLLC", "S5_RAN_OVERLOAD")
+        self.assertIsNotNone(parts)
+        self.assertEqual(parts[3], "1")       # Outage = 1
+        self.assertEqual(parts[10], "100.0%") # SLA Viol % = 100.0%
+
+    def test_06_bler_scaled_to_percentage(self):
+        """BLER 0.1000 in CSV must be formatted as 10.00 % in Section 3."""
+        rows = [{
+            "timestamp_utc": "2026-11-17T12:00:00Z",
+            "elapsed_sec": "10.0",
+            "event_scenario": "S3_RAN_SOFT",
+            "ran_bler_cell1": "0.1000"
+        }]
+        csv_path = self._write_csv("test_bler.csv", rows)
+        output = self._run_analyzer(csv_path)
+
+        self.assertIn("--- 3. TELEMETRI INFRASTRUKTUR", output)
+        self.assertIn("10.00 %", output)
+        self.assertNotIn("0.10 %", output)
+
+    def test_07_nan_backlog_displays_na(self):
+        """All-NaN backlog readings must display 'N/A' rather than '0 B'."""
+        rows = [{
+            "timestamp_utc": "2026-11-17T12:00:00Z",
+            "elapsed_sec": "10.0",
+            "event_scenario": "S1_NORMAL_LIGHT",
+            "upf_backlog_bytes_embb": "NaN"
+        }]
+        csv_path = self._write_csv("test_backlog_nan.csv", rows)
+        output = self._run_analyzer(csv_path)
+
+        parts = self._get_table_row(output, "--- 3. TELEMETRI INFRASTRUKTUR", "S1_NORMAL_LIGHT")
+        self.assertIsNotNone(parts)
+        # parts: [S1_NORMAL_LIGHT, PRB C1 Avg, PRB C1 Max, Backlog Max, ...]
+        self.assertEqual(parts[3], "N/A")
+
+    def test_08_drop_rate_max_gauge(self):
+        """upf_drops_embb is a gauge rate; report maximum rate, not sum."""
+        rows = [
+            {"timestamp_utc": "2026-11-17T12:00:00Z", "elapsed_sec": "10.0", "event_scenario": "S6_CORE_SOFT", "upf_drops_embb": "10.0"},
+            {"timestamp_utc": "2026-11-17T12:00:01Z", "elapsed_sec": "11.0", "event_scenario": "S6_CORE_SOFT", "upf_drops_embb": "25.5"},
+            {"timestamp_utc": "2026-11-17T12:00:02Z", "elapsed_sec": "12.0", "event_scenario": "S6_CORE_SOFT", "upf_drops_embb": "15.0"},
+        ]
+        csv_path = self._write_csv("test_drops.csv", rows)
+        output = self._run_analyzer(csv_path)
+
+        self.assertIn("25.5 pkt/s", output)
+        self.assertNotIn("50.5 pkt/s", output)
+
+    def test_09_operational_phase_segmentation(self):
+        """CSV spanning Baseline (<120s), Fault (120-420s), Recovery (>=420s) must output phase table."""
+        rows = [
+            {"timestamp_utc": "2026-11-17T12:00:00Z", "elapsed_sec": "30.0", "event_scenario": "S3_RAN_SOFT", "ran_prb_cell1": "10.0"},
+            {"timestamp_utc": "2026-11-17T12:03:00Z", "elapsed_sec": "200.0", "event_scenario": "S3_RAN_SOFT", "ran_prb_cell1": "85.0"},
+            {"timestamp_utc": "2026-11-17T12:08:00Z", "elapsed_sec": "500.0", "event_scenario": "S3_RAN_SOFT", "ran_prb_cell1": "12.0"},
+        ]
+        csv_path = self._write_csv("test_phases.csv", rows)
+        output = self._run_analyzer(csv_path)
+
+        self.assertIn("--- 4. AUDIT SEGMENTASI FASE OPERASIONAL", output)
+        self.assertIn("S3_RAN_SOFT [1_BASELINE]", output)
+        self.assertIn("S3_RAN_SOFT [2_ACTIVE_FAULT]", output)
+        self.assertIn("S3_RAN_SOFT [3_RECOVERY]", output)
+        self.assertIn("10.0 %", output)
+        self.assertIn("85.0 %", output)
+        self.assertIn("12.0 %", output)
+
+
 if __name__ == "__main__":
     unittest.main()

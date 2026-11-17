@@ -16,6 +16,145 @@ import sys
 DATA_DIR = os.getenv("MONITORING_DATA_DIR", "/opt/oran/monitoring/data")
 
 
+def make_metrics_bucket():
+    return {
+        "total_rows": 0,
+        # Slice 1 (eMBB / UE-1)
+        "s1_measured_rows": 0,
+        "s1_valid_rtt_rows": 0,
+        "s1_valid_tput_rows": 0,
+        "s1_outage_rows": 0,
+        "s1_missing_rows": 0,
+        "s1_tput": [],
+        "s1_rtt": [],
+        "s1_loss": [],
+
+        # Slice 2 (URLLC / UE-2)
+        "s2_measured_rows": 0,
+        "s2_valid_rtt_rows": 0,
+        "s2_outage_rows": 0,
+        "s2_missing_rows": 0,
+        "s2_latency_violated_rows": 0,
+        "s2_loss_violated_rows": 0,
+        "s2_sla_violated_rows": 0,
+        "s2_sla_compliant_rows": 0,
+        "s2_sla_unknown_rows": 0,
+        "s2_rtt": [],
+        "s2_loss": [],
+
+        # Infrastructure (RAN & Core)
+        "prb_c1": [],
+        "prb_c2": [],
+        "backlog": [],
+        "drops": [],
+        "mcs_c1": [],
+        "bler_c1": [],
+        "snr_c1": []
+    }
+
+
+def parse_val(row, *cols):
+    for col in cols:
+        val = row.get(col, "")
+        if val not in ("", "NaN", "nan", "None", "null", None):
+            try:
+                return float(val)
+            except ValueError:
+                pass
+    return math.nan
+
+
+def update_bucket(d, row):
+    d["total_rows"] += 1
+
+    # --- Slice 1 Telemetry (eMBB / UE-1 via UPF-1) ---
+    s1_tput = parse_val(row, "e2e_slice1_tput_mbps", "e2e_slice1_throughput_mbps")
+    if not math.isnan(s1_tput):
+        d["s1_tput"].append(s1_tput)
+        d["s1_valid_tput_rows"] += 1
+
+    s1_rtt = parse_val(row, "e2e_slice1_rtt_ms", "e2e_slice1_latency_rtt_ms")
+    s1_loss = parse_val(row, "e2e_slice1_loss_pct", "e2e_slice1_packet_loss_pct")
+
+    if math.isnan(s1_rtt) and math.isnan(s1_loss):
+        d["s1_missing_rows"] += 1
+    else:
+        d["s1_measured_rows"] += 1
+        if not math.isnan(s1_loss) and s1_loss >= 100.0:
+            d["s1_outage_rows"] += 1
+            d["s1_loss"].append(s1_loss)
+        else:
+            if not math.isnan(s1_rtt):
+                d["s1_rtt"].append(s1_rtt)
+                d["s1_valid_rtt_rows"] += 1
+            if not math.isnan(s1_loss):
+                d["s1_loss"].append(s1_loss)
+
+    # --- Slice 2 Telemetry (URLLC / UE-2 via UPF-2) ---
+    s2_rtt = parse_val(row, "e2e_slice2_rtt_ms", "e2e_slice2_latency_rtt_ms")
+    s2_loss = parse_val(row, "e2e_slice2_loss_pct", "e2e_slice2_packet_loss_pct")
+
+    if math.isnan(s2_rtt) and math.isnan(s2_loss):
+        d["s2_missing_rows"] += 1
+    else:
+        d["s2_measured_rows"] += 1
+        is_outage = (not math.isnan(s2_loss) and s2_loss >= 100.0)
+        is_latency_violation = (not math.isnan(s2_rtt) and s2_rtt > 20.0)
+        is_loss_violation = (not math.isnan(s2_loss) and s2_loss > 1.0 and s2_loss < 100.0)
+
+        if not math.isnan(s2_rtt):
+            d["s2_rtt"].append(s2_rtt)
+            d["s2_valid_rtt_rows"] += 1
+            if is_latency_violation:
+                d["s2_latency_violated_rows"] += 1
+
+        if not math.isnan(s2_loss):
+            d["s2_loss"].append(s2_loss)
+            if is_outage:
+                d["s2_outage_rows"] += 1
+            elif is_loss_violation:
+                d["s2_loss_violated_rows"] += 1
+
+        # SLA evaluation: RTT <= 20ms AND loss <= 1.0%
+        # Definite violation if any measured component violates
+        if is_outage or is_latency_violation or is_loss_violation:
+            d["s2_sla_violated_rows"] += 1
+        elif (not math.isnan(s2_rtt) and s2_rtt <= 20.0) and (not math.isnan(s2_loss) and s2_loss <= 1.0):
+            d["s2_sla_compliant_rows"] += 1
+        else:
+            # Partial measurement (e.g. RTT <= 20ms but loss is NaN): status is Unknown
+            d["s2_sla_unknown_rows"] += 1
+
+    # --- Infrastructure Telemetry (RAN & Core) ---
+    prb1 = parse_val(row, "ran_prb_cell1", "ran_cell_prb_utilization_1")
+    if not math.isnan(prb1):
+        d["prb_c1"].append(prb1)
+
+    prb2 = parse_val(row, "ran_prb_cell2", "ran_cell_prb_utilization_2")
+    if not math.isnan(prb2):
+        d["prb_c2"].append(prb2)
+
+    b_log = parse_val(row, "upf_backlog_bytes_embb", "upf_queue_backlog_bytes_01000001")
+    if not math.isnan(b_log):
+        d["backlog"].append(b_log)
+
+    drop = parse_val(row, "upf_drops_embb", "upf_packet_drops_01000001")
+    if not math.isnan(drop):
+        d["drops"].append(drop)
+
+    mcs1 = parse_val(row, "ran_mcs_cell1", "ran_cell_mcs_1")
+    if not math.isnan(mcs1):
+        d["mcs_c1"].append(mcs1)
+
+    bler1 = parse_val(row, "ran_bler_cell1", "ran_cell_bler_1")
+    if not math.isnan(bler1):
+        d["bler_c1"].append(bler1)
+
+    snr1 = parse_val(row, "ran_snr_cell1", "ran_cell_snr_db_1")
+    if not math.isnan(snr1):
+        d["snr_c1"].append(snr1)
+
+
 def main():
     if len(sys.argv) > 1:
         raw_files = [sys.argv[1]]
@@ -32,11 +171,12 @@ def main():
     filename = os.path.basename(raw_file)
     size_kb = os.path.getsize(raw_file) / 1024.0
 
-    print("=" * 110)
+    print("=" * 115)
     print(f"ANALISIS TELEMETRI DATASET: {filename} ({size_kb:.1f} KB)")
-    print("=" * 110)
+    print("=" * 115)
 
     scen_data = {}
+    phase_data = {}
     total_rows = 0
 
     with open(raw_file, "r") as f:
@@ -45,134 +185,26 @@ def main():
             total_rows += 1
             scen = row.get("event_scenario", row.get("scenario", "UNKNOWN"))
             if scen not in scen_data:
-                scen_data[scen] = {
-                    "total_rows": 0,
-                    # Slice 1 (eMBB / UE-1)
-                    "s1_measured_rows": 0,
-                    "s1_valid_rtt_rows": 0,
-                    "s1_valid_tput_rows": 0,
-                    "s1_outage_rows": 0,
-                    "s1_missing_rows": 0,
-                    "s1_tput": [],
-                    "s1_rtt": [],
-                    "s1_loss": [],
+                scen_data[scen] = make_metrics_bucket()
 
-                    # Slice 2 (URLLC / UE-2)
-                    "s2_measured_rows": 0,
-                    "s2_valid_rtt_rows": 0,
-                    "s2_outage_rows": 0,
-                    "s2_missing_rows": 0,
-                    "s2_latency_violated_rows": 0,
-                    "s2_loss_violated_rows": 0,
-                    "s2_sla_violated_rows": 0,
-                    "s2_rtt": [],
-                    "s2_loss": [],
+            update_bucket(scen_data[scen], row)
 
-                    # Infrastructure (RAN & Core)
-                    "prb_c1": [],
-                    "prb_c2": [],
-                    "backlog": [],
-                    "drops": [],
-                    "mcs_c1": [],
-                    "bler_c1": [],
-                    "snr_c1": []
-                }
-
-            d = scen_data[scen]
-            d["total_rows"] += 1
-
-            def parse_val(*cols):
-                for col in cols:
-                    val = row.get(col, "")
-                    if val not in ("", "NaN", "nan", "None", "null", None):
-                        try:
-                            return float(val)
-                        except ValueError:
-                            pass
-                return math.nan
-
-            # --- Slice 1 Telemetry (eMBB / UE-1 via UPF-1) ---
-            s1_tput = parse_val("e2e_slice1_tput_mbps", "e2e_slice1_throughput_mbps")
-            if not math.isnan(s1_tput):
-                d["s1_tput"].append(s1_tput)
-                d["s1_valid_tput_rows"] += 1
-
-            s1_rtt = parse_val("e2e_slice1_rtt_ms", "e2e_slice1_latency_rtt_ms")
-            s1_loss = parse_val("e2e_slice1_loss_pct", "e2e_slice1_packet_loss_pct")
-
-            if math.isnan(s1_rtt) and math.isnan(s1_loss):
-                d["s1_missing_rows"] += 1
-            else:
-                d["s1_measured_rows"] += 1
-                if not math.isnan(s1_loss) and s1_loss >= 100.0:
-                    d["s1_outage_rows"] += 1
-                    d["s1_loss"].append(s1_loss)
+            # Phase segmentation
+            el_sec = parse_val(row, "elapsed_sec")
+            if not math.isnan(el_sec):
+                if el_sec < 120.0:
+                    ph = "1_BASELINE"
+                elif el_sec < 420.0:
+                    ph = "2_ACTIVE_FAULT"
                 else:
-                    if not math.isnan(s1_rtt):
-                        d["s1_rtt"].append(s1_rtt)
-                        d["s1_valid_rtt_rows"] += 1
-                    if not math.isnan(s1_loss):
-                        d["s1_loss"].append(s1_loss)
-
-            # --- Slice 2 Telemetry (URLLC / UE-2 via UPF-2) ---
-            s2_rtt = parse_val("e2e_slice2_rtt_ms", "e2e_slice2_latency_rtt_ms")
-            s2_loss = parse_val("e2e_slice2_loss_pct", "e2e_slice2_packet_loss_pct")
-
-            if math.isnan(s2_rtt) and math.isnan(s2_loss):
-                d["s2_missing_rows"] += 1
+                    ph = "3_RECOVERY"
             else:
-                d["s2_measured_rows"] += 1
-                is_outage = (not math.isnan(s2_loss) and s2_loss >= 100.0)
-                is_latency_violation = (not math.isnan(s2_rtt) and s2_rtt > 20.0)
-                is_loss_violation = (not math.isnan(s2_loss) and s2_loss > 1.0 and s2_loss < 100.0)
+                ph = row.get("event_phase_id", "UNKNOWN")
 
-                if is_outage:
-                    d["s2_outage_rows"] += 1
-                    d["s2_loss"].append(s2_loss)
-                    d["s2_sla_violated_rows"] += 1
-                else:
-                    if not math.isnan(s2_rtt):
-                        d["s2_rtt"].append(s2_rtt)
-                        d["s2_valid_rtt_rows"] += 1
-                        if is_latency_violation:
-                            d["s2_latency_violated_rows"] += 1
-
-                    if not math.isnan(s2_loss):
-                        d["s2_loss"].append(s2_loss)
-                        if is_loss_violation:
-                            d["s2_loss_violated_rows"] += 1
-
-                    if is_latency_violation or is_loss_violation:
-                        d["s2_sla_violated_rows"] += 1
-
-            # --- Infrastructure Telemetry (RAN & Core) ---
-            prb1 = parse_val("ran_prb_cell1", "ran_cell_prb_utilization_1")
-            if not math.isnan(prb1):
-                d["prb_c1"].append(prb1)
-
-            prb2 = parse_val("ran_prb_cell2", "ran_cell_prb_utilization_2")
-            if not math.isnan(prb2):
-                d["prb_c2"].append(prb2)
-
-            b_log = parse_val("upf_backlog_bytes_embb", "upf_queue_backlog_bytes_01000001")
-            if not math.isnan(b_log):
-                d["backlog"].append(b_log)
-
-            drop = parse_val("upf_drops_embb", "upf_packet_drops_01000001")
-            if not math.isnan(drop):
-                d["drops"].append(drop)
-
-            mcs1 = parse_val("ran_mcs_cell1", "ran_cell_mcs_1")
-            if not math.isnan(mcs1):
-                d["mcs_c1"].append(mcs1)
-
-            bler1 = parse_val("ran_bler_cell1", "ran_cell_bler_1")
-            if not math.isnan(bler1):
-                d["bler_c1"].append(bler1)
-
-            snr1 = parse_val("ran_snr_cell1", "ran_cell_snr_db_1")
-            if not math.isnan(snr1):
-                d["snr_c1"].append(snr1)
+            phase_key = (scen, ph)
+            if phase_key not in phase_data:
+                phase_data[phase_key] = make_metrics_bucket()
+            update_bucket(phase_data[phase_key], row)
 
     # --- 1. Print Slice 1 (eMBB / UE-1) Report ---
     print("\n--- 1. SLICE 1: eMBB (UE-1 @ UPF-1) TELEMETRI TRAFIK & QOS ---")
@@ -195,15 +227,16 @@ def main():
         print(f"{scen:<16} | {n_tot:<5} | {s1_val:<5} | {s1_out:<6} | {s1_mis:<4} | {s1_cov:>6.1f}% | {tput_mean_str} | {tput_max_str} | {rtt_mean_str} | {rtt_max_str} | {loss_avg_str}")
 
     # --- 2. Print Slice 2 (URLLC / UE-2) Report ---
-    print("\n--- 2. SLICE 2: URLLC (UE-2 @ UPF-2) AUDIT SLA (<20ms) ---")
-    print(f"{'Skenario Event':<16} | {'Total':<5} | {'Valid':<5} | {'Outage':<6} | {'Miss':<4} | {'Cov %':<7} | {'RTT Mean':<10} | {'RTT Max':<9} | {'Loss Avg':<8} | {'SLA Viol %':<10}")
-    print("-" * 103)
+    print("\n--- 2. SLICE 2: URLLC (UE-2 @ UPF-2) AUDIT SLA (<20ms, Loss <=1%) ---")
+    print(f"{'Skenario Event':<16} | {'Total':<5} | {'Valid':<5} | {'Outage':<6} | {'Miss':<4} | {'Unk':<4} | {'Cov %':<7} | {'RTT Mean':<10} | {'RTT Max':<9} | {'Loss Avg':<8} | {'SLA Viol %':<10}")
+    print("-" * 110)
 
     for scen, d in sorted(scen_data.items()):
         n_tot = d["total_rows"]
         s2_val = d["s2_valid_rtt_rows"]
         s2_out = d["s2_outage_rows"]
         s2_mis = d["s2_missing_rows"]
+        s2_unk = d["s2_sla_unknown_rows"]
         s2_cov = (s2_val / n_tot * 100.0) if n_tot > 0 else 0.0
 
         rtt_mean_str = f"{sum(d['s2_rtt'])/len(d['s2_rtt']):>7.2f} ms" if d["s2_rtt"] else f"{'N/A':>10}"
@@ -212,13 +245,17 @@ def main():
         if d["s2_measured_rows"] > 0:
             avg_loss = (sum(d["s2_loss"]) / len(d["s2_loss"])) if d["s2_loss"] else None
             loss_avg_str = f"{avg_loss:>6.1f} %" if avg_loss is not None else f"{'N/A':>8}"
-            sla_pct = (d["s2_sla_violated_rows"] / d["s2_measured_rows"] * 100.0)
-            sla_str = f"{sla_pct:>9.1f}%"
+            evaluable_s2 = d["s2_sla_violated_rows"] + d["s2_sla_compliant_rows"]
+            if evaluable_s2 > 0:
+                sla_pct = (d["s2_sla_violated_rows"] / evaluable_s2 * 100.0)
+                sla_str = f"{sla_pct:>9.1f}%"
+            else:
+                sla_str = f"{'N/A':>10}"
         else:
             loss_avg_str = f"{'N/A':>8}"
             sla_str = f"{'N/A':>10}"
 
-        print(f"{scen:<16} | {n_tot:<5} | {s2_val:<5} | {s2_out:<6} | {s2_mis:<4} | {s2_cov:>6.1f}% | {rtt_mean_str} | {rtt_max_str} | {loss_avg_str} | {sla_str}")
+        print(f"{scen:<16} | {n_tot:<5} | {s2_val:<5} | {s2_out:<6} | {s2_mis:<4} | {s2_unk:<4} | {s2_cov:>6.1f}% | {rtt_mean_str} | {rtt_max_str} | {loss_avg_str} | {sla_str}")
 
     # --- 3. Print Infrastructure Telemetry (RAN & Core) ---
     print("\n--- 3. TELEMETRI INFRASTRUKTUR (RAN CELL-1 & CORE UPF-1) ---")
@@ -236,14 +273,37 @@ def main():
 
         print(f"{scen:<16} | {prb_avg_str} | {prb_max_str} | {b_max_str} | {drops_max_str} | {mcs_avg_str} | {bler_avg_str} | {snr_avg_str}")
 
+    # --- 4. Print Operational Phase Segmentation Report (if multiple phases present) ---
+    if len(phase_data) > len(scen_data):
+        print("\n--- 4. AUDIT SEGMENTASI FASE OPERASIONAL (Baseline [0-120s] -> Active [120-420s] -> Recovery [420-600s]) ---")
+        print(f"{'Skenario / Fase':<34} | {'Rows':<5} | {'PRB C1':<8} | {'Backlog Max':<12} | {'Drop Max':<11} | {'MCS':<5} | {'BLER C1':<9} | {'URLLC RTT':<10} | {'SLA Viol %':<10}")
+        print("-" * 122)
+        for (scen, ph), d in sorted(phase_data.items()):
+            label = f"{scen} [{ph}]"
+            n_r = d["total_rows"]
+            prb_s = f"{sum(d['prb_c1'])/len(d['prb_c1']):>6.1f} %" if d["prb_c1"] else f"{'N/A':>8}"
+            b_s = f"{max(d['backlog']):>10,.0f} B" if d["backlog"] else f"{'N/A':>12}"
+            d_s = f"{max(d['drops']):>7.1f} p/s" if d["drops"] else f"{'N/A':>11}"
+            m_s = f"{sum(d['mcs_c1'])/len(d['mcs_c1']):>5.1f}" if d["mcs_c1"] else f"{'N/A':>5}"
+            bl_s = f"{sum(d['bler_c1'])/len(d['bler_c1'])*100:>6.2f} %" if d["bler_c1"] else f"{'N/A':>9}"
+            r_s = f"{sum(d['s2_rtt'])/len(d['s2_rtt']):>7.2f} ms" if d["s2_rtt"] else f"{'N/A':>10}"
+            ev = d["s2_sla_violated_rows"] + d["s2_sla_compliant_rows"]
+            if ev > 0:
+                s_s = f"{(d['s2_sla_violated_rows']/ev*100):>9.1f}%"
+            else:
+                s_s = f"{'N/A':>10}"
+            print(f"{label:<34} | {n_r:<5} | {prb_s} | {b_s} | {d_s} | {m_s} | {bl_s} | {r_s} | {s_s}")
+
     print("=" * 115)
     print(f"Total Sampel Dievaluasi: {total_rows} baris")
     print("Definisi Audit Telemetri & Klasifikasi Probe:")
     print(" - Valid      : Sampel dengan pengukuran RTT numerik yang berhasil diterima dalam jendela evaluasi.")
     print(" - Outage     : Gangguan total terkonfirmasi (probe aktif, packet loss terukur >= 100%).")
     print(" - Miss       : Probe tidak aktif / data belum tersedia (bukan outage terkonfirmasi).")
+    print(" - Unk        : Status SLA parsial / unknown (komponen terukur normal, komponen lain missing).")
     print(" - Cov %      : Rasio sampel valid terhadap total baris fase (Valid / Total * 100%).")
-    print(" - SLA Viol % : Rasio pelanggaran SLA terhadap sampel terukur (SLA Viol / Measured * 100%, threshold SLA: RTT <= 20ms).")
+    print(" - SLA Viol % : Rasio pelanggaran SLA terhadap sampel definitif (SLA Viol / (Violated + Compliant) * 100%).")
+    print(" - Joint SLA  : Evaluasi SLA gabungan eMBB+URLLC bersyarat ketersediaan receiver goodput EXT-DN.")
 
 
 if __name__ == "__main__":
