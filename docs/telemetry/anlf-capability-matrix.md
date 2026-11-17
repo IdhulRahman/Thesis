@@ -90,7 +90,7 @@ Every variable recorded in the experiment dataset has a fully traceable provenan
 │   │ Real-time MAC scheduler ASCII logging to /opt/oran/ran/du1.log                                              │
 │   ▼                                                                                                             │
 │ [VM-4: ran_adapter.py]                                                                                          │
-│   │ Persistent file offset seek; Regex parser: NPRB/106, MCS, BLER, SNR                                         │
+│   │ Persistent file offset seek; Regex parser: NPRB/carrier_PRBs, MCS, BLER, SNR                                │
 │   │ HTTP POST http://10.102.0.67:9100/report (1 Hz cadence)                                                     │
 │   ▼                                                                                                             │
 │ [VM-6: telemetry_collector.py] ──► Prometheus Gauge (ran_cell_*) ──► [record_experiment.py] (1.000 Hz CSV)     │
@@ -130,10 +130,13 @@ To maintain scientific rigor, all telemetry recorded during experiments is stric
 
 ### Tier 1: Primary Feature Tensor (Inputs to Cross-Domain Diagnosis Model)
 * **RAN Features (OAI DU Scheduler-Derived):**
-  * `ran_prb_cell1`, `ran_prb_cell2` (PRB utilization percentage: $\frac{NPRB}{106} \times 100$)
+  * `ran_prb_cell1`, `ran_prb_cell2` (PRB grant proxy percentage: $\frac{N_{\text{PRB},c}}{N_{\mathrm{RB,configured},c}} \times 100\%$, where $N_{\mathrm{RB,configured}}=51$ for Cell-1 Profile 1 and $106$ for Cell-2)
   * `ran_mcs_cell1`, `ran_mcs_cell2` (Modulation and Coding Scheme index, 0–28)
   * `ran_bler_cell1`, `ran_bler_cell2` (Transport block BLER, 0.0–1.0)
   * `ran_snr_cell1`, `ran_snr_cell2` (Uplink SNR, dB)
+* **Optional / Extended RAN Candidates (Not in Canonical 40-Column CSV Schema v1):**
+  * `ran_cell_rssi_dbm`: Optional/additional — available from gNB scheduler logs via `ran_adapter.py`, exposed at `:9100/metrics` as Prometheus gauge `ran_cell_rssi_dbm`, but NOT part of the canonical 40-column CSV schema v1. Inclusion in model input requires an explicit schema version bump.
+  * `CQI`: Optional/pending — not confirmed available in uplink scheduler log path. Do not synthesize CQI from SNR.
 * **Core NWDAF Features (3GPP TS 29.520 AnLF Native):**
   * `nwdaf_comm_ul_bytes` (Cumulative uplink user-plane volume)
   * `nwdaf_comm_dl_bytes` (Cumulative downlink user-plane volume)
@@ -141,7 +144,8 @@ To maintain scientific rigor, all telemetry recorded during experiments is stric
   * `nwdaf_comm_vol_std_bytes` (Volume standard deviation across session records)
   * *Note on Volume Rate Derivatives:* Upstream NWDAF cumulative volume counters (`nwdaf_comm_ul_bytes`, `nwdaf_comm_dl_bytes`) update in step functions every $\approx 30\text{ s}$ governed by periodic UPF URR reports. Direct 1 Hz differentiation ($\Delta V / \Delta t$) produces intermittent zero-delta plateaus with 30-second burst spikes. If rate derivatives are computed for inference, they require causal windowed aggregation ($\frac{V_t - V_{t-W}}{W}$ where $W \ge 30\text{ s}$) with explicit reset/epoch boundaries; raw 1 Hz instantaneous differentiation does not represent physical instantaneous line-rate throughput.
 
-### Tier 2: Ground-Truth Validation & Reference Data (Excluded from Model Input)
+### Tier 2: Ground-Truth Validation & Reference Data (Excluded from Primary AnLF Model Input)
+*(Excluded from primary AnLF model input; included only in explicitly declared extended OAM comparisons (Model C) and/or validation experiments.)*
 * **Core Kernel Validation:**
   * `upf_backlog_bytes_embb`, `upf_backlog_bytes_urllc` (Linux qdisc queue depth)
   * `upf_drops_embb`, `upf_drops_urllc` (Linux qdisc packet drop rate)

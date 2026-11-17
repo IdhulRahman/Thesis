@@ -12,7 +12,7 @@ This directory contains the operational daemons, automation scripts, fault injec
 | Host Node | Host IP | Script File | Architectural Role | Execution Mode & Output |
 |---|---|---|---|---|
 | **VM-3** | `10.102.0.246` | [`core_adapter.py`](core_adapter.py) | Reads Linux kernel `tc qdisc` backlog and packet drops from UPF containers via Netlink. | Continuous daemon (1.0 Hz); pushes JSON to VM-6 `:9100/report` and archives local JSONL. |
-| **VM-3** | `10.102.0.246` | [`receiver_iperf.sh`](receiver_iperf.sh) | Dedicated one-off receiver manager for `oai-ext-dn` container to capture ground-truth delivered goodput and UDP loss JSON. | Bash utility; exports to `data/raw/<RUN_ID>/receiver_<SESSION_ID>.json`. |
+| **VM-3** | `10.102.0.246` | [`receiver_iperf.sh`](receiver_iperf.sh) | Dedicated one-off receiver manager for `oai-ext-dn` container to capture ground-truth delivered goodput and UDP loss JSON (export waits for natural session completion; use `RECEIVER_WAIT_TIMEOUT=N` for sessions longer than 15s). | Bash utility; exports to `data/raw/<RUN_ID>/receiver_<SESSION_ID>.json`. |
 | **VM-4** | `10.102.0.167` | [`start_ran.sh`](start_ran.sh) | Orchestrates background startup of OAI gNB CU (N2/E2), DU-1 (Cell-1 `:4043` with `-E` three-quarter sampling), and DU-2 (Cell-2 `:4044`). | Bash launcher; writes `cu.log`, `du1.log`, `du2.log`. |
 | **VM-4** | `10.102.0.167` | [`stop_ran.sh`](stop_ran.sh) | Gracefully terminates all running OAI softmodem processes on VM-4. | Bash teardown utility; kills CU and DUs. |
 | **VM-4** | `10.102.0.167` | [`rfsim_channel_control.py`](rfsim_channel_control.py) | Dynamic RF channel impairment controller over OAI softmodem Telnet (`:9090`). Controls UL/DL path loss and attenuation without restarting gNB processes. | Python CLI utility; supports `show`, `set-attenuation`, `set-raw-ploss`, `reset`, `sweep`. |
@@ -40,25 +40,28 @@ This directory contains the operational daemons, automation scripts, fault injec
    ```bash
    python3 /opt/oran/monitoring/scripts/record_experiment.py
    ```
-   *Prompts for scenario identifier, duration in seconds (180s proposed for standard recording window), and run notes.*
+   *Prompts for scenario identifier, duration in seconds (600s nominal continuous protocol), and run notes.*
 
-2. **Direct CLI Execution (Active Disturbance & Recovery Windows):**
+2. **Direct CLI Execution (600s Nominal Continuous Protocol):**
    > [!IMPORTANT]
-   > *Recording Duration & Labeling Boundary:* `--duration 180` records only the active disturbance window and halts immediately upon treatment release. To capture both the active regime (~180s) AND the post-fault recovery observation window (~60s+), the CLI should be executed with a combined duration (e.g., `--duration 240`) or run in manual stop mode (`--duration 0`).  
-   > *Offline Labeling Rule:* The recorder stamps `event_domain` statically across the full run duration. Rows after disturbance release must NOT be assumed to be `BASELINE` immediately, as queues require drainage and settling time ($T_{\text{recovery}}$, distinct from iperf duration delta $\Delta t$). Offline segmentation based on event timestamps and empirical indicators (queue backlog = 0 B, RTT normal) is required.
+   > *Unified 600s Duration:* Under the nominal continuous protocol, experiments run for `--duration 600` under continuous traffic (`trafgen.sh start 660`). This encapsulates baseline settling ($[0, 120\text{ s}]$), active disturbance ($[120, 420\text{ s}]$), and recovery drainage ($[420, 600\text{ s}]$) in a single recording.  
+   > *Offline Labeling Rule:* The recorder stamps `event_domain` statically across the full run duration. Rows after disturbance release must NOT be assumed to be `BASELINE` immediately, as queues require drainage and settling time ($T_{\text{recovery}}$). Offline segmentation based on event timestamps and empirical indicators (queue backlog = 0 B, RTT normal) is required.
 
    ```bash
-   # Record S1 Light Baseline (240s total: settling + baseline run + observation)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 240 --notes "S1 Light Baseline Candidate 5M"
+   # Record S1 Light Baseline (600s continuous protocol)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 600 --notes "S1 Light Baseline Candidate 5M"
 
-   # Record S2 Higher Baseline (240s total)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S2 --duration 240 --notes "S2 Higher Baseline Candidate 10M"
+   # Record S2 Higher Baseline (600s continuous protocol)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S2 --duration 600 --notes "S2 Higher Baseline Candidate 10M"
 
-   # Record S3 RAN Overload (240s total: 180s active saturation + 60s queue drainage)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S3 --duration 240 --notes "S3 RAN Overload Capacity Saturation"
+   # Record S3 RAN Soft Degradation (600s continuous: 25 dB candidate)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S3 --duration 600 --notes "S3 RAN Soft Degradation 25dB"
 
-   # Record S6 Core Bottleneck (240s total: 180s active TBF + 60s post-release drainage)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S6 --duration 240 --notes "S6 Core Bottleneck UPF-1 TBF 5M"
+   # Record S5 RAN Capacity Overload (600s continuous: 20M saturation)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S5 --duration 600 --notes "S5 RAN Overload Capacity Saturation"
+
+   # Record S6 Core Bottleneck (600s continuous: UPF-1 TBF 5M)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S6 --duration 600 --notes "S6 Core Bottleneck UPF-1 TBF 5M"
    ```
 
 3. **Manual Stop Mode (`Ctrl+C`):**

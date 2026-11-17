@@ -50,7 +50,7 @@ All virtual machines operate within the dedicated inter-VM subnet `10.102.0.0/24
 | **NWDAF Gateway** | Kong API Gateway | `3.3.0` | `kong:3.3.0` | Reverse proxy exposing port `8080` (HTTP) and `8001` (Admin) |
 | **NWDAF Datastore** | MongoDB | `4.4` | `mongo:4.4` | Port `27017`, stores database `testing` and collection `smf` |
 
-### 2.2 O-RAN Radio Access Network (VM-4)
+### 2.3 O-RAN Radio Access Network (VM-4)
 
 | Component | Upstream Repository | Target Branch / Tag | Pinned Commit Hash | Deployed Artifact / Binary |
 |---|---|---|---|---|
@@ -60,7 +60,7 @@ All virtual machines operate within the dedicated inter-VM subnet `10.102.0.0/24
 | **FlexRIC E2 Agent** | FlexRIC submodule (`openairinterface5g`) | `develop` | Pinned to OAI | Embedded shared library linked into CU softmodem |
 | **RAN Adapter Daemon** | In-house Python daemon | v1.0.0 | Repository HEAD | Host process (`scripts/ran_adapter.py`) reading `du1.log` & `du2.log` |
 
-### 2.3 O-RAN Near-RT RIC (VM-2) & Non-RT RIC (VM-1)
+### 2.4 O-RAN Near-RT RIC (VM-2) & Non-RT RIC (VM-1)
 
 | Subsystem | Component | Upstream Project / Repository | Pinned Version / Release | Exposure / Ports |
 |---|---|---|---|---|
@@ -74,7 +74,7 @@ All virtual machines operate within the dedicated inter-VM subnet `10.102.0.0/24
 | **VM-2 (Near-RT)** | **Shared Data Layer (DBaaS)** | O-RAN SC `ric-plt-dbaas` / Redis | `0.5.7` / Redis `5.0.9` | RESP2 Protocol (`:6379`) |
 | **VM-2 (Near-RT)** | **Traffic Steering xApp** | In-house Python xApp | Python `ricxappframe` | RMR (`:4560`), Container IP `10.0.2.20` |
 
-### 2.4 User Equipment & Traffic Generation (VM-5)
+### 2.5 User Equipment & Traffic Generation (VM-5)
 
 | Component | Upstream Repository | Target Branch / Tag | Deployed Artifact / Script | Execution Context |
 |---|---|---|---|---|
@@ -82,7 +82,7 @@ All virtual machines operate within the dedicated inter-VM subnet `10.102.0.0/24
 | **Multi-UE Spawner** | In-house Bash script | v2.0.0 | `scripts/spawn_multi_ue.sh` | Orchestrates namespaces `ue1`, `ue2`, veth, and NAT |
 | **Multi-Slice TrafGen** | In-house Bash script | v2.0.0 | `scripts/trafgen.sh` | Injects iperf3 UDP & ICMP canary probes |
 
-### 2.5 Telemetry Collection & Monitoring (VM-6)
+### 2.6 Telemetry Collection & Monitoring (VM-6)
 
 | Component | Software Framework | Version | Deployment Mode | Primary Port / Resource |
 |---|---|---|---|---|
@@ -119,3 +119,5 @@ The repository maintains formal Git patch files under `patches/` to document and
 |---|---|---|---|---|---|---|
 | **Slice 1 (eMBB)** | `1` | `000001` | `1` | `default` | `12.1.1.0/24` (UPF-1 `192.168.70.142`) | Cell-1 (`du_gnb1.conf`, TCP `:4043`) |
 | **Slice 2 (URLLC)** | `222` | `00007B` | `123` | `lowlatency` | `12.1.2.0/24` (UPF-2 `192.168.70.143`) | Cell-2 (`du_gnb2.conf`, TCP `:4044`) |
+
+> **Calibration sweep binary/commit:** OAI softmodem commit used in the 2026-11-17 RF attenuation calibration sweep has not yet been recorded. Update this manifest when the commit hash is confirmed.

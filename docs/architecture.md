@@ -96,7 +96,7 @@ The diagram below illustrates the complete **proposed multi-timescale closed-loo
 1. **Monitor (Continuous Ingestion):**  
    The Non-RT RIC coordinator on VM-1 ingests normalized, time-aligned feature vectors streaming from the VM-6 telemetry pipeline at 1 Hz intervals.
 2. **Analyze (Bottleneck Classification):**  
-   The rApp executes an explainable classification engine (Decision Tree / Rules) to categorize system health into one of four states:
+   The rApp on VM-1 executes an explainable classification engine (Decision Tree / Rules) to categorize system health into one of four states (planned decision cadence: 5 s grid; current evaluation placeholder: 30 s):
    * **`BASELINE` (`NORMAL`):** System operating within SLA bounds under reference channel; no intervention required.
    * **`RAN` (`RAN_BOTTLENECK`):** Radio air-interface bottleneck (scheduling capacity saturation or channel degradation/attenuation), while Core queues remain empty.
    * **`CORE` (`CORE_BOTTLENECK`):** Transport queue accumulation (`upf_queue_backlog_bytes > 0`), surging packet drops, or elevated delay under binding UPF egress shaping, while radio PRBs remain available.
@@ -114,6 +114,8 @@ The diagram below illustrates the complete **proposed multi-timescale closed-loo
    * **Core User-Plane Conditioning (Planned):** A dedicated actuation agent applies Linux `tc qdisc` Token Bucket Filter (TBF) constraints on target UPF egress interfaces. *(Note: `core_adapter.py` remains strictly a read-only telemetry sensor; in current baseline experiments, TBF constraints are applied manually or via testbed orchestration scripts for fault injection).*
 5. **Verify (Closed-Loop SLA Recovery):**  
    The rApp evaluates post-steering SLA compliance ($V_s$, recovery time, and latency percentiles). If SLA is restored, further churn is suppressed; if the bottleneck persists, fallback mitigation is triggered.
+
+> **Status note:** Items labeled "planned" are design targets for autonomous closed-loop execution (Phase B); cross-domain telemetry ingestion, scraping, and baseline recording pipelines are fully implemented and validated in the testbed.
 
 ---
 
