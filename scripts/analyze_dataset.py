@@ -155,6 +155,40 @@ def update_bucket(d, row):
         d["snr_c1"].append(snr1)
 
 
+def resolve_phase(scen, row):
+    scen_upper = scen.upper()
+    raw_phase = row.get("event_phase_id", "").strip()
+
+    # 1. Actual event phase annotation priority:
+    # Use if explicit informative phase annotation is present (not generic single run placeholder, idle, or NaN)
+    if (raw_phase and
+        not raw_phase.upper().startswith("PHASE_1_") and
+        not raw_phase.upper().startswith("PHASE_") and
+        raw_phase.upper() not in ("IDLE", "UNKNOWN", "NONE", "NAN", "NULL", "")):
+        return raw_phase
+
+    # 2. Reference normal baseline scenarios (S1, S2): steady-state reference throughout the entire run
+    if any(k in scen_upper for k in ("S1", "S2", "NORMAL_LIGHT", "NORMAL_HIGH")):
+        return "1_REFERENCE_STEADY"
+
+    # 3. Continuous saturated load scenario (S5): fixed capacity overload throughout the run
+    if any(k in scen_upper for k in ("S5", "RAN_OVERLOAD")):
+        return "1_SATURATED_STEADY"
+
+    # 4. Fault injection scenarios (S3, S4, S6, S7, S8, S9):
+    # Scheduled nominal windows [0-120s], [120-420s], [420-600s]
+    el_sec = parse_val(row, "elapsed_sec")
+    if not math.isnan(el_sec):
+        if el_sec < 120.0:
+            return "1_BASELINE_NOMINAL [0-120s]"
+        elif el_sec < 420.0:
+            return "2_ACTIVE_FAULT_NOMINAL [120-420s]"
+        else:
+            return "3_RECOVERY_NOMINAL [420-600s]"
+
+    return raw_phase if raw_phase and raw_phase.upper() not in ("NAN", "NULL") else "UNKNOWN"
+
+
 def main():
     if len(sys.argv) > 1:
         raw_files = [sys.argv[1]]
@@ -190,16 +224,7 @@ def main():
             update_bucket(scen_data[scen], row)
 
             # Phase segmentation
-            el_sec = parse_val(row, "elapsed_sec")
-            if not math.isnan(el_sec):
-                if el_sec < 120.0:
-                    ph = "1_BASELINE"
-                elif el_sec < 420.0:
-                    ph = "2_ACTIVE_FAULT"
-                else:
-                    ph = "3_RECOVERY"
-            else:
-                ph = row.get("event_phase_id", "UNKNOWN")
+            ph = resolve_phase(scen, row)
 
             phase_key = (scen, ph)
             if phase_key not in phase_data:
@@ -275,9 +300,9 @@ def main():
 
     # --- 4. Print Operational Phase Segmentation Report (if multiple phases present) ---
     if len(phase_data) > len(scen_data):
-        print("\n--- 4. AUDIT SEGMENTASI FASE OPERASIONAL (Baseline [0-120s] -> Active [120-420s] -> Recovery [420-600s]) ---")
-        print(f"{'Skenario / Fase':<34} | {'Rows':<5} | {'PRB C1':<8} | {'Backlog Max':<12} | {'Drop Max':<11} | {'MCS':<5} | {'BLER C1':<9} | {'URLLC RTT':<10} | {'SLA Viol %':<10}")
-        print("-" * 122)
+        print("\n--- 4. AUDIT SEGMENTASI FASE OPERASIONAL (Jadwal Nominal Gangguan S3-S4/S6-S9: Baseline [0-120s] -> Active Fault [120-420s] -> Recovery [420-600s]) ---")
+        print(f"{'Skenario / Fase':<44} | {'Rows':<5} | {'PRB C1':<8} | {'Backlog Max':<12} | {'Drop Max':<11} | {'MCS':<5} | {'BLER C1':<9} | {'URLLC RTT':<10} | {'SLA Viol %':<10}")
+        print("-" * 132)
         for (scen, ph), d in sorted(phase_data.items()):
             label = f"{scen} [{ph}]"
             n_r = d["total_rows"]
@@ -292,7 +317,7 @@ def main():
                 s_s = f"{(d['s2_sla_violated_rows']/ev*100):>9.1f}%"
             else:
                 s_s = f"{'N/A':>10}"
-            print(f"{label:<34} | {n_r:<5} | {prb_s} | {b_s} | {d_s} | {m_s} | {bl_s} | {r_s} | {s_s}")
+            print(f"{label:<44} | {n_r:<5} | {prb_s} | {b_s} | {d_s} | {m_s} | {bl_s} | {r_s} | {s_s}")
 
     print("=" * 115)
     print(f"Total Sampel Dievaluasi: {total_rows} baris")
@@ -304,6 +329,7 @@ def main():
     print(" - Cov %      : Rasio sampel valid terhadap total baris fase (Valid / Total * 100%).")
     print(" - SLA Viol % : Rasio pelanggaran SLA terhadap sampel definitif (SLA Viol / (Violated + Compliant) * 100%).")
     print(" - Joint SLA  : Evaluasi SLA gabungan eMBB+URLLC bersyarat ketersediaan receiver goodput EXT-DN.")
+    print(" - Segmentasi : Batas 120s/420s pada skenario gangguan (S3-S4, S6-S9) adalah interval jadwal nominal injeksi, bukan bukti definitif status fisik jaringan. Skenario S1/S2 dan S5 dievaluasi sebagai fase tunak tunggal (steady-state).")
 
 
 if __name__ == "__main__":
