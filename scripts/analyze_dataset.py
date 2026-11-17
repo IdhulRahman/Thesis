@@ -50,7 +50,15 @@ def make_metrics_bucket():
         "drops": [],
         "mcs_c1": [],
         "bler_c1": [],
-        "snr_c1": []
+        "snr_c1": [],
+
+        # 3GPP NWDAF AnLF Metrics
+        "nwdaf_ul": [],
+        "nwdaf_dl": [],
+        "nwdaf_dur": [],
+        "nwdaf_std": [],
+        "nwdaf_fresh": [],
+        "nwdaf_api": []
     }
 
 
@@ -154,6 +162,31 @@ def update_bucket(d, row):
     snr1 = parse_val(row, "ran_snr_cell1", "ran_cell_snr_db_1")
     if not math.isnan(snr1):
         d["snr_c1"].append(snr1)
+
+    # --- 3GPP NWDAF AnLF Telemetry ---
+    ul = parse_val(row, "nwdaf_comm_ul_bytes")
+    if not math.isnan(ul):
+        d["nwdaf_ul"].append(ul)
+
+    dl = parse_val(row, "nwdaf_comm_dl_bytes")
+    if not math.isnan(dl):
+        d["nwdaf_dl"].append(dl)
+
+    dur = parse_val(row, "nwdaf_comm_duration_sec")
+    if not math.isnan(dur):
+        d["nwdaf_dur"].append(dur)
+
+    std = parse_val(row, "nwdaf_comm_vol_std_bytes")
+    if not math.isnan(std):
+        d["nwdaf_std"].append(std)
+
+    fresh = parse_val(row, "nwdaf_comm_freshness")
+    if not math.isnan(fresh):
+        d["nwdaf_fresh"].append(fresh)
+
+    api = parse_val(row, "nwdaf_api_status")
+    if not math.isnan(api):
+        d["nwdaf_api"].append(api)
 
 
 def is_recorder_placeholder(raw_phase, scen_upper):
@@ -311,6 +344,40 @@ def main():
 
         print(f"{scen:<16} | {prb_avg_str} | {prb_max_str} | {b_max_str} | {drops_max_str} | {mcs_avg_str} | {bler_avg_str} | {snr_avg_str}")
 
+    # --- 3B. Print 3GPP NWDAF AnLF Telemetry Report ---
+    print("\n--- 3B. 3GPP NWDAF AnLF (VM-07 NBI :8080) TELEMETRI ANALITIK USER-PLANE ---")
+    print(f"{'Skenario Event':<16} | {'API Status':<10} | {'Freshness':<10} | {'URR Updates':<11} | {'UL Total':<12} | {'DL Total':<12} | {'Max Duration':<12}")
+    print("-" * 95)
+
+    for scen, d in sorted(scen_data.items()):
+        api_str = f"{sum(d['nwdaf_api'])/len(d['nwdaf_api'])*100:>8.1f} %" if d["nwdaf_api"] else f"{'N/A':>10}"
+        fresh_str = f"{sum(d['nwdaf_fresh'])/len(d['nwdaf_fresh'])*100:>8.1f} %" if d["nwdaf_fresh"] else f"{'N/A':>10}"
+
+        urr_updates = 0
+        if len(d["nwdaf_ul"]) > 1:
+            for i in range(1, len(d["nwdaf_ul"])):
+                if d["nwdaf_ul"][i] != d["nwdaf_ul"][i-1] or (i < len(d["nwdaf_dl"]) and d["nwdaf_dl"][i] != d["nwdaf_dl"][i-1]):
+                    urr_updates += 1
+            urr_str = f"{urr_updates:>11}"
+        else:
+            urr_str = f"{'N/A':>11}"
+
+        if d["nwdaf_ul"]:
+            delta_ul = d["nwdaf_ul"][-1] - d["nwdaf_ul"][0]
+            ul_str = f"{delta_ul/1e6:>8.2f} MB" if delta_ul >= 0 else f"{d['nwdaf_ul'][-1]/1e6:>8.2f} MB"
+        else:
+            ul_str = f"{'N/A':>12}"
+
+        if d["nwdaf_dl"]:
+            delta_dl = d["nwdaf_dl"][-1] - d["nwdaf_dl"][0]
+            dl_str = f"{delta_dl/1e6:>8.2f} MB" if delta_dl >= 0 else f"{d['nwdaf_dl'][-1]/1e6:>8.2f} MB"
+        else:
+            dl_str = f"{'N/A':>12}"
+
+        dur_str = f"{d['nwdaf_dur'][-1]:>10.1f} s" if d["nwdaf_dur"] else f"{'N/A':>12}"
+
+        print(f"{scen:<16} | {api_str} | {fresh_str} | {urr_str} | {ul_str} | {dl_str} | {dur_str}")
+
     # --- 4. Print Operational Phase Segmentation Report (if multiple phases present) ---
     if len(phase_data) > len(scen_data):
         print("\n--- 4. AUDIT SEGMENTASI FASE OPERASIONAL (Jadwal Nominal Gangguan S3-S4/S6-S9: Baseline [0-120s] -> Active Fault [120-420s] -> Recovery [420-600s]) ---")
@@ -334,6 +401,14 @@ def main():
 
     print("=" * 115)
     print(f"Total Sampel Dievaluasi: {total_rows} baris")
+    jsonl_file = os.path.join(os.path.dirname(raw_file), "nwdaf_raw_poll_responses.jsonl")
+    if os.path.isfile(jsonl_file):
+        try:
+            with open(jsonl_file, "r", encoding="utf-8") as jf:
+                poll_count = sum(1 for line in jf if line.strip())
+            print(f"Arsip NWDAF Raw        : {poll_count} poll responses tersimpan di {os.path.basename(jsonl_file)}")
+        except Exception:
+            pass
     print("Definisi Audit Telemetri & Klasifikasi Probe:")
     print(" - Valid      : Sampel dengan pengukuran RTT numerik yang berhasil diterima dalam jendela evaluasi.")
     print(" - Outage     : Gangguan total terkonfirmasi (probe aktif, packet loss terukur >= 100%).")

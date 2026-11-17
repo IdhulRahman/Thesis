@@ -33,3 +33,6 @@ Setiap run eksperimen dijalankan di bawah protokol kontinu 600 detik:
 
 ## 4. Alur Sinkronisasi VM (Sesuai `mem:project/user_workflow_and_agent_role`)
 Sinkronisasi ke target VM selalu menggunakan perintah `curl` dari GitHub raw publik (`https://raw.githubusercontent.com/IdhulRahman/Thesis/main/...`) dan dieksekusi langsung oleh peneliti di terminal masing-masing VM.
+
+## 5. Log Run Eksperimen Formal (Kampanye Dataset)
+- **EXP_S1_20261117_165322**: Run 1 S1 (`S1_NORMAL_LIGHT`), durasi 600.0s (600 sampel), 600 scrape OK (0 gagal), 298 poll NWDAF tersimpan (0 gagal), Alasan selesai: DURATION_REACHED.

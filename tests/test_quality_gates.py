@@ -1077,6 +1077,36 @@ class TestAnalyzeDatasetIntegration(unittest.TestCase):
         self.assertIn("PHASE_3_ACTUAL_RECOVERY", output)
         self.assertNotIn("1_BASELINE_NOMINAL", output)
 
+    def test_13_nwdaf_telemetry_section_output(self):
+        """CSV containing NWDAF columns must output Section 3B with aggregated metrics."""
+        rows = [
+            {
+                "timestamp_utc": "2026-11-17T12:00:00Z",
+                "elapsed_sec": "1.0",
+                "event_scenario": "S1_NORMAL_LIGHT",
+                "nwdaf_comm_ul_bytes": "1000000",
+                "nwdaf_comm_dl_bytes": "2000000",
+                "nwdaf_comm_duration_sec": "30.0",
+                "nwdaf_comm_freshness": "1",
+                "nwdaf_api_status": "1"
+            },
+            {
+                "timestamp_utc": "2026-11-17T12:00:30Z",
+                "elapsed_sec": "31.0",
+                "event_scenario": "S1_NORMAL_LIGHT",
+                "nwdaf_comm_ul_bytes": "1500000",
+                "nwdaf_comm_dl_bytes": "3000000",
+                "nwdaf_comm_duration_sec": "60.0",
+                "nwdaf_comm_freshness": "1",
+                "nwdaf_api_status": "1"
+            }
+        ]
+        csv_path = self._write_csv("test_nwdaf.csv", rows)
+        output = self._run_analyzer(csv_path)
+
+        self.assertIn("--- 3B. 3GPP NWDAF AnLF (VM-07 NBI :8080) TELEMETRI ANALITIK USER-PLANE ---", output)
+        self.assertIn("100.0 %", output)
+
 
 # ---------------------------------------------------------------------------
 # Integration tests for receiver_iperf.sh abort & export persistence
