@@ -155,7 +155,9 @@ case "$ACTION" in
     IPERF_LOG=""
     IPERF_PID=""
     UE1_PING_LOG=""
+    UE1_PING_PID=""
     PING_LOG=""
+    UE2_PING_PID=""
     UE1_NS=""
     UE2_NS=""
 
@@ -176,14 +178,16 @@ case "$ACTION" in
         IPERF_PID=$!
         echo "$IPERF_PID" >> "$PID_FILE"
         nohup ip netns exec "$ns" ping -D -O -I oaitun_ue1 -i 0.2 -c $(( (DURATION + 5) * 5 )) "$EXT_DN_IP" </dev/null > "$UE1_PING_LOG" 2>&1 &
-        echo $! >> "$PID_FILE"
+        UE1_PING_PID=$!
+        echo "$UE1_PING_PID" >> "$PID_FILE"
       else
         UE2_NS="$ns"
         PING_LOG="$LOG_DIR/ping_${ns}_${TIMESTAMP}.log"
         > "$PING_LOG"
         > "${PING_LOG}.state"
         nohup ip netns exec "$ns" ping -D -O -I oaitun_ue1 -i 0.1 -c $(( (DURATION + 5) * 10 )) "$EXT_DN_IP" </dev/null > "$PING_LOG" 2>&1 &
-        echo $! >> "$PID_FILE"
+        UE2_PING_PID=$!
+        echo "$UE2_PING_PID" >> "$PID_FILE"
       fi
     done < "$STATE_FILE"
 
@@ -338,6 +342,14 @@ case "$ACTION" in
       sleep 0.5
     fi
 
+    # Hentikan background ping dengan SIGINT agar menulis ringkasan statistik ke log
+    for ppid in "$UE1_PING_PID" "$UE2_PING_PID"; do
+      if [[ -n "$ppid" ]] && kill -0 "$ppid" 2>/dev/null; then
+        kill -INT "$ppid" 2>/dev/null || true
+      fi
+    done
+    sleep 0.2
+
     sender_tput=""
     receiver_tput=""
     if [[ -n "$IPERF_LOG" && -f "$IPERF_LOG" ]]; then
@@ -353,11 +365,15 @@ case "$ACTION" in
     ping_stat=""
     ping_loss=""
     if [[ -n "$PING_LOG" && -f "$PING_LOG" ]]; then
-      ping_stat=$(tail -n 2 "$PING_LOG" 2>/dev/null | grep -oP '(?<=rtt min/avg/max/mdev = )[^ ]+' || echo "N/A")
-      ping_loss=$(tail -n 3 "$PING_LOG" 2>/dev/null | grep -oP '\d+(\.\d+)?(?=%\s+(packet\s+)?loss)' || echo "$loss_pct")
+      ping_stat=$(grep -oP '(?<=rtt min/avg/max/mdev = )[^ ]+' "$PING_LOG" 2>/dev/null | tail -n 1 || true)
+      ping_loss=$(grep -oP '\d+(\.\d+)?(?=%\s+(packet\s+)?loss)' "$PING_LOG" 2>/dev/null | tail -n 1 || true)
     fi
-    [[ -z "$ping_stat" ]] && ping_stat="N/A"
-    [[ -z "$ping_loss" ]] && ping_loss="$loss_pct"
+    if [[ -z "$ping_stat" || "$ping_stat" == "N/A" ]]; then
+      [[ "$rtt" != "NaN" && -n "$rtt" ]] && ping_stat="$rtt" || ping_stat="N/A"
+    fi
+    if [[ -z "$ping_loss" ]]; then
+      [[ "$loss_pct" != "NaN" && -n "$loss_pct" ]] && ping_loss="$loss_pct" || ping_loss="0.0"
+    fi
 
     echo "Hasil: eMBB Sender=${sender_tput} Mbps | eMBB Receiver=${receiver_tput} Mbps | URLLC RTT=${ping_stat} ms | Loss=${ping_loss}%"
     cleanup

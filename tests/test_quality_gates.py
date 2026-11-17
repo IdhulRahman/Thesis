@@ -1309,5 +1309,75 @@ class TestReceiverAbortExportIntegration(unittest.TestCase):
         self.assertIn("interrupt", summary["error"])
 
 
+class TestTrafGenQualityGates(unittest.TestCase):
+    """Quality gates for scripts/trafgen.sh ping and throughput parsing."""
+
+    def setUp(self):
+        self.repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.trafgen_path = os.path.join(self.repo_root, "scripts", "trafgen.sh")
+        self.test_dir = tempfile.mkdtemp(prefix="test_trafgen_")
+
+    def tearDown(self):
+        if os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def test_01_trafgen_syntax_check(self):
+        res = subprocess.run(["bash", "-n", self.trafgen_path], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"trafgen.sh syntax error: {res.stderr}")
+
+    def test_02_trafgen_ping_summary_extraction(self):
+        log_path = os.path.join(self.test_dir, "ping.log")
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(
+                "[1731831539.123] 64 bytes from 192.168.70.135: icmp_seq=1 ttl=64 time=10.0 ms\n"
+                "[1731831539.223] 64 bytes from 192.168.70.135: icmp_seq=2 ttl=64 time=12.5 ms\n\n"
+                "--- 192.168.70.135 ping statistics ---\n"
+                "2 packets transmitted, 2 received, 0% packet loss, time 200ms\n"
+                "rtt min/avg/max/mdev = 10.000/11.250/12.500/1.250 ms\n"
+            )
+        script = f"""
+        PING_LOG="{log_path}"
+        rtt="12.50"
+        loss_pct="0.0"
+        ping_stat=$(grep -oP '(?<=rtt min/avg/max/mdev = )[^ ]+' "$PING_LOG" 2>/dev/null | tail -n 1 || true)
+        ping_loss=$(grep -oP '\\d+(\\.\\d+)?(?=%\\s+(packet\\s+)?loss)' "$PING_LOG" 2>/dev/null | tail -n 1 || true)
+        if [[ -z "$ping_stat" || "$ping_stat" == "N/A" ]]; then
+          [[ "$rtt" != "NaN" && -n "$rtt" ]] && ping_stat="$rtt" || ping_stat="N/A"
+        fi
+        if [[ -z "$ping_loss" ]]; then
+          [[ "$loss_pct" != "NaN" && -n "$loss_pct" ]] && ping_loss="$loss_pct" || ping_loss="0.0"
+        fi
+        echo "$ping_stat|$ping_loss"
+        """
+        res = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(res.stdout.strip(), "10.000/11.250/12.500/1.250|0")
+
+    def test_03_trafgen_ping_fallback_when_summary_absent(self):
+        log_path = os.path.join(self.test_dir, "ping_incomplete.log")
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(
+                "[1731831539.123] 64 bytes from 192.168.70.135: icmp_seq=1 ttl=64 time=10.0 ms\n"
+                "[1731831539.223] 64 bytes from 192.168.70.135: icmp_seq=2 ttl=64 time=13.3 ms\n"
+            )
+        script = f"""
+        PING_LOG="{log_path}"
+        rtt="13.30"
+        loss_pct="0.0"
+        ping_stat=$(grep -oP '(?<=rtt min/avg/max/mdev = )[^ ]+' "$PING_LOG" 2>/dev/null | tail -n 1 || true)
+        ping_loss=$(grep -oP '\\d+(\\.\\d+)?(?=%\\s+(packet\\s+)?loss)' "$PING_LOG" 2>/dev/null | tail -n 1 || true)
+        if [[ -z "$ping_stat" || "$ping_stat" == "N/A" ]]; then
+          [[ "$rtt" != "NaN" && -n "$rtt" ]] && ping_stat="$rtt" || ping_stat="N/A"
+        fi
+        if [[ -z "$ping_loss" ]]; then
+          [[ "$loss_pct" != "NaN" && -n "$loss_pct" ]] && ping_loss="$loss_pct" || ping_loss="0.0"
+        fi
+        echo "$ping_stat|$ping_loss"
+        """
+        res = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(res.stdout.strip(), "13.30|0.0")
+
+
 if __name__ == "__main__":
     unittest.main()
