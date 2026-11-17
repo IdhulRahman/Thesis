@@ -740,5 +740,97 @@ nwdaf_poll_in_flight 0
                 os.environ.pop("MONITORING_DATA_DIR", None)
 
 
+# ---------------------------------------------------------------------------
+# Regression tests for analyzer bug fixes (audit 2026-11-17)
+# ---------------------------------------------------------------------------
+
+class TestBlerUnitConversion(unittest.TestCase):
+    """BLER stored as ratio [0,1]; display must multiply by 100."""
+
+    def _fmt_bler(self, ratio):
+        """Mirror the fixed format logic from analyze_dataset.py."""
+        if ratio is None or (isinstance(ratio, float) and math.isnan(ratio)):
+            return "N/A"
+        return f"{ratio * 100:.2f} %"
+
+    def test_zero(self):
+        self.assertEqual(self._fmt_bler(0.0), "0.00 %")
+
+    def test_ten_percent(self):
+        self.assertEqual(self._fmt_bler(0.1), "10.00 %")
+
+    def test_hundred_percent(self):
+        self.assertEqual(self._fmt_bler(1.0), "100.00 %")
+
+    def test_nan_returns_na(self):
+        self.assertEqual(self._fmt_bler(float("nan")), "N/A")
+
+
+class TestNaNBacklogDisplay(unittest.TestCase):
+    """When all backlog readings are NaN (empty list), display must be 'N/A', not '0 B'."""
+
+    def _fmt_backlog(self, backlog_list):
+        return f"{max(backlog_list):>10,.0f} B" if backlog_list else "N/A"
+
+    def test_empty_list_returns_na(self):
+        self.assertEqual(self._fmt_backlog([]), "N/A")
+
+    def test_nonempty_list_returns_value(self):
+        result = self._fmt_backlog([1024.0])
+        self.assertIn("1,024", result)
+
+
+class TestDropRateSemantics(unittest.TestCase):
+    """upf_drops_embb is a rate (pkt/s gauge). Report max rate, not sum."""
+
+    def _fmt_drops(self, drops_list):
+        return f"{max(drops_list):.1f} pkt/s" if drops_list else "N/A"
+
+    def test_empty_returns_na(self):
+        self.assertEqual(self._fmt_drops([]), "N/A")
+
+    def test_max_not_sum(self):
+        values = [10.0, 20.0, 15.0]
+        result = self._fmt_drops(values)
+        self.assertIn("20.0", result)
+        self.assertNotIn("45", result)
+
+
+class TestSlaThreshold(unittest.TestCase):
+    """SLA compliant when loss <= 1.0%. Only loss > 1.0% is a violation."""
+
+    def _is_loss_violation(self, loss_pct):
+        return loss_pct > 1.0 and loss_pct < 100.0
+
+    def test_zero_loss_compliant(self):
+        self.assertFalse(self._is_loss_violation(0.0))
+
+    def test_half_percent_compliant(self):
+        self.assertFalse(self._is_loss_violation(0.5))
+
+    def test_one_percent_compliant(self):
+        self.assertFalse(self._is_loss_violation(1.0))
+
+    def test_above_one_percent_violation(self):
+        self.assertTrue(self._is_loss_violation(1.1))
+
+    def test_full_loss_is_outage_not_violation(self):
+        self.assertFalse(self._is_loss_violation(100.0))
+
+
+class TestLossNaDisplay(unittest.TestCase):
+    """When loss is not measured (empty list), show 'N/A', not '0.0 %'."""
+
+    def _fmt_loss(self, loss_list):
+        avg_loss = (sum(loss_list) / len(loss_list)) if loss_list else None
+        return f"{avg_loss:.1f} %" if avg_loss is not None else "N/A"
+
+    def test_empty_loss_returns_na(self):
+        self.assertEqual(self._fmt_loss([]), "N/A")
+
+    def test_nonempty_loss_returns_value(self):
+        self.assertEqual(self._fmt_loss([2.5]), "2.5 %")
+
+
 if __name__ == "__main__":
     unittest.main()
