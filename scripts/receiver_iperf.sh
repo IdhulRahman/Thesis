@@ -110,14 +110,23 @@ case "$ACTION" in
     # Default 15s; override with RECEIVER_WAIT_TIMEOUT env var for longer sessions
     WAIT_TIMEOUT="${RECEIVER_WAIT_TIMEOUT:-15}"
     WAIT_COUNT=0
-    FORCE_ABORT=0
     while is_receiver_running; do
       if [ "$WAIT_COUNT" -ge "$WAIT_TIMEOUT" ]; then
-        echo "[WARNING] Receiver (PID: ${REC_PID:-port $PORT}) still running after ${WAIT_TIMEOUT}s timeout. Sesi belum selesai secara normal; menghentikan paksa..." >&2
-        terminate_receiver
-        FORCE_ABORT=1
-        sleep 1
-        break
+        echo "[STATUS: PENDING] Receiver (PID: ${REC_PID:-port $PORT}) still running after ${WAIT_TIMEOUT}s timeout. Sesi belum selesai secara normal; TIDAK menghentikan sesi aktif." >&2
+        # Return pending status without terminating the active receiver session
+        python3 - "$SUMMARY_FILE" << 'PENDING_EOF'
+import json, sys
+summary_path = sys.argv[1]
+summary = {
+    "format": "pending",
+    "session_complete": False,
+    "status": "pending",
+    "message": "Receiver session is still actively running. Export deferred without stopping receiver."
+}
+with open(summary_path, "w", encoding="utf-8") as sf:
+    json.dump(summary, sf, indent=2)
+PENDING_EOF
+        exit 2
       fi
       echo "[*] Menunggu receiver (PID: ${REC_PID:-port $PORT}) selesai secara normal (${WAIT_COUNT}/${WAIT_TIMEOUT}s)..."
       sleep 1
@@ -306,8 +315,29 @@ EOF
     echo "[DONE] Receiver stopped."
     ;;
 
+  abort)
+    echo "[*] Explicitly aborting receiver for Run: $RUN_ID | Session: $SESSION_ID | Port: $PORT..."
+    HOST_EXPORT_DIR="/opt/oran/5gc/data/raw/${RUN_ID}"
+    SUMMARY_FILE="${HOST_EXPORT_DIR}/receiver_${SESSION_ID}_summary.json"
+    mkdir -p "$HOST_EXPORT_DIR"
+    sudo docker exec "$CONTAINER" pkill -INT -f "iperf3.*${PORT}" 2>/dev/null || true
+    python3 - "$SUMMARY_FILE" << 'ABORT_EOF'
+import json, sys
+summary_path = sys.argv[1]
+summary = {
+    "format": "aborted",
+    "session_complete": False,
+    "aborted": True,
+    "error": "Sesi receiver dihentikan paksa oleh perintah abort eksplisit"
+}
+with open(summary_path, "w", encoding="utf-8") as sf:
+    json.dump(summary, sf, indent=2)
+ABORT_EOF
+    echo "[DONE] Receiver aborted explicitly."
+    ;;
+
   *)
-    echo "Usage: $0 {check|start [RUN_ID] [SESSION_ID] [PORT]|export [RUN_ID] [SESSION_ID]|status|stop [PORT]}"
+    echo "Usage: $0 {check|start [RUN_ID] [SESSION_ID] [PORT]|export [RUN_ID] [SESSION_ID]|status|stop [PORT]|abort [RUN_ID] [SESSION_ID] [PORT]}"
     exit 1
     ;;
 esac

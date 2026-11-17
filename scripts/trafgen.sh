@@ -338,12 +338,17 @@ case "$ACTION" in
       sleep 0.5
     fi
 
-    final_tput=""
+    sender_tput=""
+    receiver_tput=""
     if [[ -n "$IPERF_LOG" && -f "$IPERF_LOG" ]]; then
-      final_tput=$(grep -oP '\d+(\.\d+)?(?=\s+Mbits/sec\s+receiver)' "$IPERF_LOG" 2>/dev/null | tail -n 1 || true)
-      [[ -z "$final_tput" ]] && final_tput=$(grep -oP '\d+(\.\d+)?(?=\s+Mbits/sec)' "$IPERF_LOG" 2>/dev/null | tail -n 1 || true)
+      sender_tput=$(grep -E '\s+sender\s*$' "$IPERF_LOG" 2>/dev/null | grep -oP '\d+(\.\d+)?(?=\s+Mbits/sec)' | tail -n 1 || true)
+      receiver_tput=$(grep -E '\s+receiver\s*$' "$IPERF_LOG" 2>/dev/null | grep -oP '\d+(\.\d+)?(?=\s+Mbits/sec)' | tail -n 1 || true)
+      if [[ -z "$sender_tput" ]]; then
+        sender_tput=$(grep -oP '\d+(\.\d+)?(?=\s+Mbits/sec)' "$IPERF_LOG" 2>/dev/null | head -n 1 || true)
+      fi
     fi
-    [[ -z "$final_tput" ]] && final_tput="N/A"
+    [[ -z "$sender_tput" ]] && sender_tput="N/A"
+    [[ -z "$receiver_tput" ]] && receiver_tput="N/A"
 
     ping_stat=""
     ping_loss=""
@@ -354,11 +359,7 @@ case "$ACTION" in
     [[ -z "$ping_stat" ]] && ping_stat="N/A"
     [[ -z "$ping_loss" ]] && ping_loss="$loss_pct"
 
-    if [[ "$final_tput" == "N/A" ]]; then
-      echo "Hasil: eMBB=N/A (receiver goodput unavailable) | URLLC RTT=${ping_stat} ms | Loss=${ping_loss}%"
-    else
-      echo "Hasil: eMBB=${final_tput} Mbps (sender-side) | URLLC RTT=${ping_stat} ms | Loss=${ping_loss}%"
-    fi
+    echo "Hasil: eMBB Sender=${sender_tput} Mbps | eMBB Receiver=${receiver_tput} Mbps | URLLC RTT=${ping_stat} ms | Loss=${ping_loss}%"
     cleanup
     ;;
 
