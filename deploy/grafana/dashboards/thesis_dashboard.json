@@ -221,8 +221,8 @@
         { "expr": "ran_cell_prb_utilization{cell_id=\"1\"}", "legendFormat": "Cell-1 PRB (eMBB Slice-1)", "refId": "A" },
         { "expr": "ran_cell_prb_utilization{cell_id=\"2\"}", "legendFormat": "Cell-2 PRB (URLLC Slice-2)", "refId": "B" }
       ],
-      "title": "RAN PRB Allocation Ratio (NPRB / 106)",
-      "description": "Instantaneous PRB allocation ratio sampled at ~1 Hz from OAI DU scheduler logs by ran_adapter.py.",
+      "title": "PRB Grant Proxy (NPRB / configured PRBs)",
+      "description": "Instantaneous PRB allocation ratio sampled at ~1 Hz from OAI DU scheduler logs by ran_adapter.py (normalized by per-cell configured carrier PRBs: 51 for Cell-1, 106 for Cell-2).",
       "type": "timeseries"
     },
     {
@@ -382,7 +382,7 @@
         { "expr": "upf_packet_drops_per_sec{snssai=\"01000001\"}", "legendFormat": "UPF-1 Drops (eMBB)", "refId": "A" },
         { "expr": "upf_packet_drops_per_sec{snssai=\"de00007b\"}", "legendFormat": "UPF-2 Drops (URLLC)", "refId": "B" }
       ],
-      "title": "UPF Kernel Qdisc Packet Drop Rate",
+      "title": "UPF Kernel Qdisc Packet Drop Rate (pkt/s)",
       "description": "Direct drop rate in packets/sec (strictly un-rated gauge).",
       "type": "timeseries"
     },
