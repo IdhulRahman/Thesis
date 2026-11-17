@@ -80,7 +80,7 @@ The repository documentation is modularized into discrete functional categories:
 | **[docs/deployment/](docs/deployment/README.md)** | Step-by-step installation, bring-up, and operational guides for all 7 VMs. |
 | **[docs/integration/](docs/integration/README.md)** | Cross-VM protocol contracts: A1 interface, E2 interface, and native 3GPP NWDAF pipeline. |
 | **[docs/telemetry/](docs/telemetry/metric-catalog.md)** | Single authoritative metric dictionary for the 40-column dataset and Prometheus metrics. |
-| **[docs/experiments/](docs/experiments/methodology.md)** | Comparative baseline methodology (B0–B4 vs Proposed) and scenario registry (S1–S10). |
+| **[docs/experiments/](docs/experiments/methodology.md)** | Comparative baseline methodology (B0–B4 vs Proposed), scenario registry (S1–S9), and RF calibration. |
 | **[docs/references/](docs/references/standards.md)** | Standards claim mapping table (3GPP/ETSI/O-RAN) and bottleneck taxonomy. |
 | **[docs/troubleshooting/](docs/troubleshooting/README.md)** | Domain-separated troubleshooting guides with complete historical case mapping. |
 | **[docs/diagrams/](docs/diagrams/current-system-architecture.mmd)** | Source Mermaid files and high-resolution rendered architectural diagrams. |
@@ -112,11 +112,14 @@ sudo nohup python3 -u /opt/oran/ran/scripts/ran_adapter.py > /dev/null 2>&1 &
 
 # Step 6: Spawn UEs and Traffic on VM-5 (10.102.0.165)
 sudo /opt/oran/ue/scripts/spawn_multi_ue.sh -s1 1 -s2 1
-sudo nohup /opt/oran/ue/scripts/trafgen.sh start 60 25 > /dev/null 2>&1 &
+# Launch baseline traffic (660s for 600s continuous protocol; or 70s for smoke test)
+sudo /opt/oran/ue/scripts/trafgen.sh start 660 5
 
 # Step 7: Launch Collector & Logger on VM-6 (10.102.0.67)
 python3 /opt/oran/monitoring/collector/telemetry_collector.py &
-python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 60
+# Record baseline scenario S1 under continuous 600s protocol
+python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 600
+# (For a quick 60s smoke test: use trafgen.sh start 70 5 and record_experiment.py S1 --duration 60)
 ```
 
 ---

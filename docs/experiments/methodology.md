@@ -160,23 +160,23 @@ Every experimental run follows an eight-stage lifecycle designed to capture clea
 
 ```mermaid
 flowchart LR
-    A["1. Baseline Reset\n(CLEAR / 0 dB / No TBF)"] --> B["2. Readback & Connectivity\n(Ping UE-1 & UE-2)"]
-    B --> C["3. Workload Launch\n(Offered Load & Canary)"]
-    C --> D["4. Treatment Application\n(RAN or Core Fault)"]
-    D --> E["5. Settling Window\n(~60s proposed)"]
-    E --> F["6. Telemetry Recording\n(600s continuous)"]
-    F --> G["7. Treatment Release\n(Clear Fault)"]
-    G --> H["8. Recovery Observation\n(Post-fault window)"]
+    A["1. Baseline Reset\n(0 dB / No TBF)"] --> B["2. Readback Check\n(Ping Canaries)"]
+    B --> C["3. Workload Launch\n(t = -30s: trafgen 660)"]
+    C --> D["4. Recorder Start\n(t = 0s: Baseline 0-120s)"]
+    D --> E["5. Treatment Injected\n(t = 120s: Active 120-420s)"]
+    E --> F["6. Treatment Released\n(t = 420s: Recovery 420-600s)"]
+    F --> G["7. Recorder Stop\n(t = 600s: CSV & Manifest)"]
+    G --> H["8. Export & Audit\n(t = 630s: Receiver JSON)"]
 ```
 
 1. **Stage 1 — Baseline Reset:** Reset RF channel path loss to verified Profile 1 baseline ($0.0\text{ dB}$) and delete UPF egress rate shaping.
 2. **Stage 2 — Readback & Connectivity Check:** Query RF channel status via `rfsim_channel_control.py show` and qdisc via `tc -s qdisc show dev eth0`. Confirm ping reachability from `ue1` and `ue2` to EXT-DN (`192.168.70.145`).
-3. **Stage 3 — Workload Launch:** Start traffic generation (`iperf3 -u` on UE-1) and canary probing (`ping` on UE-2) with parameters explicitly logged in the experiment manifest.
-4. **Stage 4 — Treatment Application:** Apply the specified scenario treatment (e.g., path loss attenuation via Telnet or egress TBF on UPF-1 container).
-5. **Stage 5 — Settling Observation Window (~60s proposed):** Allow physical queues, scheduler link adaptation, and container network buffers to stabilize into the target operating regime.
-6. **Stage 6 — Telemetry Recording Window (600s continuous protocol):** Execute `record_experiment.py` at 1.000 Hz monotonic scraping cadence to capture the continuous multi-phase regime.
-7. **Stage 7 — Treatment Release:** Remove the active disturbance (restore radio attenuation or delete qdisc shaper).
-8. **Stage 8 — Recovery Observation Window:** Continue telemetry recording and canary probing until queue drainage, RTT normalization, and SLA recovery can be conclusively evaluated.
+3. **Stage 3 — Workload Launch ($t \approx -30\text{ s}$):** Start continuous traffic generation (`iperf3 -u` on UE-1 framed for 660s) and canary probing (`ping` on UE-2) via `trafgen.sh start 660 <rate>`.
+4. **Stage 4 — Recorder Start ($t = 0\text{ s}$ — Baseline Regime $[0, 120\text{ s}]$):** Execute `record_experiment.py <SCENARIO> --duration 600` at 1.000 Hz monotonic cadence. Telemetry stabilizes under unperturbed baseline conditions.
+5. **Stage 5 — Treatment Application ($t = 120\text{ s}$ — Active Disturbance Regime $[120, 420\text{ s}]$):** Apply the scenario treatment (path attenuation via `rfsim_channel_control.py` or egress TBF via `tc qdisc`). Queues build up and link adaptation responds.
+6. **Stage 6 — Treatment Release ($t = 420\text{ s}$ — Recovery Regime $[420, 600\text{ s}]$):** Remove the active disturbance (`rfsim_channel_control.py reset` or `tc qdisc del dev eth0 root`). Telemetry records queue drainage and link recovery under ongoing traffic.
+7. **Stage 7 — Recorder Completion ($t = 600\text{ s}$):** The 600-second recording window completes; recorder flushes and seals `telemetry_<RUN_ID>.csv` and writes `manifest.json`.
+8. **Stage 8 — Workload Completion & Receiver Log Export ($t \approx 630\text{ s}$):** Client `trafgen.sh` finishes 660s cycle gracefully, allowing iperf3 server to emit final summary; execute `receiver_iperf.sh export` on VM-3 to archive ground-truth goodput.
 
 * **Recording Duration Spanning Recovery & Offline Segmentation (600s Continuous Protocol):**  
   Under the unified 600-second protocol (`record_experiment.py <SCENARIO> --duration 600`), the recorder captures the baseline stabilization ($[0, 120\text{ s}]$), active disturbance ($[120, 420\text{ s}]$), and post-fault recovery ($[420, 600\text{ s}]$) regimes in a single continuous recording under persistent traffic (`trafgen.sh start 660`).  
@@ -205,7 +205,7 @@ flowchart LR
 * **S4 (Hard Radio Channel Degradation via Attenuation):**  
   The offered traffic load and reference noise power must remain strictly constant, while path attenuation on Channel 1 (`rfsimu_channel_ue0`) is adjusted (preliminary candidate: 30 dB per [rf-attenuation-calibration.md](rf-attenuation-calibration.md)). Target channel identity must be confirmed via Telnet readback. If severe attenuation triggers an unhandled softmodem assertion failure, process termination, or RLF (observed at 35 dB), it must be recorded as an **infrastructure failure**, NOT as a valid training sample of radio congestion.
 * **S5 (Radio Overload via Capacity Saturation):**  
-  Operating load must be determined via a dedicated capacity calibration pilot across candidate rates ($15, 18, 20\text{ Mbps}$). Once calibrated, a **single fixed load** is applied throughout the 600-second recording. Radio overload under clean channel conditions is characterized by scheduling queue growth and goodput shortfall; **BLER can remain low ($\approx 0\%$) and MCS high**, which must not be misconstrued as an absence of overload.
+  Under the current tooling lifecycle, S5 operates under a **single continuous saturated offered load** ($\approx 20\text{ Mbps}$ across the 660-second window, launched once via `trafgen.sh start 660 20`), directly benchmarking scheduling capacity limits against Profile 1 ($C \approx 16.6\text{ Mbps}$). The multi-phase dynamic offered load transition ($10 \to 20 \to 10\text{ Mbps}$) is explicitly documented as **not yet implemented in testbed tooling** pending decoupled lifecycle support in `trafgen.sh` (as invoking `start` mid-run triggers `cleanup()` which terminates active ping canaries). Radio overload under clean channel conditions is characterized by scheduling queue growth and goodput shortfall; **BLER can remain low ($\approx 0\%$) and MCS high**, which must not be misconstrued as an absence of overload.
 * **S6 (Core Bottleneck via UPF Egress Shaping):**  
   Radio channel capacity must be verified as capable of forwarding the offered load (e.g., $10\text{ Mbps}$ traffic), while the TBF rate on UPF-1 egress (`eth0`) is set strictly lower (candidate $5\text{–}6\text{ Mbps}$) so that the constraint binds at the Core user plane. The formal terminology is **UPF-host/container egress shaping**.
 * **S8 (Joint Soft Degradation):**  

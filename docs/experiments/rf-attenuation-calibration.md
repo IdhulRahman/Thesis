@@ -1,11 +1,11 @@
 # RFsim Uplink Attenuation Calibration: Observations, Evidence, and Scenario Implications
 
 **Status:** User-reported experiment — 2026-11-17 WIB (Asia/Jakarta). Raw log artifacts pending verification.
-**Testbed:** OAI RFsim (5G NR FR1), VM-2 (gNB-DU) ↔ VM-5 (nrUE), Cell-1 (51 PRB, `-E`, AWGN, `noise_power_dB=-100.0`)
+**Testbed:** OAI RFsim (5G NR FR1), VM-4 (gNB-DU) ↔ VM-5 (nrUE), Cell-1 (51 PRB, `-E`, AWGN, `noise_power_dB=-100.0`)
 **Traffic:** 10 Mbps UDP uplink, `iperf3 -u -b 10M`, UE→EXT-DN via `oaitun_ue1` (IP `12.1.1.3`), iperf3 server at `192.168.70.145:5201`
 **Sweep tool:** `scripts/rfsim_channel_control.py sweep --channel-id 1 --port 9090`
 **Sweep parameters:** Attenuation 5.0 → 40.0 dB, step +5.0 dB, 30 s dwell per step
-**Monitoring:** Prometheus scrape at `localhost:9100/metrics` (ran_adapter), 2 s interval
+**Monitoring:** Prometheus scrape at VM-6 (localhost:9100/metrics, populated by `ran_adapter` on VM-4), 2 s interval
 
 ---
 
@@ -65,7 +65,7 @@ Fields: `PRB%` | `MCS` | `BLER` | `SNR`
 11:47:48 | 100.00% | 17.0 | 0.1000 | 24.90 dB
 ```
 
-Source: Prometheus scrape at `localhost:9100/metrics`, `ran_adapter` on VM-2.
+Source: Scraped from VM-6 telemetry collector (`10.102.0.67:9100/metrics`), populated by `ran_adapter` on VM-4 (`10.102.0.167`).
 
 ---
 
@@ -78,16 +78,16 @@ Source: Prometheus scrape at `localhost:9100/metrics`, `ran_adapter` on VM-2.
 Values reported by `ran_cell_bler` (and stored in CSV column `ran_bler_cell1`) are dimensionless ratios in [0, 1]. A value of `0.1000` means 10 % BLER, not 0.10 %. All display and analysis code must multiply by 100 before formatting as a percentage.
 
 **(b) BLER > 0 does not imply a RAN bottleneck.**
-HARQ retransmissions and link adaptation can maintain throughput service despite non-zero BLER. At 25 dB (step 5), BLER ≈ 10 % with MCS 17 and 100 % PRB grant; sender-side service appeared unaffected. This is a stressed but non-binding (non-bottleneck) radio condition per sender evidence. Receiver-side confirmation is pending.
+HARQ retransmissions and link adaptation can maintain throughput service despite non-zero BLER. At 25 dB (step 5), BLER ≈ 10 % with MCS 17 and 100 % PRB grant; sender-side offered load appeared unaffected (10 Mbps). However, sender-side metrics alone cannot definitively prove that service was delivered without packet loss or jitter; receiver-side confirmation at EXT-DN is pending before formally declaring 25 dB non-binding.
 
-**(c) 25 dB classification: stressed non-binding (preliminary).**
-Evidence supports that 25 dB degrades the radio link (MCS drops to 17, BLER ≈ 10 %) but does not conclusively confirm a service bottleneck. Appropriate for S3 (RAN-stressed) scenario candidate, but cannot be declared a confirmed RAN bottleneck until per-step receiver goodput evidence is collected.
+**(c) 25 dB classification: stressed radio link (preliminary candidate).**
+Evidence supports that 25 dB degrades the radio link (MCS drops to 17, BLER ≈ 10 %) but does not conclusively confirm a service bottleneck. Appropriate for S3 (RAN-stressed) scenario candidate, but cannot be declared a confirmed RAN bottleneck or definitively non-binding until per-step receiver goodput evidence is collected.
 
-**(d) 30 dB is a preliminary Core/stressed candidate, not confirmed.**
+**(d) 30 dB is a preliminary RAN/stressed candidate, not confirmed.**
 At 30 dB, MCS dropped to 0–1 and BLER reached 0.62. Sender-side offered load remained 10 Mbps, but receiver goodput was not captured per step. Classification of 30 dB as a RAN-binding or service-impacting threshold requires receiver evidence.
 
 **(e) 35 dB caused Radio Link Failure — not a stable operating point.**
-The UE disconnect at ~t=196 s into step 7 constitutes a Radio Link Failure (RLF). This is consistent with link budget collapse at 35 dB under these testbed conditions. 35 dB should not be used as a stable fault injection target without confirmed recovery and re-attachment after each application.
+The UE disconnect at ~t=196 s into step 7 constitutes an observed Radio Link Failure (RLF). While this is consistent with link budget collapse at 35 dB under these testbed parameters, verifying the exact disconnect trigger (RRC out-of-sync vs softmodem thread stall) requires softmodem / RRC log corroboration. 35 dB should not be used as a stable fault injection target without confirmed recovery and re-attachment after each application.
 
 **(f) 40 dB was not independently measured.**
 Step 8 was not observed in a connected state. The 40 dB row in the table is a placeholder indicating the sweep attempted this step but had no active UE session. Any scenario targeting 40 dB must run a separate, fresh sweep to establish a baseline.

@@ -66,7 +66,7 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 | **`S5`** | `S5_RAN_OVERLOAD` | `RAN` | Hard-Load | gNB DU-1 (Cell-1) | Radio capacity saturation under reference channel | Fixed load via capacity calibration (candidates: $15, 18, 20\text{ Mbps}$) | Receiver throughput capped ($G_{\text{rx}} < R_{\text{tx}}$), $\Delta t > 0$, PRB $\to 51$, UPF backlog 0 B. |
 | **`S6`** | `S6_CORE_SOFT` | `CORE` | Soft | UPF-1 Egress (`eth0`) | Soft Core transport rate limiting via mild TBF | Fixed load ($\approx 10\text{ Mbps}$), mild TBF rate ($8\text{–}8.5\text{ Mbps}$, latency $80\text{ ms}$) | UPF backlog stays moderate (6k–14k Bytes), RTT increases mildly, minimal drops. |
 | **`S7`** | `S7_CORE_QUEUE_TBF` | `CORE` | Hard | UPF-1 Egress (`eth0`) | Hard UPF-host/container egress rate shaping via binding TBF | Fixed load ($\approx 10\text{ Mbps}$), binding TBF rate ($5\text{–}6\text{ Mbps}$, latency $200\text{ ms}$) | UPF backlog surges, packet drops increase, egress rate matches TBF, radio metrics nominal. |
-| **`S8`** | `S8_JOINT_SOFT` | `JOINT` | Soft | DU-1 UL + UPF-1 Egress | Simultaneous soft radio attenuation and soft core rate limiting | Soft UL attenuation ($4\text{–}6\text{ dB}$) + Soft TBF ($8\text{–}8.5\text{ Mbps}$) | Sub-threshold degradation in both domains: PRB ~58–65%, Backlog ~6k–14k B, RTT ~26–30 ms. |
+| **`S8`** | `S8_JOINT_SOFT` | `JOINT` | Soft | DU-1 UL + UPF-1 Egress | Simultaneous soft radio attenuation and soft core rate limiting | Candidate UL attenuation: 25 dB (preliminary; candidate non-binding stressed radio per [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) + Soft TBF ($8\text{–}8.5\text{ Mbps}$) | Sub-threshold degradation in both domains: PRB ~58–65%, Backlog ~6k–14k B, RTT ~26–30 ms. |
 | **`S9`** | `S9_JOINT_OVERLOAD` | `JOINT` | Hard | DU-1 UL + UPF-1 Egress | Simultaneous active radio impairment and binding Core shaping | Degraded radio forwarding rate $R_{\text{arr}}$ + binding TBF ($R_{\text{TBF}} < R_{\text{arr}}$) | Simultaneous radio degradation (low SNR/MCS, elevated BLER) AND Core congestion (elevated UPF backlog and drops). |
 
 ---
@@ -135,7 +135,7 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
    ```
 6. **Evidence to Collect:** Telemetry CSV (NPRB, SNR, MCS, BLER), Telnet command/readback logs, iperf receiver logs.
 7. **Responses to Examine:** Moderate SNR drop; MCS shifts downward (22–24); PRB grant proxy elevated to 57–65%; mild goodput reduction (~9–9.5 Mbps). UPF backlog remains $0\text{ B}$.
-8. **Interpretation Boundaries:** Temporal segmentation rules apply: $[0, 120\text{ s}]$ is Baseline, $[120, 420\text{ s}]$ is Active Soft RAN, and $[420, 600\text{ s}]$ captures drainage/recovery under persistent load.
+8. **Interpretation Boundaries:** Temporal segmentation rules apply: $[0, 120\text{ s}]$ is Baseline, $[120, 420\text{ s}]$ is Active Soft RAN, and $[420, 600\text{ s}]$ captures drainage/recovery under persistent load. Because 25 dB calibration showed BLER ≈ 10% and MCS 17 while 10 Mbps sender demand was still met, S3 represents a stressed radio link; it must NOT be automatically declared an active RAN bottleneck without verified receiver goodput deficit per [rf-attenuation-calibration.md](rf-attenuation-calibration.md).
 
 ---
 
@@ -169,18 +169,17 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 
 1. **Objective:** Observe radio service limitations and bottleneck signatures caused purely by traffic demand exceeding available air-interface capacity under clean/reference radio conditions.
 2. **Initial Conditions:** Reference radio channel (no added attenuation, reference noise); unshaped UPF egress.
-3. **Independent Variables (Changed):** Offered load set to a fixed saturation value (candidate: $18\text{–}20\text{ Mbps}$) during $t \in [120, 420\text{ s}]$, returning to moderate baseline load ($10\text{ Mbps}$) at $t = 420\text{ s}$.
+3. **Independent Variables (Changed):** Under the current unified tooling lifecycle, offered load is set to a single continuous saturated value (candidate: $20\text{ Mbps}$) across the 660s run (`trafgen.sh start 660 20`), directly benchmarking Profile 1 scheduling capacity limits ($C \approx 16.6\text{ Mbps}$). The three-phase dynamic offered load transition ($10 \to 20 \to 10\text{ Mbps}$) is documented as not yet implemented in testbed tooling pending decoupled probe lifecycle support.
 4. **Controlled Variables (Maintained):** Reference RF propagation parameters, Core UPF unshaped egress, Slice 2 canary probing.
 5. **Planned Execution Sequence (600s Continuous Protocol):**
    ```bash
-   # Terminal 1 (VM-5 UE): Launch baseline traffic (10 Mbps) for 120s, ramp to overload (20 Mbps) at t = 120s, return to baseline at t = 420s
-   # Or execute multi-stage trafgen script sequence.
+   # Terminal 1 (VM-5 UE): Launch continuous saturated traffic (20 Mbps) for 660s
    sudo /opt/oran/ue/scripts/trafgen.sh start 660 20
 
    # Terminal 2 (VM-6 Monitoring): Start recorder ~30s after traffic starts
    python3 /opt/oran/monitoring/scripts/record_experiment.py S5 --duration 600 --notes "S5 RAN Overload Capacity Saturation 600s"
    ```
-   > **Procedure gap:** The command above offers 20 Mbps from t=0 and does not implement the described three-phase reference→overload→reference transition. Use two sequential `trafgen.sh start` calls with different rates to approximate the transition. This procedure is not yet fully automated.
+   > **Tooling boundary:** S5 is executed as a single continuous 20 Mbps saturated load across the 660-second window. A dynamic mid-run rate transition ($10 \to 20 \to 10\text{ Mbps}$) is not yet implemented in `trafgen.sh` because restarting `trafgen.sh` mid-run triggers `cleanup()`, which terminates active ping canary processes.
 6. **Evidence to Collect:** Telemetry CSV, iperf receiver delivery logs (arrival goodput), UE-1 in-band RTT logs, UE-2 cross-slice canary logs, SFN progress audit.
 7. **Responses to Examine:** Receiver throughput capped below offered load ($G_{\text{rx}} < R_{\text{tx}}$); positive receiver–sender duration difference ($\Delta t > 0$); instantaneous PRB grant proxy saturating near $100\%$ ($N_{\text{PRB}} \to 51$); Core UPF queue backlog remains zero ($0\text{ B}$).
 8. **Interpretation Boundaries:** Capacity exhaustion is a scheduling volume limit, not RF corruption; BLER remains low ($\approx 0\%$) and MCS remains high under clean channels.
@@ -244,7 +243,7 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 1. **Objective:** Evaluate telemetry signatures when sub-threshold impairments simultaneously affect both radio and core domains — testing whether joint soft degradation is distinguishable from single-domain soft faults.
 2. **Initial Conditions:** Reference configuration; previous scenario treatments cleared.
 3. **Independent Variables (Changed):**
-   * RAN impairment: Injected Uplink path attenuation on Channel 1 at soft level ($4\text{–}6\text{ dB}$) during $t \in [120, 420\text{ s}]$, reset at $t = 420\text{ s}$.
+   * RAN impairment: Injected Uplink path attenuation on Channel 1 at candidate soft level 25 dB (preliminary; candidate non-binding stressed radio per [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) during $t \in [120, 420\text{ s}]$, reset at $t = 420\text{ s}$.
    * Core impairment: Mild TBF shaping on UPF-1 `eth0` ($8\text{–}8.5\text{ Mbps}$) during $t \in [120, 420\text{ s}]$, removed at $t = 420\text{ s}$.
 4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$ continuous across 660s), reference noise power, Slice 2 canary probing.
 5. **Planned Execution Sequence (600s Continuous Protocol):**
@@ -253,10 +252,10 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
    sudo /opt/oran/ue/scripts/trafgen.sh start 660 10
 
    # Terminal 2 (VM-6 Monitoring): Start recorder ~30s after traffic starts
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S8 --duration 600 --notes "S8 Joint Soft 5dB + TBF 8.5M"
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S8 --duration 600 --notes "S8 Joint Soft 25dB + TBF 8.5M"
 
    # At elapsed t = 120s (VM-4 RAN & VM-3 Core): Apply simultaneous soft impairments
-   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 5.0 --channel-id 1 --port 9090
+   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 25.0 --channel-id 1 --port 9090
    sudo docker exec oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 8500kbit burst 10kb latency 80ms
 
    # At elapsed t = 420s (VM-4 RAN & VM-3 Core): Release both impairments; observe recovery until t = 600s
