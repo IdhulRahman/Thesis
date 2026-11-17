@@ -189,7 +189,7 @@ case "$ACTION" in
 
     echo "TrafGen: ${DURATION}s | eMBB ${EMBB_RATE}M | URLLC 100ms"
     printf "%4s  %-10s  %-9s  %-7s  %-9s  %-8s  %-6s  %s\n" \
-      "Sec" "eMBB-Mbps" "eMBB-RTT" "Loss" "URLLC-RTT" "Jitter" "Loss" "SLA"
+      "Sec" "eMBB-Offered" "eMBB-RTT" "Loss" "URLLC-RTT" "Jitter" "Loss" "SLA"
     echo "-----------------------------------------------------------------------"
 
     prev_rtt="0.0"
@@ -343,7 +343,7 @@ case "$ACTION" in
       final_tput=$(grep -oP '\d+(\.\d+)?(?=\s+Mbits/sec\s+receiver)' "$IPERF_LOG" 2>/dev/null | tail -n 1 || true)
       [[ -z "$final_tput" ]] && final_tput=$(grep -oP '\d+(\.\d+)?(?=\s+Mbits/sec)' "$IPERF_LOG" 2>/dev/null | tail -n 1 || true)
     fi
-    [[ -z "$final_tput" ]] && final_tput="$EMBB_RATE"
+    [[ -z "$final_tput" ]] && final_tput="N/A"
 
     ping_stat=""
     ping_loss=""
@@ -354,7 +354,11 @@ case "$ACTION" in
     [[ -z "$ping_stat" ]] && ping_stat="N/A"
     [[ -z "$ping_loss" ]] && ping_loss="$loss_pct"
 
-    echo "Hasil: eMBB=${final_tput} Mbps | URLLC RTT=${ping_stat} ms | Loss=${ping_loss}%"
+    if [[ "$final_tput" == "N/A" ]]; then
+      echo "Hasil: eMBB=N/A (receiver goodput unavailable) | URLLC RTT=${ping_stat} ms | Loss=${ping_loss}%"
+    else
+      echo "Hasil: eMBB=${final_tput} Mbps (sender-side) | URLLC RTT=${ping_stat} ms | Loss=${ping_loss}%"
+    fi
     cleanup
     ;;
 

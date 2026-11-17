@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Dataset Statistical Audit & Analysis Script for 5G O-RAN Thesis
-Location on VM-6: /opt/oran/monitoring/scripts/analyze_final_dataset.py
+Location on VM-6: /opt/oran/monitoring/scripts/analyze_dataset.py
 Pure Python 3 Standard Library - Zero External Dependencies
 Evaluates recorded CSV telemetry: PRB saturation, Core buffer backlog,
 packet drops, throughput delivery, and URLLC SLA violation rates per scenario.
@@ -124,7 +124,7 @@ def main():
                 d["s2_measured_rows"] += 1
                 is_outage = (not math.isnan(s2_loss) and s2_loss >= 100.0)
                 is_latency_violation = (not math.isnan(s2_rtt) and s2_rtt > 20.0)
-                is_loss_violation = (not math.isnan(s2_loss) and 0.0 < s2_loss < 100.0)
+                is_loss_violation = (not math.isnan(s2_loss) and s2_loss > 1.0 and s2_loss < 100.0)
 
                 if is_outage:
                     d["s2_outage_rows"] += 1
@@ -210,8 +210,8 @@ def main():
         rtt_max_str = f"{max(d['s2_rtt']):>6.2f} ms" if d["s2_rtt"] else f"{'N/A':>9}"
 
         if d["s2_measured_rows"] > 0:
-            avg_loss = (sum(d["s2_loss"]) / len(d["s2_loss"])) if d["s2_loss"] else 0.0
-            loss_avg_str = f"{avg_loss:>6.1f} %"
+            avg_loss = (sum(d["s2_loss"]) / len(d["s2_loss"])) if d["s2_loss"] else None
+            loss_avg_str = f"{avg_loss:>6.1f} %" if avg_loss is not None else f"{'N/A':>8}"
             sla_pct = (d["s2_sla_violated_rows"] / d["s2_measured_rows"] * 100.0)
             sla_str = f"{sla_pct:>9.1f}%"
         else:
@@ -222,19 +222,19 @@ def main():
 
     # --- 3. Print Infrastructure Telemetry (RAN & Core) ---
     print("\n--- 3. TELEMETRI INFRASTRUKTUR (RAN CELL-1 & CORE UPF-1) ---")
-    print(f"{'Skenario Event':<16} | {'PRB C1 Avg':<10} | {'PRB C1 Max':<10} | {'Backlog Max':<12} | {'Drops Total':<11} | {'MCS C1 Avg':<10} | {'BLER C1 Avg':<11} | {'SNR C1 Avg':<10}")
-    print("-" * 105)
+    print(f"{'Skenario Event':<16} | {'PRB C1 Avg':<10} | {'PRB C1 Max':<10} | {'Backlog Max':<12} | {'Drop Rate Max':<13} | {'MCS C1 Avg':<10} | {'BLER C1 Avg':<11} | {'SNR C1 Avg':<10}")
+    print("-" * 107)
 
     for scen, d in sorted(scen_data.items()):
         prb_avg_str = f"{sum(d['prb_c1'])/len(d['prb_c1']):>8.1f} %" if d["prb_c1"] else f"{'N/A':>10}"
         prb_max_str = f"{max(d['prb_c1']):>8.1f} %" if d["prb_c1"] else f"{'N/A':>10}"
-        b_max_str = f"{max(d['backlog']):>10,.0f} B" if d["backlog"] else f"{'0 B':>12}"
-        drops_sum_str = f"{sum(d['drops']):>9,.0f} pkt" if d["drops"] else f"{'0 pkt':>11}"
+        b_max_str = f"{max(d['backlog']):>10,.0f} B" if d["backlog"] else f"{'N/A':>12}"
+        drops_max_str = f"{max(d['drops']):>7.1f} pkt/s" if d["drops"] else f"{'N/A':>13}"
         mcs_avg_str = f"{sum(d['mcs_c1'])/len(d['mcs_c1']):>8.1f}" if d["mcs_c1"] else f"{'N/A':>10}"
-        bler_avg_str = f"{sum(d['bler_c1'])/len(d['bler_c1']):>9.2f} %" if d["bler_c1"] else f"{'N/A':>11}"
+        bler_avg_str = f"{sum(d['bler_c1'])/len(d['bler_c1'])*100:>8.2f} %" if d["bler_c1"] else f"{'N/A':>11}"
         snr_avg_str = f"{sum(d['snr_c1'])/len(d['snr_c1']):>7.1f} dB" if d["snr_c1"] else f"{'N/A':>10}"
 
-        print(f"{scen:<16} | {prb_avg_str} | {prb_max_str} | {b_max_str} | {drops_sum_str} | {mcs_avg_str} | {bler_avg_str} | {snr_avg_str}")
+        print(f"{scen:<16} | {prb_avg_str} | {prb_max_str} | {b_max_str} | {drops_max_str} | {mcs_avg_str} | {bler_avg_str} | {snr_avg_str}")
 
     print("=" * 115)
     print(f"Total Sampel Dievaluasi: {total_rows} baris")

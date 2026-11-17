@@ -7,7 +7,7 @@
 # Usage:
 #   ./receiver_iperf.sh check                               # Check iperf3 version & available JSON streaming options
 #   ./receiver_iperf.sh start [RUN_ID] [SESSION_ID] [PORT]  # Start dedicated receiver for run session
-#   ./receiver_iperf.sh export [RUN_ID] [SESSION_ID]        # Export & parse completed JSON log
+#   ./receiver_iperf.sh export [RUN_ID] [SESSION_ID]        # Export & parse completed JSON log (set RECEIVER_WAIT_TIMEOUT=N for longer sessions)
 #   ./receiver_iperf.sh status                              # Check running receivers & listening ports
 #   ./receiver_iperf.sh stop [PORT]                         # Stop receiver process
 # ==============================================================================
@@ -107,7 +107,8 @@ case "$ACTION" in
     }
 
     # Wait for receiver session to finish naturally instead of immediately sending SIGINT
-    WAIT_TIMEOUT=10
+    # Default 15s; override with RECEIVER_WAIT_TIMEOUT env var for longer sessions
+    WAIT_TIMEOUT="${RECEIVER_WAIT_TIMEOUT:-15}"
     WAIT_COUNT=0
     FORCE_ABORT=0
     while is_receiver_running; do
