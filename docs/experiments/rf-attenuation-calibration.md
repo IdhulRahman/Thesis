@@ -107,7 +107,7 @@ The table below maps sweep observations to scenario candidates. All candidate va
 | Scenario | Role | Attenuation Candidate | Rationale | Confidence |
 |---|---|---|---|---|
 | S1 / S2 (Baseline) | Healthy radio | 0 dB (no attenuation) | Low PRB grant, high MCS, BLER ≈ 0, service met | Confirmed (existing data) |
-| S3 (RAN-stressed) | Stressed radio, non-binding | **25 dB** (preliminary) | BLER ≈ 10 %, MCS 17, 100 % PRB; sender service met; receiver pending | **Preliminary — pending receiver evidence** |
+| S3 (RAN-stressed) | Stressed radio, binding status pending receiver evidence | **25 dB** (preliminary) | BLER ≈ 10 %, MCS 17, 100 % PRB; sender service met; receiver pending | **Preliminary — pending receiver evidence** |
 | S4 (RAN-binding) | Active RAN bottleneck | **30 dB** (preliminary) | BLER 0.05–0.62, MCS 0–1; receiver goodput unverified | **Preliminary — pending per-step receiver evidence** |
 | S8 (RAN + Core, Joint) | Two simultaneous treatments | 25 dB + TBF | Note: two active treatments ≠ two active bottlenecks. JOINT class requires binding evidence from both domains on the same measurement interval. | Procedure pending binding evidence |
 | S9 (Joint bottleneck) | Both domains confirmed binding | TBD | Must verify receiver goodput degradation independently for both RAN and Core paths | Not yet established |

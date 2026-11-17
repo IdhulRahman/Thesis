@@ -110,16 +110,19 @@ To bring up the multi-slice 5G O-RAN platform in correct dependency order, follo
 sudo /opt/oran/ran/start_ran.sh
 sudo nohup python3 -u /opt/oran/ran/scripts/ran_adapter.py > /dev/null 2>&1 &
 
-# Step 6: Spawn UEs and Traffic on VM-5 (10.102.0.165)
+# Step 6: Start Telemetry Exporter Daemon on VM-6 (10.102.0.67) [Terminal 1]
+# Collector must be running before traffic and recording start to serve /metrics on :9100
+python3 /opt/oran/monitoring/collector/telemetry_collector.py &
+
+# Step 7: Spawn UEs and Launch Traffic on VM-5 (10.102.0.165) [Terminal 2]
 sudo /opt/oran/ue/scripts/spawn_multi_ue.sh -s1 1 -s2 1
-# Launch baseline traffic (660s for 600s continuous protocol; or 70s for smoke test)
+# Launch baseline traffic in foreground (660s framing for 600s continuous protocol; or 70s for smoke test)
 sudo /opt/oran/ue/scripts/trafgen.sh start 660 5
 
-# Step 7: Launch Collector & Logger on VM-6 (10.102.0.67)
-python3 /opt/oran/monitoring/collector/telemetry_collector.py &
-# Record baseline scenario S1 under continuous 600s protocol
+# Step 8: Start Telemetry Recorder on VM-6 (10.102.0.67) [Terminal 3 or background]
+# Wait ~30s after trafgen starts to ensure link adaptation and ping canaries have stabilized
 python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 600
-# (For a quick 60s smoke test: use trafgen.sh start 70 5 and record_experiment.py S1 --duration 60)
+# (For a quick 60s smoke test: use trafgen.sh start 70 5 on VM-5 and record_experiment.py S1 --duration 60 on VM-6)
 ```
 
 ---

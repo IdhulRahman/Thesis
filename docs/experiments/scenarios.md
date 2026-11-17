@@ -61,12 +61,12 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 |---|---|:---:|:---:|---|---|---|---|
 | **`S1`** | `S1_NORMAL_LIGHT` | `BASELINE` | — | None (Reference) | Light baseline traffic on reference channel | Offered load $\approx 5\text{ Mbps}$, reference channel, no Core limiter | Throughput parity, stable RTT, zero UPF backlog. |
 | **`S2`** | `S2_NORMAL_HIGH` | `BASELINE` | — | None (Reference) | Higher baseline traffic without bottleneck | Offered load $\approx 10\text{–}12\text{ Mbps}$, reference channel, no Core limiter | Traffic fully served, elevated PRB grant proxy, zero UPF backlog. |
-| **`S3`** | `S3_RAN_SOFT` | `RAN` | Soft | DU-1 Uplink (`rfsimu_channel_ue0`) | Soft radio channel degradation via mild attenuation | Fixed load ($\approx 10\text{ Mbps}$), candidate UL attenuation: 25 dB (preliminary; non-binding stressed radio per 2026-11-17 calibration; receiver evidence pending — see [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) | Moderate SNR drop, MCS shifts down, PRB elevated, mild goodput dip. UPF backlog 0 B. |
+| **`S3`** | `S3_RAN_SOFT` | `RAN` | Soft | DU-1 Uplink (`rfsimu_channel_ue0`) | Soft radio channel degradation via mild attenuation | Fixed load ($\approx 10\text{ Mbps}$), candidate UL attenuation: 25 dB (preliminary; stressed radio, binding status pending receiver evidence — see [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) | Moderate SNR drop, MCS shifts down, PRB elevated, mild goodput dip. UPF backlog 0 B. |
 | **`S4`** | `S4_RAN_DEGRADATION` | `RAN` | Hard-RF | DU-1 Uplink (`rfsimu_channel_ue0`) | Hard radio channel degradation via heavy attenuation | Fixed load ($\approx 10\text{ Mbps}$), candidate UL attenuation: 30 dB (preliminary; pending stable per-step receiver evidence — see [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) | Collapsing SNR, low MCS, elevated BLER/HARQ, unserved traffic demand. UPF backlog 0 B. |
 | **`S5`** | `S5_RAN_OVERLOAD` | `RAN` | Hard-Load | gNB DU-1 (Cell-1) | Radio capacity saturation under reference channel | Fixed load via capacity calibration (candidates: $15, 18, 20\text{ Mbps}$) | Receiver throughput capped ($G_{\text{rx}} < R_{\text{tx}}$), $\Delta t > 0$, PRB $\to 51$, UPF backlog 0 B. |
 | **`S6`** | `S6_CORE_SOFT` | `CORE` | Soft | UPF-1 Egress (`eth0`) | Soft Core transport rate limiting via mild TBF | Fixed load ($\approx 10\text{ Mbps}$), mild TBF rate ($8\text{–}8.5\text{ Mbps}$, latency $80\text{ ms}$) | UPF backlog stays moderate (6k–14k Bytes), RTT increases mildly, minimal drops. |
 | **`S7`** | `S7_CORE_QUEUE_TBF` | `CORE` | Hard | UPF-1 Egress (`eth0`) | Hard UPF-host/container egress rate shaping via binding TBF | Fixed load ($\approx 10\text{ Mbps}$), binding TBF rate ($5\text{–}6\text{ Mbps}$, latency $200\text{ ms}$) | UPF backlog surges, packet drops increase, egress rate matches TBF, radio metrics nominal. |
-| **`S8`** | `S8_JOINT_SOFT` | `JOINT` | Soft | DU-1 UL + UPF-1 Egress | Simultaneous soft radio attenuation and soft core rate limiting | Candidate UL attenuation: 25 dB (preliminary; candidate non-binding stressed radio per [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) + Soft TBF ($8\text{–}8.5\text{ Mbps}$) | Sub-threshold degradation in both domains: PRB ~58–65%, Backlog ~6k–14k B, RTT ~26–30 ms. |
+| **`S8`** | `S8_JOINT_SOFT` | `JOINT` | Soft | DU-1 UL + UPF-1 Egress | Simultaneous soft radio attenuation and soft core rate limiting | Candidate UL attenuation: 25 dB (preliminary; stressed radio, binding status pending receiver evidence per [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) + Soft TBF ($8\text{–}8.5\text{ Mbps}$) | Sub-threshold degradation in both domains: PRB ~58–65%, Backlog ~6k–14k B, RTT ~26–30 ms. |
 | **`S9`** | `S9_JOINT_OVERLOAD` | `JOINT` | Hard | DU-1 UL + UPF-1 Egress | Simultaneous active radio impairment and binding Core shaping | Degraded radio forwarding rate $R_{\text{arr}}$ + binding TBF ($R_{\text{TBF}} < R_{\text{arr}}$) | Simultaneous radio degradation (low SNR/MCS, elevated BLER) AND Core congestion (elevated UPF backlog and drops). |
 
 ---
@@ -117,7 +117,7 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 
 1. **Objective:** Observe network behavior under mild sub-threshold radio propagation impairment that causes measurable but non-catastrophic degradation — a marginal RAN case distinguishable from baseline.
 2. **Initial Conditions:** Reference channel baseline ($0.0\text{ dB}$); fixed moderate traffic demand ($\approx 10\text{ Mbps}$) fully served under reference conditions.
-3. **Independent Variables (Changed):** Injected Uplink path attenuation on DU-1 Channel 1 (`rfsimu_channel_ue0`) at candidate level 25 dB (preliminary; non-binding stressed radio per 2026-11-17 calibration; per-step receiver evidence pending — see [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) during $t \in [120, 420\text{ s}]$, released at $t = 420\text{ s}$.
+3. **Independent Variables (Changed):** Injected Uplink path attenuation on DU-1 Channel 1 (`rfsimu_channel_ue0`) at candidate level 25 dB (preliminary; stressed radio, binding status pending receiver evidence — see [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) during $t \in [120, 420\text{ s}]$, released at $t = 420\text{ s}$.
 4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$ continuous across 660s), reference noise power, Core UPF unshaped egress, Slice 2 canary probing.
 5. **Planned Execution Sequence (600s Continuous Protocol):**
    ```bash
@@ -243,7 +243,7 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 1. **Objective:** Evaluate telemetry signatures when sub-threshold impairments simultaneously affect both radio and core domains — testing whether joint soft degradation is distinguishable from single-domain soft faults.
 2. **Initial Conditions:** Reference configuration; previous scenario treatments cleared.
 3. **Independent Variables (Changed):**
-   * RAN impairment: Injected Uplink path attenuation on Channel 1 at candidate soft level 25 dB (preliminary; candidate non-binding stressed radio per [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) during $t \in [120, 420\text{ s}]$, reset at $t = 420\text{ s}$.
+   * RAN impairment: Injected Uplink path attenuation on Channel 1 at candidate soft level 25 dB (preliminary; stressed radio, binding status pending receiver evidence per [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) during $t \in [120, 420\text{ s}]$, reset at $t = 420\text{ s}$.
    * Core impairment: Mild TBF shaping on UPF-1 `eth0` ($8\text{–}8.5\text{ Mbps}$) during $t \in [120, 420\text{ s}]$, removed at $t = 420\text{ s}$.
 4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$ continuous across 660s), reference noise power, Slice 2 canary probing.
 5. **Planned Execution Sequence (600s Continuous Protocol):**
@@ -332,17 +332,17 @@ The following sequence is recommended for each full dataset collection run under
 | 3 | *Reset* | Run operational reset commands | Clear residual buffers |
 | 4 | **Record S2** | `record_experiment.py S2 --duration 600` | `BASELINE` high load (10–12 Mbps across 600s) |
 | 5 | *Reset* | Run operational reset commands | Clear residual buffers |
-| 6 | **Record S3** | `record_experiment.py S3 --duration 600` | `RAN` soft attenuation (4–6 dB active at 120–420s) |
+| 6 | **Record S3** | `record_experiment.py S3 --duration 600` | `RAN` soft attenuation (candidate: 25 dB stressed radio, binding status pending receiver evidence; active at 120–420s) |
 | 7 | *Reset* | Run operational reset commands | Reset RF attenuation to 0.0 dB |
-| 8 | **Record S4** | `record_experiment.py S4 --duration 600` | `RAN` hard RF attenuation (10–12 dB active at 120–420s) |
+| 8 | **Record S4** | `record_experiment.py S4 --duration 600` | `RAN` hard RF attenuation (candidate: 30 dB heavy attenuation, active at 120–420s; preliminary) |
 | 9 | *Reset* | Run operational reset commands | Reset RF attenuation to 0.0 dB |
-| 10 | **Record S5** | `record_experiment.py S5 --duration 600` | `RAN` capacity overload (18–20 Mbps active at 120–420s) |
+| 10 | **Record S5** | `record_experiment.py S5 --duration 600` | `RAN` capacity overload (continuous saturated load 20 Mbps across 660s; Profile 1 capacity limit) |
 | 11 | *Reset* | Run operational reset commands | Stop overload traffic |
 | 12 | **Record S6** | `record_experiment.py S6 --duration 600` | `CORE` soft rate shaping (TBF 8.5 Mbps active at 120–420s) |
 | 13 | *Reset* | Run operational reset commands | Remove UPF TBF |
 | 14 | **Record S7** | `record_experiment.py S7 --duration 600` | `CORE` hard rate shaping (TBF 5 Mbps active at 120–420s) |
 | 15 | *Reset* | Run operational reset commands | Remove UPF TBF |
-| 16 | **Record S8** | `record_experiment.py S8 --duration 600` | `JOINT` soft (4–6 dB + TBF 8.5M active at 120–420s) |
+| 16 | **Record S8** | `record_experiment.py S8 --duration 600` | `JOINT` soft (candidate: 25 dB + TBF 8.5M active at 120–420s; binding status pending receiver evidence) |
 | 17 | *Reset* | Run operational reset commands | Reset RF and remove UPF TBF |
 | 18 | **Record S9** | `record_experiment.py S9 --duration 600` | `JOINT` hard (8–10 dB + TBF 4M active at 120–420s) |
 | 19 | *Reset* | Run operational reset commands | Final cleanup |

@@ -60,8 +60,11 @@ This directory contains the operational daemons, automation scripts, fault injec
    # Record S5 RAN Capacity Overload (600s continuous: 20M saturation)
    python3 /opt/oran/monitoring/scripts/record_experiment.py S5 --duration 600 --notes "S5 RAN Overload Capacity Saturation"
 
-   # Record S6 Core Bottleneck (600s continuous: UPF-1 TBF 5M)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S6 --duration 600 --notes "S6 Core Bottleneck UPF-1 TBF 5M"
+   # Record S6 Core Soft (600s continuous: UPF-1 TBF 8.5M)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S6 --duration 600 --notes "S6 Core Soft UPF-1 TBF 8.5M"
+
+   # Record S7 Core Hard Bottleneck (600s continuous: UPF-1 TBF 5M)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S7 --duration 600 --notes "S7 Core Hard Bottleneck UPF-1 TBF 5M"
    ```
 
 3. **Manual Stop Mode (`Ctrl+C`):**

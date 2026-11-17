@@ -48,7 +48,7 @@ In accordance with **3GPP TS 38.401 Clause 3.1**, the split gNB architecture dis
 
 The experimental scenarios evaluated in this thesis map directly to this taxonomy:
 * **Scenario S1 & S2:** Baseline healthy operation across all domains.
-* **Scenario S3:** Soft Radio Channel Degradation via mild attenuation (Air Interface, Uu — preliminary candidate 25 dB, stressed non-binding per [rf-attenuation-calibration.md](../experiments/rf-attenuation-calibration.md)).
+* **Scenario S3:** Soft Radio Channel Degradation via mild attenuation (Air Interface, Uu — preliminary candidate 25 dB, stressed radio with binding status pending receiver evidence per [rf-attenuation-calibration.md](../experiments/rf-attenuation-calibration.md)).
 * **Scenario S4:** Hard Radio Channel Degradation via heavy attenuation (Air Interface, Uu — preliminary candidate 30 dB).
 * **Scenario S5:** RAN MAC Scheduler PRB Exhaustion / Capacity Overload under clean channel (gNB-DU MAC Scheduler).
 * **Scenario S6 & S7:** Core UPF QoS Rate Limiting & Queue Backpressure (Core User Plane).
