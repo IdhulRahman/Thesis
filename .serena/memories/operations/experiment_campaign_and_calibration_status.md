@@ -35,4 +35,5 @@ Setiap run eksperimen dijalankan di bawah protokol kontinu 600 detik:
 Sinkronisasi ke target VM selalu menggunakan perintah `curl` dari GitHub raw publik (`https://raw.githubusercontent.com/IdhulRahman/Thesis/main/...`) dan dieksekusi langsung oleh peneliti di terminal masing-masing VM.
 
 ## 5. Log Run Eksperimen Formal (Kampanye Dataset)
-- **EXP_S1_20261117_165322**: Run 1 S1 (`S1_NORMAL_LIGHT`), durasi 600.0s (600 sampel), 600 scrape OK (0 gagal), 298 poll NWDAF tersimpan (0 gagal), Alasan selesai: DURATION_REACHED.
+- **EXP_S1_20261117_165322**: Run 1 S1 (`S1_NORMAL_LIGHT`) 600.0s (600 sampel). eMBB: 5.00 Mbps, RTT 15.83 ms, Loss 0.0%. URLLC: RTT 14.64 ms, Loss 0.0%, SLA Viol 6.3%. RAN: PRB 55.0%, MCS 28.0, BLER 0.00%, SNR 26.8 dB. Core: Backlog 0 B, Drops 0.0 pkt/s. NWDAF AnLF: API Status 100.0%, Freshness 96.8%, 20 URR updates, UL 382.55 MB, 298 raw JSONL polls tersimpan.
+- **EXP_S1_20261117_174739**: Run 2 S1 (`S1_NORMAL_LIGHT`) 600.0s (600 sampel). eMBB: 5.00 Mbps, RTT 15.81 ms, Loss 0.0%. URLLC: RTT 15.00 ms, Loss 0.0%, SLA Viol 7.2%. RAN: PRB 53.7%, MCS 28.0, BLER 0.00%, SNR 26.7 dB. Core: Backlog 0 B, Drops 0.0 pkt/s. NWDAF AnLF: API Status 100.0%, Freshness 99.3%, 20 URR updates, UL 382.22 MB, 298 raw JSONL polls.
