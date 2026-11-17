@@ -1027,12 +1027,197 @@ class TestAnalyzeDatasetIntegration(unittest.TestCase):
         output = self._run_analyzer(csv_path)
 
         self.assertIn("--- 4. AUDIT SEGMENTASI FASE OPERASIONAL", output)
-        self.assertIn("S3_RAN_SOFT [1_BASELINE]", output)
-        self.assertIn("S3_RAN_SOFT [2_ACTIVE_FAULT]", output)
-        self.assertIn("S3_RAN_SOFT [3_RECOVERY]", output)
+        self.assertIn("S3_RAN_SOFT [1_BASELINE_NOMINAL [0-120s]]", output)
+        self.assertIn("S3_RAN_SOFT [2_ACTIVE_FAULT_NOMINAL [120-420s]]", output)
+        self.assertIn("S3_RAN_SOFT [3_RECOVERY_NOMINAL [420-600s]]", output)
         self.assertIn("10.0 %", output)
         self.assertIn("85.0 %", output)
         self.assertIn("12.0 %", output)
+
+    def test_10_phase_segmentation_s1_reference_steady(self):
+        """S1 baseline without disturbance must remain a single reference steady-state without active fault."""
+        rows = [
+            {"timestamp_utc": "2026-11-17T12:00:00Z", "elapsed_sec": "30.0", "event_scenario": "S1_NORMAL_LIGHT", "e2e_slice1_tput_mbps": "5.0"},
+            {"timestamp_utc": "2026-11-17T12:03:00Z", "elapsed_sec": "200.0", "event_scenario": "S1_NORMAL_LIGHT", "e2e_slice1_tput_mbps": "5.0"},
+            {"timestamp_utc": "2026-11-17T12:08:00Z", "elapsed_sec": "500.0", "event_scenario": "S1_NORMAL_LIGHT", "e2e_slice1_tput_mbps": "5.0"},
+        ]
+        csv_path = self._write_csv("test_s1_phases.csv", rows)
+        output = self._run_analyzer(csv_path)
+
+        # S1 has no fault injection; must not be split into false active fault or recovery phases
+        self.assertNotIn("ACTIVE_FAULT", output)
+        self.assertNotIn("--- 4. AUDIT SEGMENTASI FASE OPERASIONAL", output)
+
+    def test_11_phase_segmentation_s5_continuous_saturated(self):
+        """S5 continuous saturated load must remain a single steady saturated phase without active fault."""
+        rows = [
+            {"timestamp_utc": "2026-11-17T12:00:00Z", "elapsed_sec": "30.0", "event_scenario": "S5_RAN_OVERLOAD", "e2e_slice1_tput_mbps": "16.5"},
+            {"timestamp_utc": "2026-11-17T12:03:00Z", "elapsed_sec": "200.0", "event_scenario": "S5_RAN_OVERLOAD", "e2e_slice1_tput_mbps": "16.5"},
+            {"timestamp_utc": "2026-11-17T12:08:00Z", "elapsed_sec": "500.0", "event_scenario": "S5_RAN_OVERLOAD", "e2e_slice1_tput_mbps": "16.5"},
+        ]
+        csv_path = self._write_csv("test_s5_phases.csv", rows)
+        output = self._run_analyzer(csv_path)
+
+        # S5 is continuous saturation; must not be split into false baseline or recovery phases
+        self.assertNotIn("ACTIVE_FAULT", output)
+        self.assertNotIn("--- 4. AUDIT SEGMENTASI FASE OPERASIONAL", output)
+
+
+# ---------------------------------------------------------------------------
+# Integration tests for receiver_iperf.sh abort & export persistence
+# ---------------------------------------------------------------------------
+
+class TestReceiverAbortExportIntegration(unittest.TestCase):
+    """Integration test suite ensuring abort state persistence and error enforcement in receiver export."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp(prefix="test_receiver_iperf_")
+        self.script_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "scripts", "receiver_iperf.sh")
+        )
+        with open(self.script_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        start_idx = None
+        for i, l in enumerate(lines):
+            if 'python3 - "$TARGET_FILE"' in l:
+                start_idx = i + 1
+                break
+        end_idx = None
+        if start_idx is not None:
+            for j in range(start_idx, len(lines)):
+                if lines[j].strip() == "EOF":
+                    end_idx = j
+                    break
+        self.parser_code = "".join(lines[start_idx:end_idx]) if (start_idx and end_idx) else None
+
+    def tearDown(self):
+        if os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    def _run_parser(self, target_file, summary_file, force_abort="0", session_id="ue1"):
+        self.assertIsNotNone(self.parser_code, "Could not extract parser code from receiver_iperf.sh")
+        return subprocess.run(
+            [sys.executable, "-c", self.parser_code, target_file, summary_file, force_abort, session_id],
+            capture_output=True,
+            text=True
+        )
+
+    def test_01_abort_then_export_preserves_aborted_status(self):
+        """Simulate an abort, then subsequent export must preserve session_complete=False and aborted=True."""
+        summary_path = os.path.join(self.test_dir, "receiver_ue1_summary.json")
+        marker_path = os.path.join(self.test_dir, ".receiver_ue1_aborted")
+        log_path = os.path.join(self.test_dir, "receiver_export.json")
+
+        # Step 1: Simulate prior abort action
+        with open(marker_path, "w") as mf:
+            mf.write("")
+        initial_abort_summary = {
+            "format": "aborted",
+            "session_complete": False,
+            "aborted": True,
+            "error": "Sesi receiver dihentikan paksa oleh perintah abort eksplisit"
+        }
+        with open(summary_path, "w", encoding="utf-8") as sf:
+            json.dump(initial_abort_summary, sf, indent=2)
+
+        # Step 2: Receiver log on host contains an 'end' block
+        iperf_log_content = {
+            "end": {
+                "sum_received": {
+                    "bytes": 5000000,
+                    "bits_per_second": 9500000.0,
+                    "seconds": 5.0,
+                    "packets": 5000,
+                    "lost_packets": 2,
+                    "lost_percent": 0.04,
+                    "jitter_ms": 0.5
+                }
+            }
+        }
+        with open(log_path, "w", encoding="utf-8") as lf:
+            json.dump(iperf_log_content, lf)
+
+        # Step 3: Run export parser
+        res = self._run_parser(log_path, summary_path, force_abort="0", session_id="ue1")
+
+        # Must exit with failure code 1 and report aborted in stderr
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("ABORTED", res.stderr)
+        self.assertNotIn("Session: COMPLETE", res.stdout)
+
+        # Step 4: Verify summary file retains aborted state and does NOT flip to complete
+        with open(summary_path, "r", encoding="utf-8") as sf:
+            summary = json.load(sf)
+        self.assertFalse(summary["session_complete"])
+        self.assertTrue(summary["aborted"])
+        self.assertEqual(summary["format"], "aborted")
+        self.assertEqual(summary["goodput_mbps"], 9.5)
+
+    def test_02_fixture_with_error_and_end_block_aborts(self):
+        """When log fixture contains top-level error and an end block, parser must abort."""
+        summary_path = os.path.join(self.test_dir, "receiver_ue1_summary.json")
+        log_path = os.path.join(self.test_dir, "receiver_error_log.json")
+
+        iperf_log_content = {
+            "error": "interrupt - the server was interrupted",
+            "end": {
+                "sum_received": {
+                    "bytes": 2000000,
+                    "bits_per_second": 8000000.0,
+                    "seconds": 2.0,
+                    "packets": 2000,
+                    "lost_packets": 10,
+                    "lost_percent": 0.5,
+                    "jitter_ms": 1.1
+                }
+            }
+        }
+        with open(log_path, "w", encoding="utf-8") as lf:
+            json.dump(iperf_log_content, lf)
+
+        res = self._run_parser(log_path, summary_path, force_abort="0", session_id="ue1")
+
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("ABORTED", res.stderr)
+        self.assertNotIn("Session: COMPLETE", res.stdout)
+
+        with open(summary_path, "r", encoding="utf-8") as sf:
+            summary = json.load(sf)
+        self.assertFalse(summary["session_complete"])
+        self.assertTrue(summary["aborted"])
+        self.assertIn("interrupt", summary["error"])
+
+    def test_03_normal_session_without_abort_completes(self):
+        """Normal completed receiver run must succeed with session_complete=True."""
+        summary_path = os.path.join(self.test_dir, "receiver_ue1_summary.json")
+        log_path = os.path.join(self.test_dir, "receiver_normal_log.json")
+
+        iperf_log_content = {
+            "end": {
+                "sum_received": {
+                    "bytes": 10000000,
+                    "bits_per_second": 10000000.0,
+                    "seconds": 10.0,
+                    "packets": 10000,
+                    "lost_packets": 0,
+                    "lost_percent": 0.0,
+                    "jitter_ms": 0.8
+                }
+            }
+        }
+        with open(log_path, "w", encoding="utf-8") as lf:
+            json.dump(iperf_log_content, lf)
+
+        res = self._run_parser(log_path, summary_path, force_abort="0", session_id="ue1")
+
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("Session: COMPLETE", res.stdout)
+
+        with open(summary_path, "r", encoding="utf-8") as sf:
+            summary = json.load(sf)
+        self.assertTrue(summary["session_complete"])
+        self.assertFalse(summary["aborted"])
+        self.assertEqual(summary["goodput_mbps"], 10.0)
 
 
 if __name__ == "__main__":

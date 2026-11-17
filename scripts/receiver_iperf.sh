@@ -148,12 +148,31 @@ PENDING_EOF
     fi
 
     # Parse output handling both ESnet --json-stream and standard --json with strict error enforcement
-    python3 - "$TARGET_FILE" "$SUMMARY_FILE" "$FORCE_ABORT" << 'EOF'
-import json, sys
+    python3 - "$TARGET_FILE" "$SUMMARY_FILE" "$FORCE_ABORT" "$SESSION_ID" << 'EOF'
+import json, sys, os
 
 path = sys.argv[1]
 summary_path = sys.argv[2]
 force_abort = (len(sys.argv) > 3 and sys.argv[3] == "1")
+session_id = sys.argv[4] if len(sys.argv) > 4 else "ue1"
+
+# Check prior aborted state to guarantee abort persistence
+prior_aborted = False
+prior_error = None
+summary_dir = os.path.dirname(summary_path)
+marker_path = os.path.join(summary_dir, f".receiver_{session_id}_aborted")
+if os.path.exists(marker_path):
+    prior_aborted = True
+
+if os.path.exists(summary_path):
+    try:
+        with open(summary_path, "r", encoding="utf-8") as sf:
+            prior_summary = json.load(sf)
+            if prior_summary.get("aborted") is True or prior_summary.get("format") == "aborted":
+                prior_aborted = True
+                prior_error = prior_summary.get("error")
+    except Exception:
+        pass
 
 if force_abort:
     summary = {
@@ -177,12 +196,19 @@ try:
     is_stream = False
     end_data = None
     session_complete = False
+    error_found = None
 
     # 1. Try parsing as single standard JSON
     try:
         data = json.loads(content)
         if isinstance(data, dict):
-            if "end" in data:
+            # Check for error field in top-level or end block
+            if "error" in data and data["error"]:
+                error_found = str(data["error"])
+            elif isinstance(data.get("end"), dict) and "error" in data["end"] and data["end"]["error"]:
+                error_found = str(data["end"]["error"])
+
+            if "end" in data and isinstance(data["end"], dict):
                 end_data = data["end"]
                 session_complete = True
             elif data.get("event") == "end" and "data" in data:
@@ -220,13 +246,22 @@ try:
                     sys.exit(1)
             is_stream = True
 
+            for rec in parsed_lines:
+                if isinstance(rec, dict):
+                    if rec.get("event") == "error":
+                        error_found = str(rec.get("data", {}).get("error") or rec.get("error") or "stream error")
+                        break
+                    elif "error" in rec and rec["error"]:
+                        error_found = str(rec["error"])
+                        break
+
             for rec in reversed(parsed_lines):
                 if isinstance(rec, dict):
                     if rec.get("event") == "end" and "data" in rec:
                         end_data = rec["data"]
                         session_complete = True
                         break
-                    elif "end" in rec:
+                    elif "end" in rec and isinstance(rec["end"], dict):
                         end_data = rec["end"]
                         session_complete = True
                         break
@@ -241,6 +276,11 @@ try:
     if not isinstance(end_data, dict) or not end_data:
         print("[ERROR] No valid end or summary event found in receiver log", file=sys.stderr)
         sys.exit(1)
+
+    # If session was aborted previously OR error was found in stream, never treat as normal complete
+    is_aborted = prior_aborted or (error_found is not None and any(term in str(error_found).lower() for term in ("interrupt", "abort", "terminated")))
+    if is_aborted or error_found is not None:
+        session_complete = False
 
     sum_rx = end_data.get("sum_received") or end_data.get("sum")
     if not sum_rx and "streams" in end_data and isinstance(end_data["streams"], list) and end_data["streams"]:
@@ -266,8 +306,9 @@ try:
     jitter_ms = sum_rx.get("jitter_ms")
 
     summary = {
-        "format": "json_stream" if is_stream else "standard_json",
+        "format": "aborted" if is_aborted else ("json_stream" if is_stream else "standard_json"),
         "session_complete": session_complete,
+        "aborted": is_aborted,
         "bytes_received": bytes_rx,
         "goodput_mbps": mbps_rx,
         "bits_per_second": bps_rx,
@@ -277,6 +318,11 @@ try:
         "receiver_loss_pct": loss_pct,
         "jitter_ms": jitter_ms
     }
+    if is_aborted:
+        summary["error"] = error_found or prior_error or "Sesi receiver telah di-abort sebelumnya"
+    elif error_found:
+        summary["error"] = error_found
+
     with open(summary_path, "w", encoding="utf-8") as sf:
         json.dump(summary, sf, indent=2)
 
@@ -284,10 +330,13 @@ try:
     jitter_disp = f"{jitter_ms} ms" if jitter_ms is not None else "N/A"
 
     if not session_complete:
-        print(f"[ERROR] Receiver session incomplete: log stream contains only partial interval reports without an 'end' summary event (session_complete=False). Goodput: {mbps_rx} Mbps", file=sys.stderr)
+        status_label = "ABORTED" if is_aborted else "INCOMPLETE"
+        err_msg = summary.get("error", "session incomplete without normal termination")
+        print(f"[ERROR] Receiver session {status_label}: {err_msg} (session_complete=False). Goodput: {mbps_rx} Mbps", file=sys.stderr)
         sys.exit(1)
 
     print(f"[SUCCESS] Receiver Goodput: {mbps_rx} Mbps | Loss: {loss_disp} | Jitter: {jitter_disp} | Format: {'Stream' if is_stream else 'Single'} | Session: COMPLETE")
+    sys.exit(0)
     sys.exit(0)
 
 except Exception as ex:
@@ -319,7 +368,9 @@ EOF
     echo "[*] Explicitly aborting receiver for Run: $RUN_ID | Session: $SESSION_ID | Port: $PORT..."
     HOST_EXPORT_DIR="/opt/oran/5gc/data/raw/${RUN_ID}"
     SUMMARY_FILE="${HOST_EXPORT_DIR}/receiver_${SESSION_ID}_summary.json"
+    ABORT_MARKER="${HOST_EXPORT_DIR}/.receiver_${SESSION_ID}_aborted"
     mkdir -p "$HOST_EXPORT_DIR"
+    touch "$ABORT_MARKER"
     sudo docker exec "$CONTAINER" pkill -INT -f "iperf3.*${PORT}" 2>/dev/null || true
     python3 - "$SUMMARY_FILE" << 'ABORT_EOF'
 import json, sys
