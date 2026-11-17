@@ -23,8 +23,8 @@
 3. **Workspace Path & Shell Environment:**
    Mount filesystem lokal berada di `/mnt/external-disk/Projects/Thesis`. Jika mengeksekusi script/alat otomatis, pastikan working directory selalu mengarah ke `/mnt/external-disk/Projects/Thesis`.
 4. **Status Komit & Verifikasi Terkini:**
-   - Commit HEAD terbaru di `main`: `3cc8a1b` (sinkron dengan GitHub `origin/main`).
-   - Test suite: 50 unit & end-to-end integration tests lolos (100% PASS pada `tests/test_quality_gates.py`).
+   - Commit HEAD terbaru di `main`: `7a57c7a` (sinkron dengan GitHub `origin/main`).
+   - Test suite: 53 unit & end-to-end integration tests lolos (100% PASS pada `tests/test_quality_gates.py`).
    - Detail operasional & status kalibrasi: lihat `mem:operations/experiment_campaign_and_calibration_status`.
 
 ## 3. Status Naskah Paper (IEEEtran LaTeX)
