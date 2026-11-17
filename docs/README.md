@@ -37,7 +37,8 @@ docs/
 │
 ├── experiments/                        ◄── Evaluation Framework & Scenario Registries
 │   ├── methodology.md                  ◄── Baselines (B0 to B4 vs Proposed), Metrics, Rules
-│   └── scenarios.md                    ◄── Scenarios (S1, S2, S3, S6, S9, S10_A, S10_B)
+│   ├── scenarios.md                    ◄── Scenarios (S1 through S9 Disturbance Registry)
+│   └── rf-attenuation-calibration.md   ◄── RFsim Attenuation Calibration & Sweep Evidence
 │
 ├── references/                         ◄── Standards Alignment & Conceptual Foundations
 │   ├── standards.md                    ◄── Normative Claim Mapping Table (3GPP / ETSI / O-RAN)
@@ -82,6 +83,7 @@ docs/
 4. **[Troubleshooting Index](troubleshooting/README.md):** Consult verified fixes for known operational issues across all domains.
 
 ### 2.3 For Data Scientists & Experimenters
-1. **[Experimental Scenarios](experiments/scenarios.md):** Learn how to trigger fault injections (S1 to S10) and annotate ground truth.
-2. **[Telemetry Metric Catalog](telemetry/metric-catalog.md):** Understand feature formulas, missing value handling (`NaN`), and semantic caveats.
-3. **[Experimental Methodology](experiments/methodology.md):** Review the baseline comparative framework and evaluation protocols.
+1. **[Experimental Scenarios](experiments/scenarios.md):** Learn how to trigger fault injections (S1 to S9) and annotate ground truth.
+2. **[RF Calibration](experiments/rf-attenuation-calibration.md):** Review preliminary RFsim attenuation sweep evidence and dB operating points.
+3. **[Telemetry Metric Catalog](telemetry/metric-catalog.md):** Understand feature formulas, missing value handling (`NaN`), and semantic caveats.
+4. **[Experimental Methodology](experiments/methodology.md):** Review the baseline comparative framework and evaluation protocols.

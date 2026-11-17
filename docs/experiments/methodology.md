@@ -164,9 +164,9 @@ flowchart LR
     B --> C["3. Workload Launch\n(Offered Load & Canary)"]
     C --> D["4. Treatment Application\n(RAN or Core Fault)"]
     D --> E["5. Settling Window\n(~60s proposed)"]
-    E --> F["6. Telemetry Recording\n(~180s proposed)"]
+    E --> F["6. Telemetry Recording\n(600s continuous)"]
     F --> G["7. Treatment Release\n(Clear Fault)"]
-    G --> H["8. Recovery Observation\n(~60s+ proposed)"]
+    G --> H["8. Recovery Observation\n(Post-fault window)"]
 ```
 
 1. **Stage 1 — Baseline Reset:** Reset RF channel path loss to verified Profile 1 baseline ($0.0\text{ dB}$) and delete UPF egress rate shaping.
@@ -174,13 +174,13 @@ flowchart LR
 3. **Stage 3 — Workload Launch:** Start traffic generation (`iperf3 -u` on UE-1) and canary probing (`ping` on UE-2) with parameters explicitly logged in the experiment manifest.
 4. **Stage 4 — Treatment Application:** Apply the specified scenario treatment (e.g., path loss attenuation via Telnet or egress TBF on UPF-1 container).
 5. **Stage 5 — Settling Observation Window (~60s proposed):** Allow physical queues, scheduler link adaptation, and container network buffers to stabilize into the target operating regime.
-6. **Stage 6 — Telemetry Recording Window (~180s proposed active disturbance):** Execute `record_experiment.py` at 1.000 Hz monotonic scraping cadence to capture the active disturbance regime.
+6. **Stage 6 — Telemetry Recording Window (600s continuous protocol):** Execute `record_experiment.py` at 1.000 Hz monotonic scraping cadence to capture the continuous multi-phase regime.
 7. **Stage 7 — Treatment Release:** Remove the active disturbance (restore radio attenuation or delete qdisc shaper).
-8. **Stage 8 — Recovery Observation Window (~60s+ proposed):** Continue telemetry recording and canary probing until queue drainage, RTT normalization, and SLA recovery can be conclusively evaluated.
+8. **Stage 8 — Recovery Observation Window:** Continue telemetry recording and canary probing until queue drainage, RTT normalization, and SLA recovery can be conclusively evaluated.
 
-* **Recording Duration Spanning Recovery & Offline Segmentation:**  
-  Running `record_experiment.py` with `--duration 180` terminates the recorder immediately at $t = 180\text{ s}$, right when the treatment is released at Stage 7, capturing zero post-fault recovery telemetry. To record both the active disturbance regime (~180s) AND the post-fault recovery window (~60s+), the recorder must either be executed with a combined duration (e.g., `--duration 240` representing 180s active fault + 60s recovery), operated in manual stop mode (`--duration 0`) until recovery settles, or paired with a dedicated post-fault recovery recording.  
-  *Labeling Demarcation:* As detailed in Section 3.4, the raw CSV `event_domain` column records the initial treatment preset across the full run duration. Datasets must be segmented or annotated offline based on intervention timestamps and empirical telemetry indicators (queue drainage, throughput recovery), rather than assuming an instantaneous switch to `BASELINE` at $t = 180\text{ s}$.
+* **Recording Duration Spanning Recovery & Offline Segmentation (600s Continuous Protocol):**  
+  Under the unified 600-second protocol (`record_experiment.py <SCENARIO> --duration 600`), the recorder captures the baseline stabilization ($[0, 120\text{ s}]$), active disturbance ($[120, 420\text{ s}]$), and post-fault recovery ($[420, 600\text{ s}]$) regimes in a single continuous recording under persistent traffic (`trafgen.sh start 660`).  
+  *Labeling Demarcation:* As detailed in Section 3.4, the raw CSV `event_domain` column records the initial treatment preset across the full run duration. Datasets must be segmented or annotated offline based on intervention timestamps and empirical telemetry indicators (queue drainage, throughput recovery), rather than assuming an instantaneous switch to `BASELINE` when the fault is released.
 * **Cross-VM Terminal Execution Separation:**  
   Operational procedures span multiple distinct VMs and must be executed in separate terminal sessions:
   * **Terminal 1 (VM-5 UE Traffic):** Runs `trafgen.sh start` in the foreground.
@@ -188,28 +188,30 @@ flowchart LR
   * **Terminal 3 (VM-4 RAN or VM-3 Core):** Executes fault injection at Stage 4 and fault release at Stage 7.
 * **Operational Script Limitations & Gaps:**
   * **`trafgen.sh` Probe & Traffic Lifecycles:** In `scripts/trafgen.sh`, parameter `DURATION` simultaneously determines the runtime of `iperf3 -u` (`-t "$DURATION"`), the display loop, and the ping probe packet counts (`(DURATION + 5) * 5` for eMBB, `(DURATION + 5) * 10` for URLLC). Following completion of the display loop, the script explicitly waits for the iperf3 process (`wait "$IPERF_PID" 2>/dev/null || sleep 1`) before executing `cleanup()`, terminating all child ping processes. Two operational conditions must be distinguished:
-    1. *Traffic continues after fault removal:* If the test evaluates recovery while offered traffic remains active (e.g. fault released at 180s, but 10 Mbps traffic continues flowing through 240s to observe post-release queue drainage under load), executing `trafgen.sh` with a duration covering both phases (e.g. 240s) is appropriate.
+    1. *Traffic continues after fault removal:* Under the 600s continuous protocol, traffic continues flowing through the recovery window ($t \in [420, 600\text{ s}]$) to observe post-release queue drainage under load. Executing `trafgen.sh` with a duration covering all phases (660s) is appropriate.
     2. *Observation after traffic ceases:* If the test requires observing quiescent network recovery or canary latency after traffic generation ceases, extending `trafgen.sh` duration cannot achieve this because extending `DURATION` also extends iperf traffic. In that condition, an independent ping probe with a separate lifecycle (invoked outside `trafgen.sh`) must be used.
   * **`rfsim_channel_control.py reset` Parameter Scope:** The `reset` subcommand in `scripts/rfsim_channel_control.py` resets only `path_loss_dB` (to $0.0\text{ dB}$ unity gain); it does **not** reset `noise_power_dB`.
 * **Repetition Count:** An initial set of **3 independent repetitions** per scenario is planned for initial validation, expanding to $N \ge 10$ for final statistical testing.
 * **NWDAF Ingestion Cadence Notice:** The Prometheus scraper operates at 1.0 Hz, but native upstream OAI NWDAF microservice updates depend on internal URR aggregation periods ($\approx 30\text{ s}$). A 1.0 Hz scrape rate captures new OAM and RAN adapter data every second, while NWDAF cumulative byte counters update in step-function intervals.
 
 ### 5.2 Scenario-Specific Methodological Rules
+
+> **Cross-Reference:** See [RF Attenuation Calibration (2026-11-17)](rf-attenuation-calibration.md) for empirical sweep results, attenuation candidates, and radio link observations.
+
 * **S1 & S2 (Normal Baseline Classification):**  
   The `BASELINE` label requires verified empirical confirmation that offered traffic is fully served without unserved queue growth or SLA degradation. The proposed candidate of $10\text{–}12\text{ Mbps}$ for S2 is an operating proposal; if future calibration shows queue accumulation at $12\text{ Mbps}$, the operating load must be adjusted downward to maintain clean baseline semantics.
-* **S3 (Radio Overload via Capacity Saturation):**  
-  Operating load must be determined via a dedicated capacity calibration pilot across candidate rates ($15, 18, 20\text{ Mbps}$). Once calibrated, a **single fixed load** is applied throughout the 180-second recording. Radio overload under clean channel conditions is characterized by scheduling queue growth and goodput shortfall; **BLER can remain low ($\approx 0\%$) and MCS high**, which must not be misconstrued as an absence of overload.
-* **S4 (Radio Channel Degradation via Attenuation):**  
-  The offered traffic load and reference noise power must remain strictly constant, while path attenuation on Channel 1 (`rfsimu_channel_ue0`) is adjusted. Target channel identity must be confirmed via Telnet readback. If severe attenuation triggers an unhandled softmodem assertion failure or crash, it must be recorded as an **infrastructure failure**, NOT as a valid training sample of radio congestion.
+* **S3 (Soft Radio Channel Degradation via Attenuation):**  
+  Mild attenuation (preliminary candidate: 25 dB per [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) stresses the radio channel (elevated PRB grant, lowered MCS, BLER ≈ 10%) while service demand may still be met. A non-zero BLER does not inherently constitute an active bottleneck if user throughput demands are satisfied.
+* **S4 (Hard Radio Channel Degradation via Attenuation):**  
+  The offered traffic load and reference noise power must remain strictly constant, while path attenuation on Channel 1 (`rfsimu_channel_ue0`) is adjusted (preliminary candidate: 30 dB per [rf-attenuation-calibration.md](rf-attenuation-calibration.md)). Target channel identity must be confirmed via Telnet readback. If severe attenuation triggers an unhandled softmodem assertion failure, process termination, or RLF (observed at 35 dB), it must be recorded as an **infrastructure failure**, NOT as a valid training sample of radio congestion.
+* **S5 (Radio Overload via Capacity Saturation):**  
+  Operating load must be determined via a dedicated capacity calibration pilot across candidate rates ($15, 18, 20\text{ Mbps}$). Once calibrated, a **single fixed load** is applied throughout the 600-second recording. Radio overload under clean channel conditions is characterized by scheduling queue growth and goodput shortfall; **BLER can remain low ($\approx 0\%$) and MCS high**, which must not be misconstrued as an absence of overload.
 * **S6 (Core Bottleneck via UPF Egress Shaping):**  
   Radio channel capacity must be verified as capable of forwarding the offered load (e.g., $10\text{ Mbps}$ traffic), while the TBF rate on UPF-1 egress (`eth0`) is set strictly lower (candidate $5\text{–}6\text{ Mbps}$) so that the constraint binds at the Core user plane. The formal terminology is **UPF-host/container egress shaping**.
+* **S8 (Joint Soft Degradation):**  
+  Simultaneous mild radio attenuation and soft Core rate limiting. Two active treatments do not automatically constitute two active bottlenecks; empirical binding indicators must be examined.
 * **S9 (Joint Bottleneck Binding Condition):**  
-  Because Uplink data traverses the radio access link before reaching the UPF, the UPF egress TBF rate must be configured **strictly below the arrival rate forwarded by the degraded radio channel** ($R_{\text{TBF}} < R_{\text{arr}}$). If the radio channel throttles traffic to $7\text{ Mbps}$, an egress TBF of $12\text{ Mbps}$ will not bind, resulting in an empty UPF queue that fails to demonstrate joint congestion.
-* **S10 (Staged Recovery Sequences & Dynamic Labeling):**  
-  Two counterbalanced recovery sequences are evaluated:
-  1. Sequence A: $\text{JOINT} \xrightarrow{\text{Restore Radio}} \text{CORE} \xrightarrow{\text{Release TBF}} \text{BASELINE}$.
-  2. Sequence B: $\text{JOINT} \xrightarrow{\text{Release TBF}} \text{RAN} \xrightarrow{\text{Restore Radio}} \text{BASELINE}$.
-  Each phase is allocated approximately 120 seconds. The physical transition timestamp must be recorded separately from the subsequent time of full service recovery. **A single static class label must never be assigned to the entire multi-phase recording.**
+  Because Uplink data traverses the radio access link before reaching the UPF, the UPF egress TBF rate must be configured **strictly below the arrival rate forwarded by the degraded radio channel** ($R_{\text{TBF}} < R_{\text{arr}}$). If the radio channel throttles traffic to $7\text{ Mbps}$, an egress TBF of $12\text{ Mbps}$ will not bind, resulting in an empty UPF queue that fails to demonstrate joint congestion. Both limits must be verified as simultaneously binding on the same measurement interval.
 
 ---
 
@@ -340,7 +342,7 @@ Per 3GPP TS 38.211 §4.3.1, one NR frame is exactly $10\text{ ms}$. A ratio $\ap
 To relieve simulator computational dilation while preserving active channel modeling, the testbed evaluates 3GPP bandwidth downscaling paired with OAI Three-Quarter Sampling (`-E`):
 
 1. **Frequency Domain Processing & FFT Sizing:**
-   OFDM signals are processed in the frequency domain via Fast Fourier Transform (FFT). Standard Cooley-Tukey FFT architectures require transform sizes of power-of-two ($2^N$). Standard 3GPP transmission bandwidth configurations (3GPP TS 38.104 Table 5.3.2-1), however, rarely align with power-of-two boundaries:
+   OFDM signals are processed in the frequency domain via Fast Fourier Transform (FFT). Standard Cooley-Tukey radix-2 FFT architectures require transform sizes of power-of-two ($2^N$), whereas mixed-radix algorithms (e.g., FFTW, Cooley-Tukey mixed-radix) efficiently support non-power-of-two transform sizes containing small prime factors (such as $768 = 3 \times 2^8$ or $1536 = 3 \times 2^9$). Standard 3GPP transmission bandwidth configurations (3GPP TS 38.104 Table 5.3.2-1) rarely align with power-of-two boundaries:
    * **106 PRBs ($40\text{ MHz}$, SCS $30\text{ kHz}$):** $106 \times 12 = 1272\text{ active subcarriers}$. The next power-of-two FFT is **2048 points** ($61.44\text{ Msps}$), leaving $2048 - 1272 = 776$ unused guard-band subcarriers that the CPU is forced to compute.
    * **Three-Quarter Sampling (`-E`):** OAI implements an alternative sampling rate using $\frac{3}{4} \times 2^N$. For 106 PRBs, FFT size scales to $\frac{3}{4} \times 2048 = 1536\text{ points}$ ($46.08\text{ Msps}$). Because $1536 \ge 1272$, all 106 PRBs are accommodated without frequency truncation, reducing computational load by $25\%$.
    * **51 PRBs ($20\text{ MHz}$, SCS $30\text{ kHz}$):** $51 \times 12 = 612\text{ active subcarriers}$. The power-of-two size is 1024. With `-E`, the transform size reduces to:

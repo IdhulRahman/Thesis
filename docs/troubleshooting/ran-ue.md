@@ -1138,3 +1138,41 @@ The testbed supports three distinct operational profiles depending on the experi
    sudo /opt/oran/ue/scripts/stop_multi_ue.sh
    sudo /opt/oran/ue/scripts/spawn_multi_ue.sh -s1 1 -s2 1
    ```
+
+---
+
+## Case 57 — RFsim Attenuation Sweep: RLF at 35 dB and Route Bypass Issue (2026-11-17)
+
+**Observed symptoms:**
+- First sweep (11:35–11:37 WIB): PRB = 9.80 %, MCS = 0.0 for all attenuation steps despite increasing attenuation. Throughput showed as `NaN` in monitoring.
+- UE IP shown as `10.200.1.2` in iperf3 output (veth interface), not `12.1.1.3` (oaitun_ue1 tunnel).
+- After corrected sweep: UE disconnect observed at step 7 (35 dB), approximately 196 s into the 30 s dwell. `pgrep` on UE softmodem process returned nothing.
+
+**Root causes:**
+1. **Route bypass (first sweep):** After UE respawn, `ip route` for `192.168.70.0/24` defaulted to the veth gateway (`10.200.1.1 dev veth-ue1-ns`) rather than the 5G tunnel. iperf3 traffic bypassed the radio entirely.
+2. **Tunnel interface absent:** `oaitun_ue1` was not present because the UE softmodem had exited (inactivity timeout ~1h45m), causing the kernel to delete the tunnel interface.
+3. **Radio Link Failure at 35 dB:** With `noise_power_dB=-100.0` and Cell-1 (51 PRB, AWGN), the link budget collapsed at 35 dB path_loss_dB. BLER reached 0.8185, MCS remained 0, PRB froze at 76 %. UE triggered RLF.
+
+**Resolution steps:**
+```bash
+# 1. Stop stale UE processes and re-spawn
+bash scripts/stop_multi_ue.sh
+bash scripts/spawn_multi_ue.sh -s1 1 -s2 1
+
+# 2. Set route through 5G tunnel (required after every UE respawn)
+sudo ip netns exec ue1 ip route replace 192.168.70.0/24 dev oaitun_ue1
+
+# 3. Verify route
+sudo ip netns exec ue1 ip route get 192.168.70.145
+# Expected: 192.168.70.145 dev oaitun_ue1 src 12.1.1.3
+
+# 4. Re-run sweep only after confirming oaitun_ue1 is present
+sudo ip netns exec ue1 ip link show oaitun_ue1
+```
+
+**Lessons learned:**
+- Always verify UE tunnel interface (`oaitun_ue1`) and iperf3 source IP (`12.1.1.3`) before starting any sweep.
+- 35 dB is not a stable operating point for Cell-1 (51 PRB, AWGN) under these testbed parameters; use it only as an upper-bound RLF reference, not as a repeatable fault injection target.
+- 40 dB was not independently observed (UE was already disconnected).
+
+**See also:** [RF Attenuation Calibration (2026-11-17)](../experiments/rf-attenuation-calibration.md)

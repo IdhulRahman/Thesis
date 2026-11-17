@@ -48,9 +48,10 @@ In accordance with **3GPP TS 38.401 Clause 3.1**, the split gNB architecture dis
 
 The experimental scenarios evaluated in this thesis map directly to this taxonomy:
 * **Scenario S1 & S2:** Baseline healthy operation across all domains.
-* **Scenario S3:** RAN MAC Scheduler PRB Exhaustion (Domain 1 above).
-* **Scenario S6:** Core UPF QoS Rate Limiting & Queue Backpressure (Domain 2 above).
-* **Scenario S9:** Joint Overload (simultaneous RAN PRB Exhaustion and Core Queue Backpressure).
-* **Scenario S10_A & S10_B:** Staged Recovery evaluating domain decoupling during sequential remediation.
+* **Scenario S3:** Soft Radio Channel Degradation via mild attenuation (Air Interface, Uu — preliminary candidate 25 dB, stressed non-binding per [rf-attenuation-calibration.md](../experiments/rf-attenuation-calibration.md)).
+* **Scenario S4:** Hard Radio Channel Degradation via heavy attenuation (Air Interface, Uu — preliminary candidate 30 dB).
+* **Scenario S5:** RAN MAC Scheduler PRB Exhaustion / Capacity Overload under clean channel (gNB-DU MAC Scheduler).
+* **Scenario S6 & S7:** Core UPF QoS Rate Limiting & Queue Backpressure (Core User Plane).
+* **Scenario S8 & S9:** Joint Overload (simultaneous RAN Degradation and Core Queue Backpressure — JOINT class requires binding evidence from both domains on the same measurement interval).
 
-For the exact fault injection mechanisms and parameter values, refer to [docs/experiments/scenarios.md](../experiments/scenarios.md).
+For the exact fault injection mechanisms and parameter values, refer to [docs/experiments/scenarios.md](../experiments/scenarios.md) and [docs/experiments/rf-attenuation-calibration.md](../experiments/rf-attenuation-calibration.md).
