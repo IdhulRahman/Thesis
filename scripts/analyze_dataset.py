@@ -11,6 +11,7 @@ import csv
 import glob
 import math
 import os
+import re
 import sys
 
 DATA_DIR = os.getenv("MONITORING_DATA_DIR", "/opt/oran/monitoring/data")
@@ -155,16 +156,28 @@ def update_bucket(d, row):
         d["snr_c1"].append(snr1)
 
 
+def is_recorder_placeholder(raw_phase, scen_upper):
+    if not raw_phase:
+        return True
+    rp = raw_phase.strip().upper()
+    if rp in ("IDLE", "UNKNOWN", "NONE", "NAN", "NULL", ""):
+        return True
+    # Match default single-run placeholder: phase_1_<scen> or phase_1_s<N>
+    scen_short = scen_upper.split("_")[0]
+    if rp in (f"PHASE_1_{scen_upper}", f"PHASE_1_{scen_short}"):
+        return True
+    if re.fullmatch(r"PHASE_1_S\d+", rp):
+        return True
+    return False
+
+
 def resolve_phase(scen, row):
     scen_upper = scen.upper()
     raw_phase = row.get("event_phase_id", "").strip()
 
     # 1. Actual event phase annotation priority:
-    # Use if explicit informative phase annotation is present (not generic single run placeholder, idle, or NaN)
-    if (raw_phase and
-        not raw_phase.upper().startswith("PHASE_1_") and
-        not raw_phase.upper().startswith("PHASE_") and
-        raw_phase.upper() not in ("IDLE", "UNKNOWN", "NONE", "NAN", "NULL", "")):
+    # Any explicit annotation that is not a static recorder placeholder takes precedence
+    if not is_recorder_placeholder(raw_phase, scen_upper):
         return raw_phase
 
     # 2. Reference normal baseline scenarios (S1, S2): steady-state reference throughout the entire run
