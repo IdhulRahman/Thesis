@@ -34,6 +34,11 @@ Setiap run eksperimen dijalankan di bawah protokol kontinu 600 detik:
 ## 4. Alur Sinkronisasi VM (Sesuai `mem:project/user_workflow_and_agent_role`)
 Sinkronisasi ke target VM selalu menggunakan perintah `curl` dari GitHub raw publik (`https://raw.githubusercontent.com/IdhulRahman/Thesis/main/...`) dan dieksekusi langsung oleh peneliti di terminal masing-masing VM.
 
-## 5. Log Run Eksperimen Formal (Kampanye Dataset)
-- **EXP_S1_20261117_165322**: Run 1 S1 (`S1_NORMAL_LIGHT`) 600.0s (600 sampel). eMBB: 5.00 Mbps, RTT 15.83 ms, Loss 0.0%. URLLC: RTT 14.64 ms, Loss 0.0%, SLA Viol 6.3%. RAN: PRB 55.0%, MCS 28.0, BLER 0.00%, SNR 26.8 dB. Core: Backlog 0 B, Drops 0.0 pkt/s. NWDAF AnLF: API Status 100.0%, Freshness 96.8%, 20 URR updates, UL 382.55 MB, 298 raw JSONL polls tersimpan.
-- **EXP_S1_20261117_174739**: Run 2 S1 (`S1_NORMAL_LIGHT`) 600.0s (600 sampel). eMBB: 5.00 Mbps, RTT 15.81 ms, Loss 0.0%. URLLC: RTT 15.00 ms, Loss 0.0%, SLA Viol 7.2%. RAN: PRB 53.7%, MCS 28.0, BLER 0.00%, SNR 26.7 dB. Core: Backlog 0 B, Drops 0.0 pkt/s. NWDAF AnLF: API Status 100.0%, Freshness 99.3%, 20 URR updates, UL 382.22 MB, 298 raw JSONL polls.
+## 5. Log Run Eksperimen Formal (Kampanye Dataset 2 Jam / Tri-Partition)
+- **S9 (`S9_JOINT_OVERLOAD`) — TUNTAS PENUH 100% (7.200 Sampel / 2 Jam):**
+  - **Training Set (60m):** `EXP_S9_20261117_204800` (3.600 sampel, 100% scrape OK, 1.783 NWDAF raw polls). eMBB: 10.00M, RTT 444.56 ms, Loss 3.4%. URLLC: RTT 15.19 ms, Loss 0.0%, SLA Viol 9.3%. RAN: PRB 73.1% (peak 100%), MCS 25.3, BLER 9.54%, SNR 25.2 dB. Core: Backlog Max 109,635 B, Drop Rate Max 593.9 pkt/s. NWDAF AnLF: API 100%, Freshness 99.6%, 120 URR updates, UL 4,585.75 MB.
+  - **Validation Set (30m):** `EXP_S9_20261117_223553` (1.800 sampel, 100% scrape OK, 891 NWDAF raw polls).
+  - **Testing Set (30m):** `EXP_S9_20261117_232424` (1.800 sampel, 100% scrape OK, 890 NWDAF raw polls).
+- **Log Pilot Sebelumnya (Pilot 600s):**
+  - **EXP_S1_20261117_165322**: Pilot S1 600s (600 sampel).
+  - **EXP_S1_20261117_174739**: Pilot S1 600s (600 sampel).
