@@ -1062,6 +1062,21 @@ class TestAnalyzeDatasetIntegration(unittest.TestCase):
         self.assertNotIn("ACTIVE_FAULT", output)
         self.assertNotIn("--- 4. AUDIT SEGMENTASI FASE OPERASIONAL", output)
 
+    def test_12_actual_phase_annotation_overrides_nominal_schedule(self):
+        """Informative actual event annotations like PHASE_2_ACTUAL_FAULT must override nominal windows."""
+        rows = [
+            # Injected fault actually occurred early at t = 100s, annotated by actual event logger
+            {"timestamp_utc": "2026-11-17T12:00:00Z", "elapsed_sec": "100.0", "event_scenario": "S3_RAN_SOFT", "event_phase_id": "PHASE_2_ACTUAL_FAULT", "ran_prb_cell1": "75.0"},
+            {"timestamp_utc": "2026-11-17T12:07:00Z", "elapsed_sec": "450.0", "event_scenario": "S3_RAN_SOFT", "event_phase_id": "PHASE_3_ACTUAL_RECOVERY", "ran_prb_cell1": "10.0"},
+        ]
+        csv_path = self._write_csv("test_actual_phase.csv", rows)
+        output = self._run_analyzer(csv_path)
+
+        # Must report the actual informative event phase, NOT 1_BASELINE_NOMINAL
+        self.assertIn("PHASE_2_ACTUAL_FAULT", output)
+        self.assertIn("PHASE_3_ACTUAL_RECOVERY", output)
+        self.assertNotIn("1_BASELINE_NOMINAL", output)
+
 
 # ---------------------------------------------------------------------------
 # Integration tests for receiver_iperf.sh abort & export persistence
@@ -1218,6 +1233,80 @@ class TestReceiverAbortExportIntegration(unittest.TestCase):
         self.assertTrue(summary["session_complete"])
         self.assertFalse(summary["aborted"])
         self.assertEqual(summary["goodput_mbps"], 10.0)
+
+    def test_04_single_line_event_end_with_data_error_aborts(self):
+        """Single-line JSON {'event':'end','data':{'error':…}} must result in aborted status, never COMPLETE."""
+        summary_path = os.path.join(self.test_dir, "receiver_ue1_summary.json")
+        log_path = os.path.join(self.test_dir, "receiver_single_line_err.json")
+
+        payload = {
+            "event": "end",
+            "data": {
+                "error": "interrupt - the server was interrupted",
+                "sum_received": {
+                    "bytes": 1000000,
+                    "bits_per_second": 5000000.0,
+                    "seconds": 2.0,
+                    "packets": 1000,
+                    "lost_packets": 2,
+                    "lost_percent": 0.2,
+                    "jitter_ms": 1.0
+                }
+            }
+        }
+        with open(log_path, "w", encoding="utf-8") as lf:
+            json.dump(payload, lf)
+
+        res = self._run_parser(log_path, summary_path, force_abort="0", session_id="ue1")
+
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("ABORTED", res.stderr)
+        self.assertNotIn("Session: COMPLETE", res.stdout)
+
+        with open(summary_path, "r", encoding="utf-8") as sf:
+            summary = json.load(sf)
+        self.assertFalse(summary["session_complete"])
+        self.assertTrue(summary["aborted"])
+        self.assertIn("interrupt", summary["error"])
+
+    def test_05_multi_line_stream_event_end_with_data_error_aborts(self):
+        """Multi-line JSON-stream containing {'event':'end','data':{'error':…}} must abort, never COMPLETE."""
+        summary_path = os.path.join(self.test_dir, "receiver_ue1_summary.json")
+        log_path = os.path.join(self.test_dir, "receiver_stream_err.json")
+
+        lines = [
+            json.dumps({"event": "start", "data": {}}),
+            json.dumps({"event": "interval", "data": {"sum": {"bytes": 500000, "bits_per_second": 5000000.0, "seconds": 1.0}}}),
+            json.dumps({
+                "event": "end",
+                "data": {
+                    "error": "interrupt - the server was interrupted",
+                    "sum_received": {
+                        "bytes": 1000000,
+                        "bits_per_second": 5000000.0,
+                        "seconds": 2.0,
+                        "packets": 1000,
+                        "lost_packets": 5,
+                        "lost_percent": 0.5,
+                        "jitter_ms": 1.2
+                    }
+                }
+            })
+        ]
+        with open(log_path, "w", encoding="utf-8") as lf:
+            lf.write("\n".join(lines) + "\n")
+
+        res = self._run_parser(log_path, summary_path, force_abort="0", session_id="ue1")
+
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("ABORTED", res.stderr)
+        self.assertNotIn("Session: COMPLETE", res.stdout)
+
+        with open(summary_path, "r", encoding="utf-8") as sf:
+            summary = json.load(sf)
+        self.assertFalse(summary["session_complete"])
+        self.assertTrue(summary["aborted"])
+        self.assertIn("interrupt", summary["error"])
 
 
 if __name__ == "__main__":

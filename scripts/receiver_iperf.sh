@@ -202,11 +202,13 @@ try:
     try:
         data = json.loads(content)
         if isinstance(data, dict):
-            # Check for error field in top-level or end block
+            # Check for error field in top-level, end block, or event data
             if "error" in data and data["error"]:
                 error_found = str(data["error"])
             elif isinstance(data.get("end"), dict) and "error" in data["end"] and data["end"]["error"]:
                 error_found = str(data["end"]["error"])
+            elif isinstance(data.get("data"), dict) and "error" in data["data"] and data["data"]["error"]:
+                error_found = str(data["data"]["error"])
 
             if "end" in data and isinstance(data["end"], dict):
                 end_data = data["end"]
@@ -254,6 +256,12 @@ try:
                     elif "error" in rec and rec["error"]:
                         error_found = str(rec["error"])
                         break
+                    elif isinstance(rec.get("data"), dict) and "error" in rec["data"] and rec["data"]["error"]:
+                        error_found = str(rec["data"]["error"])
+                        break
+                    elif isinstance(rec.get("end"), dict) and "error" in rec["end"] and rec["end"]["error"]:
+                        error_found = str(rec["end"]["error"])
+                        break
 
             for rec in reversed(parsed_lines):
                 if isinstance(rec, dict):
@@ -276,6 +284,13 @@ try:
     if not isinstance(end_data, dict) or not end_data:
         print("[ERROR] No valid end or summary event found in receiver log", file=sys.stderr)
         sys.exit(1)
+
+    # Check error within the resolved end_data payload as well
+    if not error_found and isinstance(end_data, dict):
+        if "error" in end_data and end_data["error"]:
+            error_found = str(end_data["error"])
+        elif isinstance(end_data.get("data"), dict) and "error" in end_data["data"] and end_data["data"]["error"]:
+            error_found = str(end_data["data"]["error"])
 
     # If session was aborted previously OR error was found in stream, never treat as normal complete
     is_aborted = prior_aborted or (error_found is not None and any(term in str(error_found).lower() for term in ("interrupt", "abort", "terminated")))
