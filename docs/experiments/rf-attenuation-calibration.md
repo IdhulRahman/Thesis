@@ -100,17 +100,30 @@ The effective modulation order (Qm) for MCS 17 depends on the active MCS table (
 
 ---
 
+## Calibrated Radio Degradation Operating Zones
+
+Following the 8-step sweep and empirical multi-hour continuous verification on 2026-11-17 / 2026-11-18, the OAI RFsim attenuation response is formally classified into four operating zones:
+
+| Operating Zone | Attenuation Range | Nominal Value | Observed Physical Radio Behavior | Scenario Mapping | Empirical Validation Status |
+|---|---|---|---|---|---|
+| **Zone 1: Dead Zone / Baseline** | $0.0\text{ dB} \le \text{Att} \le 10.0\text{ dB}$ | **$0.0\text{ dB}$** | SNR $25\text{–}28\text{ dB}$, MCS 28, BLER $0.00\%$. Loss is completely absorbed by link margin; no degradation signature in telemetry. | **S1** (`S1_NORMAL_LIGHT`),<br>**S2** (`S2_NORMAL_HIGH`) | **Confirmed** (Pilot runs `EXP_S1_*`) |
+| **Zone 2: Soft Degradation** | $12.0\text{ dB} \le \text{Att} \le 15.0\text{ dB}$ | **$15.0\text{ dB}$** | Inflection point. MCS $23\text{–}27$ (mean $25.3$), BLER $4\%\text{–}17\%$ (mean $9.54\%$), PRB grant proxy $\approx 73\%$ (peaks at $100\%$). Capacity $\approx 8\text{–}9\text{ Mbps}$; $100\%$ link stability with zero outage. | **S3** (`S3_RAN_SOFT`),<br>**S8** (`S8_JOINT_SOFT`),<br>**S9** (`S9_JOINT_OVERLOAD`) | **Confirmed** (7,200s S9 dataset `EXP_S9_*`) |
+| **Zone 3: Hard Degradation** | $18.0\text{ dB} \le \text{Att} \le 22.0\text{ dB}$ | **$20.0\text{ dB}$** | Modulation collapse to 16-QAM (MCS $20\text{–}21$), BLER $10\%\text{–}15\%$, PRB locked at $100\%$. Radio forwarding capacity drops to $\approx 6\text{–}7\text{ Mbps}$, actively throttling offered load. | **S4** (`S4_RAN_DEGRADATION`) | **Calibrated** (Step 4 sweep evidence) |
+| **Zone 4: Instability / RLF Boundary** | $\ge 25.0\text{ dB}$ | $\ge 25.0\text{ dB}$ | Link budget boundary. Under sustained continuous $10\text{ Mbps}$ UDP, triggers HARQ retransmission exhaustion and MAC/RLC buffer overflow, leading to observed RLF ($100\%$ loss). Unsuitable for steady-state data collection. | None (Excluded from steady-state protocol) | **Observed** (RLF observed at $t=125\text{s}$ under $10\text{M}$ UDP) |
+
+---
+
 ## Scenario Implications
 
-The table below maps sweep observations to scenario candidates. All candidate values are **preliminary** pending receiver evidence.
+The table below maps the calibrated attenuation thresholds to thesis experimental scenarios:
 
-| Scenario | Role | Attenuation Candidate | Rationale | Confidence |
-|---|---|---|---|---|
-| S1 / S2 (Baseline) | Healthy radio | 0 dB (no attenuation) | Low PRB grant, high MCS, BLER ≈ 0, service met | Confirmed (existing data) |
-| S3 (RAN-stressed) | Stressed radio, binding status pending receiver evidence | **25 dB** (preliminary) | BLER ≈ 10 %, MCS 17, 100 % PRB; sender service met; receiver pending | **Preliminary — pending receiver evidence** |
-| S4 (RAN-binding) | Active RAN bottleneck | **30 dB** (preliminary) | BLER 0.05–0.62, MCS 0–1; receiver goodput unverified | **Preliminary — pending per-step receiver evidence** |
-| S8 (RAN + Core, Joint) | Two simultaneous treatments | 25 dB + TBF | Note: two active treatments ≠ two active bottlenecks. JOINT class requires binding evidence from both domains on the same measurement interval. | Procedure pending binding evidence |
-| S9 (Joint bottleneck) | Both domains confirmed binding | TBD | Must verify receiver goodput degradation independently for both RAN and Core paths | Not yet established |
+| Scenario | Role | Calibrated Attenuation | Core Configuration | Rationale | Confidence |
+|---|---|---|---|---|---|
+| **S1 / S2** | Reference Baseline | **0.0 dB** | Unshaped (no TBF) | Healthy radio (MCS 28, BLER 0%) and unconstrained user plane. | **Confirmed** |
+| **S3** | RAN Soft Degradation | **15.0 dB** | Unshaped (no TBF) | Sub-threshold radio stress (MCS ~25, BLER ~9.5%), zero UPF backlog, no RLF. | **High** |
+| **S4** | RAN Hard Degradation | **20.0 dB** | Unshaped (no TBF) | Severe radio throttling (MCS ~20, PRB 100%), air interface limits arrival goodput. | **High** |
+| **S8** | Joint Soft Degradation | **15.0 dB** | TBF 8.5 Mbps (latency 80ms) | Simultaneous sub-threshold stress: mild radio degradation + moderate UPF queue (6k–15k B). | **High** |
+| **S9** | Joint Hard Overload | **15.0 dB** | TBF 4.0 Mbps (latency 200ms) | Verified joint binding: radio forwards ~8 Mbps, Core throttles to 4 Mbps ($R_{\text{TBF}} < R_{\text{arr}} < R_{\text{offered}}$). | **Confirmed (7,200s dataset)** |
 
 > [!CAUTION]
 > Scenarios S8 and S9 must not be classified as JOINT solely because two impairments are active simultaneously. JOINT classification requires that **both** the RAN and Core limits are verified as simultaneously binding on the same measurement interval.

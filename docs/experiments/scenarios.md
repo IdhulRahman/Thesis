@@ -117,7 +117,7 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 
 1. **Objective:** Observe network behavior under mild sub-threshold radio propagation impairment that causes measurable but non-catastrophic degradation — a marginal RAN case distinguishable from baseline.
 2. **Initial Conditions:** Reference channel baseline ($0.0\text{ dB}$); fixed moderate traffic demand ($\approx 10\text{ Mbps}$) fully served under reference conditions.
-3. **Independent Variables (Changed):** Injected Uplink path attenuation on DU-1 Channel 1 (`rfsimu_channel_ue0`) at candidate level 25 dB (preliminary; stressed radio, binding status pending receiver evidence — see [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) during $t \in [120, 420\text{ s}]$, released at $t = 420\text{ s}$.
+3. **Independent Variables (Changed):** Injected Uplink path attenuation on DU-1 Channel 1 (`rfsimu_channel_ue0`) at calibrated soft level **15.0 dB** (see [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) during $t \in [120, 420\text{ s}]$, released at $t = 420\text{ s}$.
 4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$ continuous across 660s), reference noise power, Core UPF unshaped egress, Slice 2 canary probing.
 5. **Planned Execution Sequence (600s Continuous Protocol):**
    ```bash
@@ -125,17 +125,17 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
    sudo /opt/oran/ue/scripts/trafgen.sh start 660 10
 
    # Terminal 2 (VM-6 Monitoring): Start recorder ~30s after traffic starts
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S3 --duration 600 --notes "S3 RAN Soft Degradation 25dB"
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S3 --duration 600 --notes "S3 RAN Soft Degradation 15dB"
 
-   # Terminal 3 (VM-4 RAN at elapsed t = 120s): Inject candidate attenuation (preliminary: 25 dB)
-   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 25.0 --channel-id 1 --port 9090
+   # Terminal 3 (VM-4 RAN at elapsed t = 120s): Inject calibrated soft attenuation (15.0 dB)
+   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 15.0 --channel-id 1 --port 9090
 
    # Terminal 3 (VM-4 RAN at elapsed t = 420s): Release attenuation; observe recovery until t = 600s
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
    ```
 6. **Evidence to Collect:** Telemetry CSV (NPRB, SNR, MCS, BLER), Telnet command/readback logs, iperf receiver logs.
-7. **Responses to Examine:** Moderate SNR drop; MCS shifts downward (22–24); PRB grant proxy elevated to 57–65%; mild goodput reduction (~9–9.5 Mbps). UPF backlog remains $0\text{ B}$.
-8. **Interpretation Boundaries:** Temporal segmentation rules apply: $[0, 120\text{ s}]$ is Baseline, $[120, 420\text{ s}]$ is Active Soft RAN, and $[420, 600\text{ s}]$ captures drainage/recovery under persistent load. Because 25 dB calibration showed BLER ≈ 10% and MCS 17 while 10 Mbps sender demand was still met, S3 represents a stressed radio link; it must NOT be automatically declared an active RAN bottleneck without verified receiver goodput deficit per [rf-attenuation-calibration.md](rf-attenuation-calibration.md).
+7. **Responses to Examine:** Moderate SNR drop; MCS shifts downward (23–27, mean ~25); PRB grant proxy elevated to ~73% (peaks at 100%); non-zero BLER (4–10%); healthy connection without RLF. UPF backlog remains $0\text{ B}$.
+8. **Interpretation Boundaries:** Temporal segmentation rules apply: $[0, 120\text{ s}]$ is Baseline, $[120, 420\text{ s}]$ is Active Soft RAN, and $[420, 600\text{ s}]$ captures drainage/recovery under persistent load. Calibrated at 15.0 dB where link adaptation stabilizes at ~8–9 Mbps without causing connection loss.
 
 ---
 
@@ -143,7 +143,7 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 
 1. **Objective:** Observe network behavior when air-interface performance degrades severely due to physical wireless propagation impairment under fixed moderate traffic load.
 2. **Initial Conditions:** Reference channel baseline ($0.0\text{ dB}$); fixed moderate traffic demand ($\approx 10\text{ Mbps}$) fully served under reference conditions.
-3. **Independent Variables (Changed):** Injected Uplink path attenuation on DU-1 Channel 1 (`rfsimu_channel_ue0`) at candidate level 30 dB (preliminary; pending stable per-step receiver evidence — see [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) during $t \in [120, 420\text{ s}]$, released at $t = 420\text{ s}$.
+3. **Independent Variables (Changed):** Injected Uplink path attenuation on DU-1 Channel 1 (`rfsimu_channel_ue0`) at calibrated hard level **20.0 dB** (see [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) during $t \in [120, 420\text{ s}]$, released at $t = 420\text{ s}$.
 4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$ continuous across 660s), reference noise power, Core UPF unshaped egress, Slice 2 canary probing.
 5. **Planned Execution Sequence (600s Continuous Protocol):**
    ```bash
@@ -151,10 +151,10 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
    sudo /opt/oran/ue/scripts/trafgen.sh start 660 10
 
    # Terminal 2 (VM-6 Monitoring): Start recorder ~30s after traffic starts
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S4 --duration 600 --notes "S4 RAN Hard Degradation 30dB"
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S4 --duration 600 --notes "S4 RAN Hard Degradation 20dB"
 
-   # Terminal 3 (VM-4 RAN at elapsed t = 120s): Inject candidate Uplink attenuation (preliminary: 30 dB)
-   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 30.0 --channel-id 1 --port 9090
+   # Terminal 3 (VM-4 RAN at elapsed t = 120s): Inject calibrated hard Uplink attenuation (20.0 dB)
+   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 20.0 --channel-id 1 --port 9090
 
    # Terminal 3 (VM-4 RAN at elapsed t = 420s): Release attenuation; observe recovery until t = 600s
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
@@ -243,8 +243,8 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 1. **Objective:** Evaluate telemetry signatures when sub-threshold impairments simultaneously affect both radio and core domains — testing whether joint soft degradation is distinguishable from single-domain soft faults.
 2. **Initial Conditions:** Reference configuration; previous scenario treatments cleared.
 3. **Independent Variables (Changed):**
-   * RAN impairment: Injected Uplink path attenuation on Channel 1 at candidate soft level 25 dB (preliminary; stressed radio, binding status pending receiver evidence per [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) during $t \in [120, 420\text{ s}]$, reset at $t = 420\text{ s}$.
-   * Core impairment: Mild TBF shaping on UPF-1 `eth0` ($8\text{–}8.5\text{ Mbps}$) during $t \in [120, 420\text{ s}]$, removed at $t = 420\text{ s}$.
+   * RAN impairment: Injected Uplink path attenuation on Channel 1 at calibrated soft level **15.0 dB** (see [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) during $t \in [120, 420\text{ s}]$, reset at $t = 420\text{ s}$.
+   * Core impairment: Mild TBF shaping on UPF-1 `eth0` ($8.5\text{ Mbps}$, latency $80\text{ ms}$) during $t \in [120, 420\text{ s}]$, removed at $t = 420\text{ s}$.
 4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$ continuous across 660s), reference noise power, Slice 2 canary probing.
 5. **Planned Execution Sequence (600s Continuous Protocol):**
    ```bash
@@ -252,10 +252,10 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
    sudo /opt/oran/ue/scripts/trafgen.sh start 660 10
 
    # Terminal 2 (VM-6 Monitoring): Start recorder ~30s after traffic starts
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S8 --duration 600 --notes "S8 Joint Soft 25dB + TBF 8.5M"
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S8 --duration 600 --notes "S8 Joint Soft 15dB + TBF 8.5M"
 
    # At elapsed t = 120s (VM-4 RAN & VM-3 Core): Apply simultaneous soft impairments
-   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 25.0 --channel-id 1 --port 9090
+   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 15.0 --channel-id 1 --port 9090
    sudo docker exec oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 8500kbit burst 10kb latency 80ms
 
    # At elapsed t = 420s (VM-4 RAN & VM-3 Core): Release both impairments; observe recovery until t = 600s
@@ -263,7 +263,7 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
    sudo docker exec oai-upf-slice1 tc qdisc del dev eth0 root
    ```
 6. **Evidence to Collect:** Telemetry CSV showing concurrent radio and Core degradation features; iperf receiver logs; qdisc readback.
-7. **Responses to Examine:** Simultaneous presence of sub-threshold signatures in both domains: PRB ~58–65%, moderate SNR reduction, mild goodput dip, UPF backlog ~6k–14k B, RTT ~26–30 ms, minimal drops.
+7. **Responses to Examine:** Simultaneous presence of sub-threshold signatures in both domains: PRB ~70–75%, moderate MCS drop (~25), non-zero BLER (~5–10%), UPF backlog ~6k–15k B, RTT ~25–40 ms, minimal drops.
 8. **Interpretation Boundaries:** Two simultaneously active treatments (e.g., attenuation + TBF) do not automatically constitute two active bottlenecks. JOINT classification requires that both the RAN and Core limits are verified as simultaneously binding on the same measurement interval per [rf-attenuation-calibration.md](rf-attenuation-calibration.md).
 
 ---
@@ -273,15 +273,15 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 1. **Objective:** Evaluate telemetry signatures and detection capabilities when distinct hard impairments simultaneously affect both the Radio Access Network and Core Network user plane.
 2. **Initial Conditions:** Reference configuration; previous scenario treatments cleared.
 3. **Independent Variables (Changed):**
-   * RAN impairment: Injected Uplink path attenuation on Channel 1 at hard level ($8\text{–}10\text{ dB}$) during $t \in [120, 420\text{ s}]$, reset at $t = 420\text{ s}$.
-   * Core impairment: Binding egress TBF shaping on UPF-1 `eth0` ($4\text{ Mbps}$) during $t \in [120, 420\text{ s}]$, removed at $t = 420\text{ s}$.
+   * RAN impairment: Injected Uplink path attenuation on Channel 1 at calibrated level **15.0 dB** during $t \in [120, 420\text{ s}]$, reset at $t = 420\text{ s}$.
+   * Core impairment: Binding egress TBF shaping on UPF-1 `eth0` ($4\text{ Mbps}$, latency $200\text{ ms}$) during $t \in [120, 420\text{ s}]$, removed at $t = 420\text{ s}$.
 4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$ continuous across 660s), reference noise power, Slice 2 canary probing.
 5. **Architectural Precedence & Binding Condition:**
    > [!IMPORTANT]
    > In Uplink data flow, packets traverse the air interface before arriving at the Core UPF:
    > $$\text{UE} \xrightarrow{\text{Air Interface (RAN)}} \text{gNodeB DU-1/CU} \xrightarrow{\text{N3 / GTP-U}} \text{UPF-1} \xrightarrow{\text{N6 / } \texttt{eth0}} \text{EXT-DN}$$
-   > If radio degradation throttles delivered throughput entering the UPF to $R_{\text{arr}}$ (e.g., $7\text{ Mbps}$), an egress TBF configured at $12\text{ Mbps}$ will **never be reached**, leaving Core queue buffers empty ($0\text{ B}$) and causing the joint fault to degenerate into a single-domain RAN fault.
-   > **Binding Requirement:** The UPF TBF rate ($R_{\text{TBF}}$) must be calibrated **strictly below** the degraded radio forwarding rate ($R_{\text{arr}}$) for both bottlenecks to bind simultaneously.
+   > If radio degradation throttles delivered throughput entering the UPF to $R_{\text{arr}}$ (e.g., $8\text{ Mbps}$ under $15\text{ dB}$ attenuation), an egress TBF configured at $12\text{ Mbps}$ will **never be reached**, leaving Core queue buffers empty ($0\text{ B}$) and causing the joint fault to degenerate into a single-domain RAN fault.
+   > **Binding Requirement:** The UPF TBF rate ($R_{\text{TBF}}$) must be calibrated **strictly below** the degraded radio forwarding rate ($R_{\text{arr}}$) for both bottlenecks to bind simultaneously ($R_{\text{TBF}} < R_{\text{arr}} < R_{\text{offered}}$).
 6. **Planned Execution Sequence (600s Continuous Protocol):**
    ```bash
    # Terminal 1 (VM-5 UE): Launch continuous moderate traffic for 660s
@@ -291,7 +291,7 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
    python3 /opt/oran/monitoring/scripts/record_experiment.py S9 --duration 600 --notes "S9 Joint Hard Binding RAN and Core"
 
    # At elapsed t = 120s (VM-4 RAN & VM-3 Core): Apply simultaneous hard impairments
-   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 10.0 --channel-id 1 --port 9090
+   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 15.0 --channel-id 1 --port 9090
    sudo docker exec oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 4mbit burst 10kb latency 200ms
 
    # At elapsed t = 420s (VM-4 RAN & VM-3 Core): Release both impairments; observe recovery until t = 600s
@@ -299,7 +299,7 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
    sudo docker exec oai-upf-slice1 tc qdisc del dev eth0 root
    ```
 7. **Evidence to Collect:** Telemetry CSV showing simultaneous radio degradation features and Core queue features; iperf receiver logs; qdisc readback.
-8. **Responses to Examine:** Simultaneous presence of radio domain signatures (degraded SNR, lower MCS, elevated BLER) and Core domain signatures (non-zero UPF queue backlog and elevated packet drops).
+8. **Responses to Examine:** Simultaneous presence of radio domain signatures (degraded SNR ~25 dB, lower MCS ~25, elevated BLER ~9.5%) and Core domain signatures (saturated UPF queue backlog ~109 kB, heavy drops ~590 pkt/s, and high RTT ~440 ms). Empirically verified across 7,200s dataset (`EXP_S9_*`).
 9. **Interpretation Boundaries:** True Joint classification requires verified empirical evidence of binding congestion in both domains. If UPF queue remains empty, the condition is not empirically Joint. Two simultaneously active treatments do not automatically constitute two active bottlenecks; both limits must be verified as simultaneously binding on the same measurement interval per [rf-attenuation-calibration.md](rf-attenuation-calibration.md).
 
 ---
@@ -332,9 +332,9 @@ The following sequence is recommended for each full dataset collection run under
 | 3 | *Reset* | Run operational reset commands | Clear residual buffers |
 | 4 | **Record S2** | `record_experiment.py S2 --duration 600` | `BASELINE` high load (10–12 Mbps across 600s) |
 | 5 | *Reset* | Run operational reset commands | Clear residual buffers |
-| 6 | **Record S3** | `record_experiment.py S3 --duration 600` | `RAN` soft attenuation (candidate: 25 dB stressed radio, binding status pending receiver evidence; active at 120–420s) |
+| 6 | **Record S3** | `record_experiment.py S3 --duration 600` | `RAN` soft attenuation (calibrated: 15.0 dB sub-threshold radio stress; active at 120–420s) |
 | 7 | *Reset* | Run operational reset commands | Reset RF attenuation to 0.0 dB |
-| 8 | **Record S4** | `record_experiment.py S4 --duration 600` | `RAN` hard RF attenuation (candidate: 30 dB heavy attenuation, active at 120–420s; preliminary) |
+| 8 | **Record S4** | `record_experiment.py S4 --duration 600` | `RAN` hard RF attenuation (calibrated: 20.0 dB heavy attenuation/16-QAM transition; active at 120–420s) |
 | 9 | *Reset* | Run operational reset commands | Reset RF attenuation to 0.0 dB |
 | 10 | **Record S5** | `record_experiment.py S5 --duration 600` | `RAN` capacity overload (continuous saturated load 20 Mbps across 660s; Profile 1 capacity limit) |
 | 11 | *Reset* | Run operational reset commands | Stop overload traffic |
@@ -342,9 +342,9 @@ The following sequence is recommended for each full dataset collection run under
 | 13 | *Reset* | Run operational reset commands | Remove UPF TBF |
 | 14 | **Record S7** | `record_experiment.py S7 --duration 600` | `CORE` hard rate shaping (TBF 5 Mbps active at 120–420s) |
 | 15 | *Reset* | Run operational reset commands | Remove UPF TBF |
-| 16 | **Record S8** | `record_experiment.py S8 --duration 600` | `JOINT` soft (candidate: 25 dB + TBF 8.5M active at 120–420s; binding status pending receiver evidence) |
+| 16 | **Record S8** | `record_experiment.py S8 --duration 600` | `JOINT` soft (calibrated: 15.0 dB + TBF 8.5M active at 120–420s; sub-threshold joint stress) |
 | 17 | *Reset* | Run operational reset commands | Reset RF and remove UPF TBF |
-| 18 | **Record S9** | `record_experiment.py S9 --duration 600` | `JOINT` hard (8–10 dB + TBF 4M active at 120–420s) |
+| 18 | **Record S9** | `record_experiment.py S9 --duration 600` | `JOINT` hard (calibrated: 15.0 dB + TBF 4.0M active at 120–420s; binding air-interface and core user plane) |
 | 19 | *Reset* | Run operational reset commands | Final cleanup |
 
 > [!NOTE]

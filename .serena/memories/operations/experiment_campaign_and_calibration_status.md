@@ -9,12 +9,12 @@ Setiap run eksperimen dijalankan di bawah protokol kontinu 600 detik:
 - **$t = 600\text{ s}$:** Perekam selesai otomatis, menulis dataset 40-kolom CSV dan `manifest.json`.
 - **$t = 630\text{ s}$:** Ekspor ringkasan iperf receiver di VM-3 (`receiver_iperf.sh export`) untuk ground-truth *arrival goodput*.
 
-## 2. Temuan Sesi Kalibrasi Atenuasi RF (5 dB s.d. 40 dB)
+## 2. Temuan & Penetapan Resmi Kalibrasi Atenuasi RF (4 Zona Operasional)
 - **Unit BLER:** `ran_cell_bler` adalah rasio dimensionless $[0, 1]$; nilai `0.1000` = 10% BLER.
-- **25 dB (Step 5):** Kondisi radio tertekan (*stressed radio*), MCS turun ke 17, PRB 100%, BLER ~10%. Status *binding* ditangguhkan (*pending receiver evidence*) hingga bukti defisit *arrival goodput* EXT-DN terkumpul.
-- **30 dB (Step 6):** Kandidat *RAN-binding*, MCS anjlok ke 0–1, BLER mencapai 0.62.
-- **35 dB (Step 7):** Memicu Radio Link Failure (RLF) pada softmodem (bukan stable operating point).
-- **40 dB (Step 8):** Bukan pengamatan independen; softmodem telah crash/RLF dari step 35 dB.
+- **Zona 1: Dead Zone / Baseline ($0\text{–}10\text{ dB}$):** MCS tetap 28, BLER $0.00\%$, SNR $25\text{–}28\text{ dB}$. Redaman diserap sepenuhnya oleh link adaptation. Ditetapkan untuk **S1** dan **S2**.
+- **Zona 2: Soft Degradation ($15.0\text{ dB}$):** *Inflection point* penurunan kualitas kanal pertama. MCS turun ke $23\text{–}27$ (mean $25.3$), BLER muncul di $4\%\text{–}17\%$ (mean $9.54\%$), PRB $\approx 73\%$ (puncak $100\%$). Koneksi $100\%$ stabil tanpa RLF, kapasitas $\approx 8\text{–}9\text{ Mbps}$. Terbukti pada dataset 7.200s S9. Ditetapkan untuk **S3** (`S3_RAN_SOFT`), **S8** (`S8_JOINT_SOFT`), dan komponen radio **S9** (`S9_JOINT_OVERLOAD`).
+- **Zona 3: Hard Degradation ($20.0\text{ dB}$):** Modulasi anjlok ke 16-QAM (MCS $20\text{–}21$), BLER $10\%\text{–}15\%$, PRB terkunci di $100\%$, kapasitas radio terpangkas di bawah $7\text{ Mbps}$. Ditetapkan untuk **S4** (`S4_RAN_DEGRADATION`).
+- **Zona 4: Instability / RLF Boundary ($\ge 25.0\text{ dB}$):** Di bawah beban kontinu 10 Mbps UDP, memicu buffer overflow MAC/RLC dan kegagalan Radio Link Failure (RLF) pada $t \approx 125\text{s}$ ($100\%$ loss). Dikeluarkan dari protokol pengambilan data tunak.
 
 ## 3. Hasil Audit & Hardening Tooling Operasional (Commit `3cc8a1b`)
 1. **`scripts/trafgen.sh` (VM-5):**

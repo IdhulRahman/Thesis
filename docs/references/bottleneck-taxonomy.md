@@ -47,11 +47,11 @@ In accordance with **3GPP TS 38.401 Clause 3.1**, the split gNB architecture dis
 ## 4. Priority Scenarios Evaluated in Testbed
 
 The experimental scenarios evaluated in this thesis map directly to this taxonomy:
-* **Scenario S1 & S2:** Baseline healthy operation across all domains.
-* **Scenario S3:** Soft Radio Channel Degradation via mild attenuation (Air Interface, Uu — preliminary candidate 25 dB, stressed radio with binding status pending receiver evidence per [rf-attenuation-calibration.md](../experiments/rf-attenuation-calibration.md)).
-* **Scenario S4:** Hard Radio Channel Degradation via heavy attenuation (Air Interface, Uu — preliminary candidate 30 dB).
+* **Scenario S1 & S2:** Baseline healthy operation across all domains ($0.0\text{ dB}$, unshaped Core).
+* **Scenario S3:** Soft Radio Channel Degradation via mild attenuation (Air Interface, Uu — calibrated at **15.0 dB**, causing moderate MCS drop to ~25 and non-zero BLER ~9.5% without connection loss per [rf-attenuation-calibration.md](../experiments/rf-attenuation-calibration.md)).
+* **Scenario S4:** Hard Radio Channel Degradation via heavy attenuation (Air Interface, Uu — calibrated at **20.0 dB**, causing modulation collapse to 16-QAM and throughput throttling).
 * **Scenario S5:** RAN MAC Scheduler PRB Exhaustion / Capacity Overload under clean channel (gNB-DU MAC Scheduler).
 * **Scenario S6 & S7:** Core UPF QoS Rate Limiting & Queue Backpressure (Core User Plane).
-* **Scenario S8 & S9:** Joint Overload (simultaneous RAN Degradation and Core Queue Backpressure — JOINT class requires binding evidence from both domains on the same measurement interval).
+* **Scenario S8 & S9:** Joint Overload (simultaneous RAN Degradation and Core Queue Backpressure — JOINT class requires binding evidence from both domains on the same measurement interval: calibrated 15.0 dB + TBF 8.5M for S8, calibrated 15.0 dB + TBF 4.0M for S9).
 
 For the exact fault injection mechanisms and parameter values, refer to [docs/experiments/scenarios.md](../experiments/scenarios.md) and [docs/experiments/rf-attenuation-calibration.md](../experiments/rf-attenuation-calibration.md).
