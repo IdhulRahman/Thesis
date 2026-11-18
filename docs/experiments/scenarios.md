@@ -273,14 +273,14 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 1. **Objective:** Evaluate telemetry signatures and detection capabilities when distinct hard impairments simultaneously affect both the Radio Access Network and Core Network user plane.
 2. **Initial Conditions:** Reference configuration; previous scenario treatments cleared.
 3. **Independent Variables (Changed):**
-   * RAN impairment: Injected Uplink path attenuation on Channel 1 at calibrated level **15.0 dB** during $t \in [120, 420\text{ s}]$, reset at $t = 420\text{ s}$.
+   * RAN impairment: Injected Uplink path attenuation on Channel 1 at calibrated hard level **20.0 dB** during $t \in [120, 420\text{ s}]$, reset at $t = 420\text{ s}$.
    * Core impairment: Binding egress TBF shaping on UPF-1 `eth0` ($4\text{ Mbps}$, latency $200\text{ ms}$) during $t \in [120, 420\text{ s}]$, removed at $t = 420\text{ s}$.
 4. **Controlled Variables (Maintained):** Offered load ($\approx 10\text{ Mbps}$ continuous across 660s), reference noise power, Slice 2 canary probing.
 5. **Architectural Precedence & Binding Condition:**
    > [!IMPORTANT]
    > In Uplink data flow, packets traverse the air interface before arriving at the Core UPF:
    > $$\text{UE} \xrightarrow{\text{Air Interface (RAN)}} \text{gNodeB DU-1/CU} \xrightarrow{\text{N3 / GTP-U}} \text{UPF-1} \xrightarrow{\text{N6 / } \texttt{eth0}} \text{EXT-DN}$$
-   > If radio degradation throttles delivered throughput entering the UPF to $R_{\text{arr}}$ (e.g., $8\text{ Mbps}$ under $15\text{ dB}$ attenuation), an egress TBF configured at $12\text{ Mbps}$ will **never be reached**, leaving Core queue buffers empty ($0\text{ B}$) and causing the joint fault to degenerate into a single-domain RAN fault.
+   > If radio degradation throttles delivered throughput entering the UPF to $R_{\text{arr}}$ (e.g., $6\text{–}7\text{ Mbps}$ under $20\text{ dB}$ attenuation), an egress TBF configured at $12\text{ Mbps}$ will **never be reached**, leaving Core queue buffers empty ($0\text{ B}$) and causing the joint fault to degenerate into a single-domain RAN fault.
    > **Binding Requirement:** The UPF TBF rate ($R_{\text{TBF}}$) must be calibrated **strictly below** the degraded radio forwarding rate ($R_{\text{arr}}$) for both bottlenecks to bind simultaneously ($R_{\text{TBF}} < R_{\text{arr}} < R_{\text{offered}}$).
 6. **Planned Execution Sequence (600s Continuous Protocol):**
    ```bash
@@ -291,7 +291,7 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
    python3 /opt/oran/monitoring/scripts/record_experiment.py S9 --duration 600 --notes "S9 Joint Hard Binding RAN and Core"
 
    # At elapsed t = 120s (VM-4 RAN & VM-3 Core): Apply simultaneous hard impairments
-   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 15.0 --channel-id 1 --port 9090
+   python3 /opt/oran/ran/scripts/rfsim_channel_control.py set-attenuation 20.0 --channel-id 1 --port 9090
    sudo docker exec oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 4mbit burst 10kb latency 200ms
 
    # At elapsed t = 420s (VM-4 RAN & VM-3 Core): Release both impairments; observe recovery until t = 600s
@@ -299,7 +299,7 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
    sudo docker exec oai-upf-slice1 tc qdisc del dev eth0 root
    ```
 7. **Evidence to Collect:** Telemetry CSV showing simultaneous radio degradation features and Core queue features; iperf receiver logs; qdisc readback.
-8. **Responses to Examine:** Simultaneous presence of radio domain signatures (degraded SNR ~25 dB, lower MCS ~25, elevated BLER ~9.5%) and Core domain signatures (saturated UPF queue backlog ~109 kB, heavy drops ~590 pkt/s, and high RTT ~440 ms). Empirically verified across 7,200s dataset (`EXP_S9_*`).
+8. **Responses to Examine:** Simultaneous presence of radio domain signatures (degraded SNR ~24 dB, lower MCS ~20–21, elevated BLER ~10–15%) and Core domain signatures (saturated UPF queue backlog ~109 kB, heavy drops ~590 pkt/s, and high RTT).
 9. **Interpretation Boundaries:** True Joint classification requires verified empirical evidence of binding congestion in both domains. If UPF queue remains empty, the condition is not empirically Joint. Two simultaneously active treatments do not automatically constitute two active bottlenecks; both limits must be verified as simultaneously binding on the same measurement interval per [rf-attenuation-calibration.md](rf-attenuation-calibration.md).
 
 ---
@@ -344,7 +344,7 @@ The following sequence is recommended for each full dataset collection run under
 | 15 | *Reset* | Run operational reset commands | Remove UPF TBF |
 | 16 | **Record S8** | `record_experiment.py S8 --duration 600` | `JOINT` soft (calibrated: 15.0 dB + TBF 8.5M active at 120–420s; sub-threshold joint stress) |
 | 17 | *Reset* | Run operational reset commands | Reset RF and remove UPF TBF |
-| 18 | **Record S9** | `record_experiment.py S9 --duration 600` | `JOINT` hard (calibrated: 15.0 dB + TBF 4.0M active at 120–420s; binding air-interface and core user plane) |
+| 18 | **Record S9** | `record_experiment.py S9 --duration 600` | `JOINT` hard (calibrated: 20.0 dB + TBF 4.0M active at 120–420s; binding air-interface and core user plane) |
 | 19 | *Reset* | Run operational reset commands | Final cleanup |
 
 > [!NOTE]
