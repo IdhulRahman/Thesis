@@ -40,38 +40,47 @@ This directory contains the operational daemons, automation scripts, fault injec
    ```bash
    python3 /opt/oran/monitoring/scripts/record_experiment.py
    ```
-   *Prompts for scenario identifier, duration in seconds (600s nominal continuous protocol), and run notes.*
+   *Prompts for scenario identifier, duration in seconds (7200s authoritative continuous campaign protocol), and run notes.*
 
-2. **Direct CLI Execution (600s Nominal Continuous Protocol):**
+2. **Direct CLI Execution (7,200s / 2-Hour Continuous Campaign Protocol):**
    > [!IMPORTANT]
-   > *Unified 600s Duration:* Under the nominal continuous protocol, experiments run for `--duration 600` under continuous traffic (`trafgen.sh start 660`). This encapsulates baseline settling ($[0, 120\text{ s}]$), active disturbance ($[120, 420\text{ s}]$), and recovery drainage ($[420, 600\text{ s}]$) in a single recording.  
-   > *Offline Labeling Rule:* The recorder stamps `event_domain` statically across the full run duration. Rows after disturbance release must NOT be assumed to be `BASELINE` immediately, as queues require drainage and settling time ($T_{\text{recovery}}$). Offline segmentation based on event timestamps and empirical indicators (queue backlog = 0 B, RTT normal) is required.
+   > *Authoritative 2-Hour (7,200s) Protocol:* Under the official campaign protocol, experiments run for `--duration 7200` under continuous traffic (`trafgen.sh start 7260 <rate>`). For fault scenarios (S3–S9), treatments are applied prior to recording and maintained persistently across the entire 7,200 seconds without mid-run operator intervention.
+   > *Offline Dataset Splitting:* Each continuous 7,200-row dataset is partitioned offline into Training (50% / 3,600s / 1 Hour), Testing (25% / 1,800s / 30 Minutes), and Evaluation (25% / 1,800s / 30 Minutes) sets without cross-fold leakage.
 
    ```bash
-   # Record S1 Light Baseline (600s continuous protocol)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 600 --notes "S1 Light Baseline Candidate 5M"
+   # Record S9 Joint Hard Overload (Full 2-Hour Continuous Campaign: RAN 18dB + UPF-1 TBF 4M)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S9 --duration 7200 --notes "S9 Joint Hard Binding RAN 18dB and Core TBF 4M 2h Continuous Campaign"
 
-   # Record S2 Higher Baseline (600s continuous protocol)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S2 --duration 600 --notes "S2 Higher Baseline Candidate 10M"
+   # Record S8 Joint Soft (Full 2-Hour Continuous Campaign: RAN 15dB + UPF-1 TBF 8.5M)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S8 --duration 7200 --notes "S8 Joint Soft RAN 15dB and Core TBF 8.5M 2h Continuous Campaign"
 
-   # Record S3 RAN Soft Degradation (600s continuous: 25 dB candidate)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S3 --duration 600 --notes "S3 RAN Soft Degradation 25dB"
+   # Record S7 Core Hard Bottleneck (Full 2-Hour Continuous Campaign: UPF-1 TBF 5M)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S7 --duration 7200 --notes "S7 Core Hard Bottleneck UPF-1 TBF 5M 2h Continuous Campaign"
 
-   # Record S5 RAN Capacity Overload (600s continuous: 20M saturation)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S5 --duration 600 --notes "S5 RAN Overload Capacity Saturation"
+   # Record S6 Core Soft (Full 2-Hour Continuous Campaign: UPF-1 TBF 8.5M)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S6 --duration 7200 --notes "S6 Core Soft UPF-1 TBF 8.5M 2h Continuous Campaign"
 
-   # Record S6 Core Soft (600s continuous: UPF-1 TBF 8.5M)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S6 --duration 600 --notes "S6 Core Soft UPF-1 TBF 8.5M"
+   # Record S5 RAN Capacity Overload (Full 2-Hour Continuous Campaign: 20M saturation)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S5 --duration 7200 --notes "S5 RAN Overload Capacity Saturation 2h Continuous Campaign"
 
-   # Record S7 Core Hard Bottleneck (600s continuous: UPF-1 TBF 5M)
-   python3 /opt/oran/monitoring/scripts/record_experiment.py S7 --duration 600 --notes "S7 Core Hard Bottleneck UPF-1 TBF 5M"
+   # Record S4 RAN Hard Degradation (Full 2-Hour Continuous Campaign: RAN 18dB)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S4 --duration 7200 --notes "S4 RAN Hard Degradation 18dB 2h Continuous Campaign"
+
+   # Record S3 RAN Soft Degradation (Full 2-Hour Continuous Campaign: RAN 15dB)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S3 --duration 7200 --notes "S3 RAN Soft Degradation 15dB 2h Continuous Campaign"
+
+   # Record S2 Higher Baseline (Full 2-Hour Continuous Campaign: 10M reference)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S2 --duration 7200 --notes "S2 Higher Baseline 10M 2h Continuous Campaign"
+
+   # Record S1 Light Baseline (Full 2-Hour Continuous Campaign: 5M reference)
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 7200 --notes "S1 Light Baseline Reference 5M 2h Continuous Campaign"
    ```
 
 3. **Manual Stop Mode (`Ctrl+C`):**
    ```bash
    python3 /opt/oran/monitoring/scripts/record_experiment.py S1 --duration 0
    ```
-   *Runs continuously until operator terminates with `Ctrl+C`. Safely flushes and closes CSV and writes manifest. Recommended when post-fault recovery duration is open-ended.*
+   *Runs continuously until operator terminates with `Ctrl+C`. Safely flushes and closes CSV and writes manifest.*
 
 ### CLI Automation Capabilities & Implementation Gaps
 * **Preset Resolution in `record_experiment.py` (`CANONICAL_PRESETS`):** Defines canonical presets for `S1`, `S2`, `S3`, `S4`, `S5`, `S6`, `S7`, `S8`, and `S9`.

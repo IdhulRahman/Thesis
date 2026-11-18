@@ -154,40 +154,41 @@ All baseline comparisons are executed across a minimum of $N \ge 10$ independent
 > The protocols and parameters in this section represent the **formal planned execution methodology** to be undertaken during the experimental phase. No runtime modifications, traffic generation, or fault injection are performed during this documentation release.
 
 ### 5.1 General Execution Lifecycle & Timing Cadence
-Every experimental run follows an eight-stage lifecycle designed to capture clean pre-fault, active-fault, and post-fault recovery dynamics:
+Every experimental run follows an eight-stage hands-free continuous lifecycle designed for the authoritative **Full 2-Hour (7,200-Second) Continuous Campaign Protocol**:
 
 ```mermaid
 flowchart LR
-    A["1. Baseline Reset\n(0 dB / No TBF)"] --> B["2. Readback Check\n(Ping Canaries)"]
-    B --> C["3. Workload Launch\n(t = -30s: trafgen 660)"]
-    C --> D["4. Recorder Start\n(t = 0s: Baseline 0-120s)"]
-    D --> E["5. Treatment Injected\n(t = 120s: Active 120-420s)"]
-    E --> F["6. Treatment Released\n(t = 420s: Recovery 420-600s)"]
-    F --> G["7. Recorder Stop\n(t = 600s: CSV & Manifest)"]
-    G --> H["8. Export & Audit\n(t = 630s: Receiver JSON)"]
+    A["1. Baseline Reset\n(0 dB / No TBF)"] --> B["2. Treatment Preset\n(Persistent S3-S9)"]
+    B --> C["3. Workload Launch\n(t = -30s: trafgen 7260)"]
+    C --> D["4. Recorder Start\n(t = 0s: 7200s @ 1Hz)"]
+    D --> E["5. Continuous Acquisition\n(7200s Monotonic Stream)"]
+    E --> F["6. Recorder Sealed\n(t = 7200s: CSV & Manifest)"]
+    F --> G["7. Export & Reset\n(t = 7260s: Receiver JSON)"]
+    G --> H["8. Offline Partition\n(50% Train, 25% Test, 25% Eval)"]
 ```
 
-1. **Stage 1 — Baseline Reset:** Reset RF channel path loss to verified Profile 1 baseline ($0.0\text{ dB}$) and delete UPF egress rate shaping.
-2. **Stage 2 — Readback & Connectivity Check:** Query RF channel status via `rfsim_channel_control.py show` and qdisc via `tc -s qdisc show dev eth0`. Confirm ping reachability from `ue1` and `ue2` to EXT-DN (`192.168.70.145`).
-3. **Stage 3 — Workload Launch ($t \approx -30\text{ s}$):** Start continuous traffic generation (`iperf3 -u` on UE-1 framed for 660s) and canary probing (`ping` on UE-2) via `trafgen.sh start 660 <rate>`.
-4. **Stage 4 — Recorder Start ($t = 0\text{ s}$ — Baseline Regime $[0, 120\text{ s}]$):** Execute `record_experiment.py <SCENARIO> --duration 600` at 1.000 Hz monotonic cadence. Telemetry stabilizes under unperturbed baseline conditions.
-5. **Stage 5 — Treatment Application ($t = 120\text{ s}$ — Active Disturbance Regime $[120, 420\text{ s}]$):** Apply the scenario treatment (path attenuation via `rfsim_channel_control.py` or egress TBF via `tc qdisc`). Queues build up and link adaptation responds.
-6. **Stage 6 — Treatment Release ($t = 420\text{ s}$ — Recovery Regime $[420, 600\text{ s}]$):** Remove the active disturbance (`rfsim_channel_control.py reset` or `tc qdisc del dev eth0 root`). Telemetry records queue drainage and link recovery under ongoing traffic.
-7. **Stage 7 — Recorder Completion ($t = 600\text{ s}$):** The 600-second recording window completes; recorder flushes and seals `telemetry_<RUN_ID>.csv` and writes `manifest.json`.
-8. **Stage 8 — Workload Completion & Receiver Log Export ($t \approx 630\text{ s}$):** Client `trafgen.sh` finishes 660s cycle gracefully, allowing iperf3 server to emit final summary; execute `receiver_iperf.sh export` on VM-3 to archive ground-truth goodput.
+1. **Stage 1 — Baseline Reset & Sanity Check:** Restore RF channel path loss to verified Profile 1 baseline ($0.0\text{ dB}$) and delete UPF egress rate shaping. Confirm baseline ping reachability from `ue1` and `ue2` to EXT-DN (`192.168.70.145`).
+2. **Stage 2 — Treatment Presetting (Hands-Free Operational Architecture):** For fault scenarios (S3–S9), the calibrated impairment condition is established prior to recording (e.g., S9 applies $18.0\text{ dB}$ attenuation on DU-1 and $4.0\text{ Mbps}$ TBF on UPF-1) and maintained persistently throughout the entire 2-hour session. For reference scenarios (S1 & S2), the system operates continuously under unperturbed baseline conditions.
+3. **Stage 3 — Workload Launch ($t \approx -30\text{ s}$):** Start continuous traffic generation (`iperf3 -u` on UE-1 framed for 7,260s) and canary probing (`ping` on UE-2) via `trafgen.sh start 7260 <rate>`.
+4. **Stage 4 — Recorder Start ($t = 0\text{ s}$):** Execute `record_experiment.py <SCENARIO> --duration 7200` at 1.000 Hz monotonic cadence. The pre-flight gate check evaluates all six telemetry pillars, and recording initiates immediately upon validation.
+5. **Stage 5 — Continuous 7,200s Monotonic Telemetry Acquisition:** Telemetry records 7,200 consecutive 1 Hz samples under persistent conditions, ensuring deep statistical convergence without mid-run operator intervention.
+6. **Stage 6 — Recorder Completion ($t = 7200\text{ s}$):** The 7,200-second recording window completes; recorder flushes and seals `telemetry_<RUN_ID>.csv` and writes `manifest.json`.
+7. **Stage 7 — Workload Completion & Receiver Log Export ($t \approx 7260\text{ s}$):** Client `trafgen.sh` finishes its 7,260s cycle gracefully, allowing iperf3 server to emit final summary; execute `receiver_iperf.sh export` on VM-3 to archive ground-truth goodput.
+8. **Stage 8 — Operational Reset & Offline Data Partitioning:** Execute inter-scenario cleanup (reset RF attenuation and delete UPF qdisc); partition the single continuous 7,200-row dataset offline into Training (50% / 3,600s), Testing (25% / 1,800s), and Evaluation (25% / 1,800s) folds.
 
-* **Recording Duration Spanning Recovery & Offline Segmentation (600s Continuous Protocol):**  
-  Under the unified 600-second protocol (`record_experiment.py <SCENARIO> --duration 600`), the recorder captures the baseline stabilization ($[0, 120\text{ s}]$), active disturbance ($[120, 420\text{ s}]$), and post-fault recovery ($[420, 600\text{ s}]$) regimes in a single continuous recording under persistent traffic (`trafgen.sh start 660`).  
-  *Labeling Demarcation:* As detailed in Section 3.4, the raw CSV `event_domain` column records the initial treatment preset across the full run duration. Datasets must be segmented or annotated offline based on intervention timestamps and empirical telemetry indicators (queue drainage, throughput recovery), rather than assuming an instantaneous switch to `BASELINE` when the fault is released.
+* **Full 2-Hour Continuous Campaign & Offline Segmentation:**  
+  Under the authoritative 7,200-second protocol (`record_experiment.py <SCENARIO> --duration 7200`), the recorder captures an uninterrupted, high-integrity 2-hour time-series dataset under persistent traffic (`trafgen.sh start 7260 <rate>`).  
+  *Labeling Demarcation:* As detailed in Section 3.4, the raw CSV `event_domain` column records the initial treatment preset across the full run duration. The dataset is subsequently partitioned offline into:
+  - **Training Partition (50% — 3,600 samples / 1 Hour):** Primary fold used for feature scaling and classifier training.
+  - **Testing Partition (25% — 1,800 samples / 30 Minutes):** Held-out fold for unbiased generalization performance testing.
+  - **Validation / Evaluation Partition (25% — 1,800 samples / 30 Minutes):** Held-out fold for hyperparameter tuning and decision threshold evaluation.
 * **Cross-VM Terminal Execution Separation:**  
   Operational procedures span multiple distinct VMs and must be executed in separate terminal sessions:
-  * **Terminal 1 (VM-5 UE Traffic):** Runs `trafgen.sh start` in the foreground.
-  * **Terminal 2 (VM-6 Monitoring / Recorder):** Runs `record_experiment.py` in the foreground.
-  * **Terminal 3 (VM-4 RAN or VM-3 Core):** Executes fault injection at Stage 4 and fault release at Stage 7.
+  * **Terminal 1 (VM-5 UE Traffic):** Runs `trafgen.sh start 7260 <rate>` in the foreground.
+  * **Terminal 2 (VM-6 Monitoring / Recorder):** Runs `record_experiment.py <SCENARIO> --duration 7200` in the foreground.
+  * **Terminal 3 (VM-4 RAN or VM-3 Core):** Pre-configures persistent fault treatments prior to launch, and executes cleanup resets upon completion.
 * **Operational Script Limitations & Gaps:**
-  * **`trafgen.sh` Probe & Traffic Lifecycles:** In `scripts/trafgen.sh`, parameter `DURATION` simultaneously determines the runtime of `iperf3 -u` (`-t "$DURATION"`), the display loop, and the ping probe packet counts (`(DURATION + 5) * 5` for eMBB, `(DURATION + 5) * 10` for URLLC). Following completion of the display loop, the script explicitly waits for the iperf3 process (`wait "$IPERF_PID" 2>/dev/null || sleep 1`) before executing `cleanup()`, terminating all child ping processes. Two operational conditions must be distinguished:
-    1. *Traffic continues after fault removal:* Under the 600s continuous protocol, traffic continues flowing through the recovery window ($t \in [420, 600\text{ s}]$) to observe post-release queue drainage under load. Executing `trafgen.sh` with a duration covering all phases (660s) is appropriate.
-    2. *Observation after traffic ceases:* If the test requires observing quiescent network recovery or canary latency after traffic generation ceases, extending `trafgen.sh` duration cannot achieve this because extending `DURATION` also extends iperf traffic. In that condition, an independent ping probe with a separate lifecycle (invoked outside `trafgen.sh`) must be used.
+  * **`trafgen.sh` Probe & Traffic Lifecycles:** In `scripts/trafgen.sh`, parameter `DURATION` simultaneously determines the runtime of `iperf3 -u` (`-t "$DURATION"`), the display loop, and the ping probe packet counts (`(DURATION + 5) * 5` for eMBB, `(DURATION + 5) * 10` for URLLC). Following completion of the display loop, the script explicitly waits for the iperf3 process (`wait "$IPERF_PID" 2>/dev/null || sleep 1`) before executing `cleanup()`, terminating all child ping processes. Under the full 2-hour continuous protocol, traffic flows persistently across the entire 7,260-second execution window (`trafgen.sh start 7260 <rate>`), completely covering the 7,200-second recording period.
   * **`rfsim_channel_control.py reset` Parameter Scope:** The `reset` subcommand in `scripts/rfsim_channel_control.py` resets only `path_loss_dB` (to $0.0\text{ dB}$ unity gain); it does **not** reset `noise_power_dB`.
 * **Repetition Count:** An initial set of **3 independent repetitions** per scenario is planned for initial validation, expanding to $N \ge 10$ for final statistical testing.
 * **NWDAF Ingestion Cadence Notice:** The Prometheus scraper operates at 1.0 Hz, but native upstream OAI NWDAF microservice updates depend on internal URR aggregation periods ($\approx 30\text{ s}$). A 1.0 Hz scrape rate captures new OAM and RAN adapter data every second, while NWDAF cumulative byte counters update in step-function intervals.
@@ -203,7 +204,7 @@ flowchart LR
 * **S4 (Hard Radio Channel Degradation via Attenuation):**  
   The offered traffic load and reference noise power must remain strictly constant, while path attenuation on Channel 1 (`rfsimu_channel_ue0`) is adjusted (preliminary candidate: 30 dB per [rf-attenuation-calibration.md](rf-attenuation-calibration.md)). Target channel identity must be confirmed via Telnet readback. If severe attenuation triggers an unhandled softmodem assertion failure, process termination, or RLF (observed at 35 dB), it must be recorded as an **infrastructure failure**, NOT as a valid training sample of radio congestion.
 * **S5 (Radio Overload via Capacity Saturation):**  
-  Under the current tooling lifecycle, S5 operates under a **single continuous saturated offered load** ($\approx 20\text{ Mbps}$ across the 660-second window, launched once via `trafgen.sh start 660 20`), directly benchmarking scheduling capacity limits against Profile 1 ($C \approx 16.6\text{ Mbps}$). The multi-phase dynamic offered load transition ($10 \to 20 \to 10\text{ Mbps}$) is explicitly documented as **not yet implemented in testbed tooling** pending decoupled lifecycle support in `trafgen.sh` (as invoking `start` mid-run triggers `cleanup()` which terminates active ping canaries). Radio overload under clean channel conditions is characterized by scheduling queue growth and goodput shortfall; **BLER can remain low ($\approx 0\%$) and MCS high**, which must not be misconstrued as an absence of overload.
+  Under the current tooling lifecycle, S5 operates under a **single continuous saturated offered load** ($\approx 20\text{ Mbps}$ across the 7,260-second window, launched once via `trafgen.sh start 7260 20`), directly benchmarking scheduling capacity limits against Profile 1 ($C \approx 16.6\text{ Mbps}$). The multi-phase dynamic offered load transition ($10 \to 20 \to 10\text{ Mbps}$) is explicitly documented as **not yet implemented in testbed tooling** pending decoupled lifecycle support in `trafgen.sh` (as invoking `start` mid-run triggers `cleanup()` which terminates active ping canaries). Radio overload under clean channel conditions is characterized by scheduling queue growth and goodput shortfall; **BLER can remain low ($\approx 0\%$) and MCS high**, which must not be misconstrued as an absence of overload.
 * **S6 (Core Soft Degradation via Mild UPF Egress Shaping):**  
   Radio channel capacity is verified as capable of forwarding the offered load (fixed $\approx 10\text{ Mbps}$), while the TBF rate on UPF-1 egress (`eth0`) is set to a mild constraint ($8\text{–}8.5\text{ Mbps}$, latency $80\text{ ms}$) so that queue backlog accumulates moderately ($6\text{k–}14\text{k Bytes}$) with minimal packet drops, creating a soft Core impairment.
 * **S7 (Core Hard Bottleneck via Binding UPF Egress Shaping):**  

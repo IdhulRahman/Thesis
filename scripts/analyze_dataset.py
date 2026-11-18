@@ -204,7 +204,7 @@ def is_recorder_placeholder(raw_phase, scen_upper):
     return False
 
 
-def resolve_phase(scen, row):
+def resolve_phase(scen, row, max_elapsed_sec=0.0):
     scen_upper = scen.upper()
     raw_phase = row.get("event_phase_id", "").strip()
 
@@ -213,17 +213,28 @@ def resolve_phase(scen, row):
     if not is_recorder_placeholder(raw_phase, scen_upper):
         return raw_phase
 
-    # 2. Reference normal baseline scenarios (S1, S2): steady-state reference throughout the entire run
+    el_sec = parse_val(row, "elapsed_sec")
+
+    # 2. Continuous 2-Hour Campaign Partitions (>660s / 7200s):
+    # Deterministic offline partitioning into 50% Train, 25% Test, 25% Eval
+    if max_elapsed_sec > 660.0 and not math.isnan(el_sec):
+        if el_sec < 3600.0:
+            return "1_TRAIN_FOLD [0-3600s]"
+        elif el_sec < 5400.0:
+            return "2_TEST_FOLD [3600-5400s]"
+        else:
+            return "3_EVAL_FOLD [5400-7200s]"
+
+    # 3. Reference normal baseline scenarios (S1, S2): steady-state reference throughout the entire run
     if any(k in scen_upper for k in ("S1", "S2", "NORMAL_LIGHT", "NORMAL_HIGH")):
         return "1_REFERENCE_STEADY"
 
-    # 3. Continuous saturated load scenario (S5): fixed capacity overload throughout the run
+    # 4. Continuous saturated load scenario (S5): fixed capacity overload throughout the run
     if any(k in scen_upper for k in ("S5", "RAN_OVERLOAD")):
         return "1_SATURATED_STEADY"
 
-    # 4. Fault injection scenarios (S3, S4, S6, S7, S8, S9):
+    # 5. Fault injection scenarios (S3, S4, S6, S7, S8, S9) under pilot short runs (<=660s):
     # Scheduled nominal windows [0-120s], [120-420s], [420-600s]
-    el_sec = parse_val(row, "elapsed_sec")
     if not math.isnan(el_sec):
         if el_sec < 120.0:
             return "1_BASELINE_NOMINAL [0-120s]"
@@ -260,22 +271,28 @@ def main():
     total_rows = 0
 
     with open(raw_file, "r") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            total_rows += 1
-            scen = row.get("event_scenario", row.get("scenario", "UNKNOWN"))
-            if scen not in scen_data:
-                scen_data[scen] = make_metrics_bucket()
+        reader = list(csv.DictReader(f))
 
-            update_bucket(scen_data[scen], row)
+    max_elapsed_sec = max(
+        (parse_val(r, "elapsed_sec") for r in reader if not math.isnan(parse_val(r, "elapsed_sec"))),
+        default=0.0
+    )
 
-            # Phase segmentation
-            ph = resolve_phase(scen, row)
+    for row in reader:
+        total_rows += 1
+        scen = row.get("event_scenario", row.get("scenario", "UNKNOWN"))
+        if scen not in scen_data:
+            scen_data[scen] = make_metrics_bucket()
 
-            phase_key = (scen, ph)
-            if phase_key not in phase_data:
-                phase_data[phase_key] = make_metrics_bucket()
-            update_bucket(phase_data[phase_key], row)
+        update_bucket(scen_data[scen], row)
+
+        # Phase / Partition segmentation
+        ph = resolve_phase(scen, row, max_elapsed_sec)
+
+        phase_key = (scen, ph)
+        if phase_key not in phase_data:
+            phase_data[phase_key] = make_metrics_bucket()
+        update_bucket(phase_data[phase_key], row)
 
     # --- 1. Print Slice 1 (eMBB / UE-1) Report ---
     print("\n--- 1. SLICE 1: eMBB (UE-1 @ UPF-1) TELEMETRI TRAFIK & QOS ---")
@@ -378,9 +395,12 @@ def main():
 
         print(f"{scen:<16} | {api_str} | {fresh_str} | {urr_str} | {ul_str} | {dl_str} | {dur_str}")
 
-    # --- 4. Print Operational Phase Segmentation Report (if multiple phases present) ---
+    # --- 4. Print Operational Phase / Partition Segmentation Report (if multiple phases present) ---
     if len(phase_data) > len(scen_data):
-        print("\n--- 4. AUDIT SEGMENTASI FASE OPERASIONAL (Jadwal Nominal Gangguan S3-S4/S6-S9: Baseline [0-120s] -> Active Fault [120-420s] -> Recovery [420-600s]) ---")
+        if max_elapsed_sec > 660.0:
+            print("\n--- 4. AUDIT SEGMENTASI PARTISI DATASET (Partisi 2-Jam / 7200s: Training [0-3600s] -> Testing [3600-5400s] -> Evaluation [5400-7200s]) ---")
+        else:
+            print("\n--- 4. AUDIT SEGMENTASI FASE OPERASIONAL (Jadwal Nominal Gangguan S3-S4/S6-S9: Baseline [0-120s] -> Active Fault [120-420s] -> Recovery [420-600s]) ---")
         print(f"{'Skenario / Fase':<44} | {'Rows':<5} | {'PRB C1':<8} | {'Backlog Max':<12} | {'Drop Max':<11} | {'MCS':<5} | {'BLER C1':<9} | {'URLLC RTT':<10} | {'SLA Viol %':<10}")
         print("-" * 132)
         for (scen, ph), d in sorted(phase_data.items()):
@@ -417,7 +437,7 @@ def main():
     print(" - Cov %      : Rasio sampel valid terhadap total baris fase (Valid / Total * 100%).")
     print(" - SLA Viol % : Rasio pelanggaran SLA terhadap sampel definitif (SLA Viol / (Violated + Compliant) * 100%).")
     print(" - Joint SLA  : Evaluasi SLA gabungan eMBB+URLLC bersyarat ketersediaan receiver goodput EXT-DN.")
-    print(" - Segmentasi : Batas 120s/420s pada skenario gangguan (S3-S4, S6-S9) adalah interval jadwal nominal injeksi, bukan bukti definitif status fisik jaringan. Skenario S1/S2 dan S5 dievaluasi sebagai fase tunak tunggal (steady-state).")
+    print(" - Segmentasi : Pada dataset kampanye 2-jam (>660s), data disegmentasi secara deterministik ke dalam fold Training [0-3600s] (50%), Testing [3600-5400s] (25%), dan Evaluasi [5400-7200s] (25%). Pada pengujian pilot (<=660s), batas 120s/420s adalah jadwal nominal injeksi.")
 
 
 if __name__ == "__main__":
