@@ -358,7 +358,7 @@ While the successful execution of the 5-layer pipeline proves that the native da
    - A dataset logger sampling at 1.000 Hz (`record_dual_stream.py`) will therefore record NWDAF metrics as a step function with a 30-second hold, rather than novel per-second measurements.
 
 5. **Calibrated Scope of Claim:**
-   - The technical milestone achieved is formally specified as: **"Native telemetry data flow is verified on PoC Slice-1"** (*Alur telemetri native terverifikasi pada PoC Slice-1*).
+   - The technical milestone achieved is formally specified as: **"Native telemetry data flow is verified on PoC Slice-1"**.
    - This demarcates the complete verification of the 5-layer transport and ingestion pipeline while maintaining scientific transparency regarding upstream OAI analytics calculation semantics.
 
 ---

@@ -26,39 +26,39 @@
 ## 1. Active VM Inventory & Component Verification
 
 All components are classified into four formal operational statuses:
-* **`BERJALAN`**: Process/container is actively executing on the hypervisor.
-* **`TERUJI`**: Interface, protocol, or data pipeline has been verified with live passing tests.
-* **`DIRENCANAKAN`**: Component or integration designed in the architecture but not yet deployed/active.
-* **`BELUM TERVERIFIKASI`**: Implemented in code/config but lacks conclusive live empirical validation.
+* **`RUNNING`**: Process/container is actively executing on the hypervisor.
+* **`VERIFIED`**: Interface, protocol, or data pipeline has been verified with live passing tests.
+* **`PLANNED`**: Component or integration designed in the architecture but not yet deployed/active.
+* **`UNVERIFIED`**: Implemented in code/config but lacks conclusive live empirical validation.
 
 | VM | Host IP | Component / Process / Container | Version / Commit / Image Tag | Architectural Role | Status | Evidence Source |
 |---|---|---|---|---|:---:|---|
-| **VM-1** | `10.102.0.168` | Non-RT RIC (FO-RIC / SMO Platform) | O-RAN SC H-Release | Management & Orchestration (SMO) | **BERJALAN** | [`docs/deployment/vm-01-non-rt-ric.md`](../deployment/vm-01-non-rt-ric.md) |
-| **VM-1** | `10.102.0.168` | A1 Policy Management Service (PMS) | `2.6.0` (`nonrtric-plt-a1policymanagementservice`) | Dispatches A1 Policy Type `20008` (HTTP `:8081`) | **TERUJI** | [`docs/integration/a1-integration.md`](../integration/a1-integration.md) |
-| **VM-1** | `10.102.0.168` | Closed-Loop Steering & Diagnosis rApp | In-house Python rApp | Cross-domain bottleneck classifier & coordinator | **DIRENCANAKAN** (In Progress) | Offline ML training in progress; dataset collected (`data/`) |
-| **VM-2** | `10.102.0.66` | Minimal O-RAN SC Near-RT RIC | `i-release` (commit `621ade26251f69...`) | Near-RT execution platform | **BERJALAN** | [`docs/deployment/vm-02-near-rt-ric.md`](../deployment/vm-02-near-rt-ric.md) |
-| **VM-2** | `10.102.0.66` | E2Term | `6.0.4` | O-RAN E2 Termination (SCTP `:36421`) | **TERUJI** | Log E2 Setup with Global gNB ID `3584` |
-| **VM-2** | `10.102.0.66` | E2Mgr & DBaaS (Redis) | E2Mgr `6.0.4`, DBaaS `0.5.7` (Redis 5.0.9) | NodeB inventory & Shared Data Layer (SDL) | **TERUJI** | SDL connection stable via RESP2 downgrade |
-| **VM-2** | `10.102.0.66` | A1 Mediator & NGINX Reverse-Proxy | A1 Mediator `3.2.2`, Nginx `:10001` | A1 protocol normalization & RMR routing | **TERUJI** | Passes `/a1-p/healthcheck` |
-| **VM-2** | `10.102.0.66` | Python xApp Runner (`python_xapp_runner`) | `i-release` (container IP `10.0.2.20`) | Hosts Python xApps (RMR `:4560`) | **BERJALAN** | Container healthy, `ricxappframe` OK |
-| **VM-2** | `10.102.0.66` | Traffic Steering xApp (`a1_policy_xapp.py`) | Python xApp baseline | Handles policy 20008, prepares E2SM-RC actions | **TERUJI** | A1 policy CREATE/GET lifecycle passed |
-| **VM-3** | `10.102.0.164` | OAI 5G Core Network Functions | OAI 5GC Federation `v2.1.0` + custom overrides | 5GC Control Plane (NRF, UDR, UDM, AUSF, AMF, SMF) | **TERUJI** | [`docs/deployment/vm-03-5g-core.md`](../deployment/vm-03-5g-core.md) (Docker Compose UP with AMF & UPF overrides; AMF N2 `:38412` active) |
-| **VM-3** | `10.102.0.164` | Dedicated UPF Slice 1 (`oai-upf-slice1`) | `oai-upf:poc-develop-ie43-compat-v1` / `v2.1.0` | User-Plane Anchor for eMBB (`01000001`, `12.1.1.0/24`) | **TERUJI (End-to-End URR & NWDAF qosmonlist Terverifikasi)** | PoC UPF develop (`c51cae2`) with Rel-16 IE 43 patch ([`patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch`](../../patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch)); N4 association OK, `Linked URR: 1` established, 0% ping loss via `oaitun_ue1`. Periodic N4 Session Reports (msg type 56) emitted to SMF; SMF dispatches `Nsmf_EventExposure` (`QOS_MON`) to `oai-nwdaf-sbi`; live volume and packet counts persistently indexed in MongoDB `qosmonlist`; Northbound `UE_COMMUNICATION` analytics successfully computed and exposed. |
-| **VM-3** | `10.102.0.164` | Dedicated UPF Slice 2 (`oai-upf-slice2`) | `oai-upf:v2.1.0` | User-Plane Anchor for URLLC (`de00007b`, `12.1.2.0/24`) | **TERUJI** | Egress traffic routed, N3/N6 active, 0% ping loss |
-| **VM-3** | `10.102.0.164` | External Data Network (`oai-ext-dn`) | Container IP `192.168.70.145` | iperf3 server `:5201` & ICMP ping target | **TERUJI** | Target reachable by UE1 & UE2 |
-| **VM-3** | `10.102.0.164` | Core Telemetry Adapter (`core_adapter.py`) | Host Python daemon v9 | Scrapes UPF Linux kernel qdisc & pushes to VM-6 `:9100/report` | **BERJALAN** | Daemon active (PID 1788641), 1 Hz sampling, local disk archive retained |
-| **VM-3** | `10.102.0.164` | OAI NWDAF Stack (`oai-nwdaf-*`) | 8 microservices (`develop`/`v2.0.0`) + Kong Gateway (`:8080`) + MongoDB | 3GPP Rel-17 NBI Analytics (`Nnwdaf_AnalyticsInfo`) & SBI Ingestion | **TERUJI** | Live query returns HTTP 200 with dynamic `absoluteNum: 1` (`NETWORK_PERFORMANCE`) and dynamic user-plane volume/duration aggregation (`UE_COMMUNICATION`: `commDur: 2842s`, `ulVol: 1680B`, `dlVol: 1680B`); MongoDB `testing.smf` indexed with live `pdusesestlist` and `qosmonlist` |
-| **VM-4** | `10.102.0.167` | OAI gNB CU (`cu_gnb.conf`) | OAI 2024.w39 `nr-softmodem` | CU-CP (RRC) & CU-UP (PDCP/SDAP), E2 Agent to VM-2 | **TERUJI** | [`docs/deployment/vm-04-ran.md`](../deployment/vm-04-ran.md) (E2 Agent connected to `:36421`) |
-| **VM-4** | `10.102.0.167` | OAI gNB DU-1 (`du_gnb1.conf`, Cell-1) | OAI 2024.w39 `nr-softmodem --rfsim` | RLC/MAC/PHY DU for Cell-1 (TCP server `:4043`) | **TERUJI** | Primary serving cell for UE1 (and co-located contention cell for UE2) |
-| **VM-4** | `10.102.0.167` | OAI gNB DU-2 (`du_gnb2.conf`, Cell-2) | OAI 2024.w39 `nr-softmodem --rfsim` | RLC/MAC/PHY DU for Cell-2 (TCP server `:4044`) | **BERJALAN** | Target standby cell for steering (or serving cell for UE2 per `spawn_multi_ue.sh` default) |
-| **VM-4** | `10.102.0.167` | RAN Telemetry Adapter (`ran_adapter.py`) | Host Python daemon v1 | Tails `du1.log`/`du2.log` for `NPRB` & pushes to VM-6 | **BERJALAN** | Log: streaming Cell-1 & Cell-2 PRB% at 1 Hz |
-| **VM-5** | `10.102.0.165` | OAI nrUE Emulator (`ue1` namespace) | OAI 2024.w39 `nr-uesoftmodem` | Attached to Cell-1 (`:4043`), eMBB slice, IP `12.1.1.2` | **TERUJI** | [`docs/deployment/vm-05-ue.md`](../deployment/vm-05-ue.md) (Interface `oaitun_ue1` active in `ue1`) |
-| **VM-5** | `10.102.0.165` | OAI nrUE Emulator (`ue2` namespace) | OAI 2024.w39 `nr-uesoftmodem` | URLLC slice, IP `12.1.2.2` (Default spawner attaches to Cell-2 `:4044`; contention mode attaches to Cell-1 `:4043`) | **TERUJI** | [`docs/deployment/vm-05-ue.md`](../deployment/vm-05-ue.md) (Interface `oaitun_ue1` active in `ue2`) |
-| **VM-5** | `10.102.0.165` | Multi-Slice TrafGen (`trafgen.sh`) | Bash automation script | Injects iperf3 UDP (eMBB) & ping (URLLC), pushes QoS | **TERUJI** | Live 1s loops push `/report` to VM-6 |
-| **VM-6** | `10.102.0.67` | Telemetry Collector (`telemetry_collector.py`) | Python HTTP Server (`:9100`) | Ingests `/report`, exports Prometheus `/metrics` | **BERJALAN** | [`docs/deployment/vm-06-monitoring.md`](../deployment/vm-06-monitoring.md) (Running with 3.5s staleness auto-reset) |
-| **VM-6** | `10.102.0.67` | Dual-Stream Logger (`record_dual_stream.py`)| Monotonic 1.000 Hz Python logger | Generates `telemetry_raw_<RUN>_<PID>.csv` | **TERUJI** | Successfully logged 952 rows on run `297233` |
-| **VM-6** | `10.102.0.67` | Event Annotator (`log_event.py`) | Atomic JSON/CSV logger | Injects ground-truth event labels S1–S10 | **TERUJI** | Generated `experiment_events_DATASET_EXP_FINAL.csv`|
-| **VM-6** | `10.102.0.67` | Prometheus TSDB & Grafana | Prometheus `:9090`, Grafana `:3000` | Real-time observability & dashboard visualization | **BERJALAN** | Scrapes `:9100` every 1s, Grafana dashboard active |
+| **VM-1** | `10.102.0.168` | Non-RT RIC (FO-RIC / SMO Platform) | O-RAN SC H-Release | Management & Orchestration (SMO) | **RUNNING** | [`docs/deployment/vm-01-non-rt-ric.md`](../deployment/vm-01-non-rt-ric.md) |
+| **VM-1** | `10.102.0.168` | A1 Policy Management Service (PMS) | `2.6.0` (`nonrtric-plt-a1policymanagementservice`) | Dispatches A1 Policy Type `20008` (HTTP `:8081`) | **VERIFIED** | [`docs/integration/a1-integration.md`](../integration/a1-integration.md) |
+| **VM-1** | `10.102.0.168` | Closed-Loop Steering & Diagnosis rApp | In-house Python rApp | Cross-domain bottleneck classifier & coordinator | **PLANNED** (In Progress) | Offline ML training in progress; dataset collected (`data/`) |
+| **VM-2** | `10.102.0.66` | Minimal O-RAN SC Near-RT RIC | `i-release` (commit `621ade26251f69...`) | Near-RT execution platform | **RUNNING** | [`docs/deployment/vm-02-near-rt-ric.md`](../deployment/vm-02-near-rt-ric.md) |
+| **VM-2** | `10.102.0.66` | E2Term | `6.0.4` | O-RAN E2 Termination (SCTP `:36421`) | **VERIFIED** | Log E2 Setup with Global gNB ID `3584` |
+| **VM-2** | `10.102.0.66` | E2Mgr & DBaaS (Redis) | E2Mgr `6.0.4`, DBaaS `0.5.7` (Redis 5.0.9) | NodeB inventory & Shared Data Layer (SDL) | **VERIFIED** | SDL connection stable via RESP2 downgrade |
+| **VM-2** | `10.102.0.66` | A1 Mediator & NGINX Reverse-Proxy | A1 Mediator `3.2.2`, Nginx `:10001` | A1 protocol normalization & RMR routing | **VERIFIED** | Passes `/a1-p/healthcheck` |
+| **VM-2** | `10.102.0.66` | Python xApp Runner (`python_xapp_runner`) | `i-release` (container IP `10.0.2.20`) | Hosts Python xApps (RMR `:4560`) | **RUNNING** | Container healthy, `ricxappframe` OK |
+| **VM-2** | `10.102.0.66` | Traffic Steering xApp (`a1_policy_xapp.py`) | Python xApp baseline | Handles policy 20008, prepares E2SM-RC actions | **VERIFIED** | A1 policy CREATE/GET lifecycle passed |
+| **VM-3** | `10.102.0.164` | OAI 5G Core Network Functions | OAI 5GC Federation `v2.1.0` + custom overrides | 5GC Control Plane (NRF, UDR, UDM, AUSF, AMF, SMF) | **VERIFIED** | [`docs/deployment/vm-03-5g-core.md`](../deployment/vm-03-5g-core.md) (Docker Compose UP with AMF & UPF overrides; AMF N2 `:38412` active) |
+| **VM-3** | `10.102.0.164` | Dedicated UPF Slice 1 (`oai-upf-slice1`) | `oai-upf:poc-develop-ie43-compat-v1` / `v2.1.0` | User-Plane Anchor for eMBB (`01000001`, `12.1.1.0/24`) | **VERIFIED (End-to-End URR & NWDAF qosmonlist Verified)** | PoC UPF develop (`c51cae2`) with Rel-16 IE 43 patch ([`patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch`](../../patches/upf/0001-fix-upf-pfcp-ie43-rel16-compat.patch)); N4 association OK, `Linked URR: 1` established, 0% ping loss via `oaitun_ue1`. Periodic N4 Session Reports (msg type 56) emitted to SMF; SMF dispatches `Nsmf_EventExposure` (`QOS_MON`) to `oai-nwdaf-sbi`; live volume and packet counts persistently indexed in MongoDB `qosmonlist`; Northbound `UE_COMMUNICATION` analytics successfully computed and exposed. |
+| **VM-3** | `10.102.0.164` | Dedicated UPF Slice 2 (`oai-upf-slice2`) | `oai-upf:v2.1.0` | User-Plane Anchor for URLLC (`de00007b`, `12.1.2.0/24`) | **VERIFIED** | Egress traffic routed, N3/N6 active, 0% ping loss |
+| **VM-3** | `10.102.0.164` | External Data Network (`oai-ext-dn`) | Container IP `192.168.70.145` | iperf3 server `:5201` & ICMP ping target | **VERIFIED** | Target reachable by UE1 & UE2 |
+| **VM-3** | `10.102.0.164` | Core Telemetry Adapter (`core_adapter.py`) | Host Python daemon v9 | Scrapes UPF Linux kernel qdisc & pushes to VM-6 `:9100/report` | **RUNNING** | Daemon active (PID 1788641), 1 Hz sampling, local disk archive retained |
+| **VM-3** | `10.102.0.164` | OAI NWDAF Stack (`oai-nwdaf-*`) | 8 microservices (`develop`/`v2.0.0`) + Kong Gateway (`:8080`) + MongoDB | 3GPP Rel-17 NBI Analytics (`Nnwdaf_AnalyticsInfo`) & SBI Ingestion | **VERIFIED** | Live query returns HTTP 200 with dynamic `absoluteNum: 1` (`NETWORK_PERFORMANCE`) and dynamic user-plane volume/duration aggregation (`UE_COMMUNICATION`: `commDur: 2842s`, `ulVol: 1680B`, `dlVol: 1680B`); MongoDB `testing.smf` indexed with live `pdusesestlist` and `qosmonlist` |
+| **VM-4** | `10.102.0.167` | OAI gNB CU (`cu_gnb.conf`) | OAI 2024.w39 `nr-softmodem` | CU-CP (RRC) & CU-UP (PDCP/SDAP), E2 Agent to VM-2 | **VERIFIED** | [`docs/deployment/vm-04-ran.md`](../deployment/vm-04-ran.md) (E2 Agent connected to `:36421`) |
+| **VM-4** | `10.102.0.167` | OAI gNB DU-1 (`du_gnb1.conf`, Cell-1) | OAI 2024.w39 `nr-softmodem --rfsim` | RLC/MAC/PHY DU for Cell-1 (TCP server `:4043`) | **VERIFIED** | Primary serving cell for UE1 (and co-located contention cell for UE2) |
+| **VM-4** | `10.102.0.167` | OAI gNB DU-2 (`du_gnb2.conf`, Cell-2) | OAI 2024.w39 `nr-softmodem --rfsim` | RLC/MAC/PHY DU for Cell-2 (TCP server `:4044`) | **RUNNING** | Target standby cell for steering (or serving cell for UE2 per `spawn_multi_ue.sh` default) |
+| **VM-4** | `10.102.0.167` | RAN Telemetry Adapter (`ran_adapter.py`) | Host Python daemon v1 | Tails `du1.log`/`du2.log` for `NPRB` & pushes to VM-6 | **RUNNING** | Log: streaming Cell-1 & Cell-2 PRB% at 1 Hz |
+| **VM-5** | `10.102.0.165` | OAI nrUE Emulator (`ue1` namespace) | OAI 2024.w39 `nr-uesoftmodem` | Attached to Cell-1 (`:4043`), eMBB slice, IP `12.1.1.2` | **VERIFIED** | [`docs/deployment/vm-05-ue.md`](../deployment/vm-05-ue.md) (Interface `oaitun_ue1` active in `ue1`) |
+| **VM-5** | `10.102.0.165` | OAI nrUE Emulator (`ue2` namespace) | OAI 2024.w39 `nr-uesoftmodem` | URLLC slice, IP `12.1.2.2` (Default spawner attaches to Cell-2 `:4044`; contention mode attaches to Cell-1 `:4043`) | **VERIFIED** | [`docs/deployment/vm-05-ue.md`](../deployment/vm-05-ue.md) (Interface `oaitun_ue1` active in `ue2`) |
+| **VM-5** | `10.102.0.165` | Multi-Slice TrafGen (`trafgen.sh`) | Bash automation script | Injects iperf3 UDP (eMBB) & ping (URLLC), pushes QoS | **VERIFIED** | Live 1s loops push `/report` to VM-6 |
+| **VM-6** | `10.102.0.67` | Telemetry Collector (`telemetry_collector.py`) | Python HTTP Server (`:9100`) | Ingests `/report`, exports Prometheus `/metrics` | **RUNNING** | [`docs/deployment/vm-06-monitoring.md`](../deployment/vm-06-monitoring.md) (Running with 3.5s staleness auto-reset) |
+| **VM-6** | `10.102.0.67` | Dual-Stream Logger (`record_dual_stream.py`)| Monotonic 1.000 Hz Python logger | Generates `telemetry_raw_<RUN>_<PID>.csv` | **VERIFIED** | Successfully logged 952 rows on run `297233` |
+| **VM-6** | `10.102.0.67` | Event Annotator (`log_event.py`) | Atomic JSON/CSV logger | Injects ground-truth event labels S1–S10 | **VERIFIED** | Generated `experiment_events_DATASET_EXP_FINAL.csv`|
+| **VM-6** | `10.102.0.67` | Prometheus TSDB & Grafana | Prometheus `:9090`, Grafana `:3000` | Real-time observability & dashboard visualization | **RUNNING** | Scrapes `:9100` every 1s, Grafana dashboard active |
 
 ---
 
@@ -265,7 +265,7 @@ The recorded dataset (`telemetry_raw_<RUN>_<PID>.csv`) contains exactly 37 colum
   - **`ulVolVariance` Standard Deviation Representation:** The NWDAF engine implements variance using `math.Sqrt(...)`. The value $588$ returned in `ulVolVariance` is mathematically the sample standard deviation ($\sigma = 588\text{ B}$), while true statistical variance is $\sigma^2 = 345,744\text{ B}^2$.
   - **Single-Slice PoC Boundary:** `getFilterUeComm()` filters strictly by time window (`startTs`, `endTs`) without SUPI or S-NSSAI isolation. While fully verified for PoC Slice-1, multi-slice deployments require upstream partitioning to avoid cross-slice metric merging.
   - **Temporal Cadence Mismatch (30s UPF Loop vs. 1 Hz Collector):** UPF `usage_report_loop()` sleeps for 30s, causing NWDAF metrics to update as a step function every 30 seconds rather than per second. `telemetry_collector.py` connects to `UE_COMMUNICATION` with a 35s freshness window (`nwdaf_comm_freshness`).
-  - **Calibrated Scientific Claim:** The verified milestone is strictly defined as **"Native telemetry data flow verified on PoC Slice-1"** (*Alur telemetri native terverifikasi pada PoC Slice-1*), acknowledging functioning 5-layer plumbing while noting upstream calculation semantics.
+  - **Calibrated Scientific Claim:** The verified milestone is strictly defined as **"Native telemetry data flow verified on PoC Slice-1"**, acknowledging functioning 5-layer plumbing while noting upstream calculation semantics.
 
 ---
 
@@ -298,12 +298,12 @@ The recorded dataset (`telemetry_raw_<RUN>_<PID>.csv`) contains exactly 37 colum
 ```
 
 ### 6.1 Control Loop Status Matrix
-* **Bottleneck Diagnosis:** **`DIRENCANAKAN`** (Currently ground-truth labeled by operator; ML model planned for offline training).
-* **A1 Policy Channel (VM-1 $\rightarrow$ VM-2):** **`TERUJI`** (Policy Type 20008 schema registered, A1 Mediator validates JSON payloads, returns HTTP 200/201).
-* **E2 Interface Setup (VM-4 $\rightarrow$ VM-2):** **`TERUJI`** (OAI CU connects to `ric_e2term` over SCTP, registers 8 Service Models including E2SM-KPM v2 and E2SM-RC v1).
-* **Dynamic E2 Traffic Steering (Cell-1 $\leftrightarrow$ Cell-2):** **`BELUM TERVERIFIKASI`** (E2SM-RC control request triggers have been smoke-tested, but automated closed-loop handover during live continuous iperf3 streams has not yet been demonstrated).
-* **Core User-Plane Control Action:** **`TERUJI`** (Manual actuation via `tc` verified; automated actuation API from RIC/rApp planned).
-* **Closed-Loop SLA Recovery Verification:** **`TERUJI`** (Manually demonstrated during the CLEAR phase where queue drain time and SLA recovery were confirmed).
+* **Bottleneck Diagnosis:** **`PLANNED`** (Currently ground-truth labeled by operator; ML model planned for offline training).
+* **A1 Policy Channel (VM-1 $\rightarrow$ VM-2):** **`VERIFIED`** (Policy Type 20008 schema registered, A1 Mediator validates JSON payloads, returns HTTP 200/201).
+* **E2 Interface Setup (VM-4 $\rightarrow$ VM-2):** **`VERIFIED`** (OAI CU connects to `ric_e2term` over SCTP, registers 8 Service Models including E2SM-KPM v2 and E2SM-RC v1).
+* **Dynamic E2 Traffic Steering (Cell-1 $\leftrightarrow$ Cell-2):** **`UNVERIFIED`** (E2SM-RC control request triggers have been smoke-tested, but automated closed-loop handover during live continuous iperf3 streams has not yet been demonstrated).
+* **Core User-Plane Control Action:** **`VERIFIED`** (Manual actuation via `tc` verified; automated actuation API from RIC/rApp planned).
+* **Closed-Loop SLA Recovery Verification:** **`VERIFIED`** (Manually demonstrated during the CLEAR phase where queue drain time and SLA recovery were confirmed).
 
 ---
 

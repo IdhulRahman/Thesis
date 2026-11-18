@@ -659,7 +659,7 @@ curl -s -G "http://10.102.0.233:8080/nnwdaf-analyticsinfo/v1/analytics" \
 > - `ulVolVariance: 588` and `dlVolVariance: 588` represent standard deviation with $N$-normalization ($\sigma = 588\text{ B}$ using divisor $N$, rather than sample divisor $N-1$), because the upstream engine computes variance via `math.Sqrt(...)`. The true statistical variance is $\sigma^2 = 345,744\text{ B}^2$.
 > - `oai-nwdaf-engine` log records confirm: `Getting Ue Communication from DB` $\rightarrow$ `Constructing Ue Communication filter for DB search ...` querying `qosmonlist` in MongoDB.
 > - **Temporal Resolution:** UPF `usage_report_loop()` emits reports every 30 seconds (`sleep(30)`); hence NWDAF volume metrics update on a 30s step function rather than continuous per-second telemetry.
-> - **Scope of Claim:** The verified milestone is strictly designated as **"Native telemetry data flow verified on PoC Slice-1"** (*Alur telemetri native terverifikasi pada PoC Slice-1*), acknowledging functioning 5-layer plumbing while noting upstream calculation semantics.
+> - **Scope of Claim:** The verified milestone is strictly designated as **"Native telemetry data flow verified on PoC Slice-1"**, acknowledging functioning 5-layer plumbing while noting upstream calculation semantics.
 
 #### 4. Scientific Implications for Thesis Research Methodology
 The findings above confirm that:

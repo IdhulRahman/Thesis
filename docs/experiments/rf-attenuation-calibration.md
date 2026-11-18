@@ -108,8 +108,8 @@ Following the 8-step sweep and empirical multi-hour continuous verification on 2
 |---|---|---|---|---|---|
 | **Zone 1: Dead Zone / Baseline** | $0.0\text{ dB} \le \text{Att} \le 10.0\text{ dB}$ | **$0.0\text{ dB}$** | SNR $25\text{–}28\text{ dB}$, MCS 28, BLER $0.00\%$. Loss is completely absorbed by link margin; no degradation signature in telemetry. | **S1** (`S1_NORMAL_LIGHT`),<br>**S2** (`S2_NORMAL_HIGH`) | **Confirmed** (Pilot runs `EXP_S1_*`) |
 | **Zone 2: Soft Degradation** | $12.0\text{ dB} \le \text{Att} \le 15.0\text{ dB}$ | **$15.0\text{ dB}$** | Inflection point. MCS $23\text{–}27$ (mean $25.3$), BLER $4\%\text{–}17\%$ (mean $9.54\%$), PRB grant proxy $\approx 73\%$ (peaks at $100\%$). Capacity $\approx 8\text{–}9\text{ Mbps}$; $100\%$ link stability with zero outage. | **S3** (`S3_RAN_SOFT`),<br>**S8** (`S8_JOINT_SOFT`) | **Confirmed** (Empirical RFsim sweep & calibration) |
-| **Zone 3: Hard Degradation** | $18.0\text{ dB} \le \text{Att} \le 22.0\text{ dB}$ | **$20.0\text{ dB}$** | Modulation collapse to 16-QAM (MCS $20\text{–}21$), BLER $10\%\text{–}15\%$, PRB locked at $100\%$. Radio forwarding capacity drops to $\approx 6\text{–}7\text{ Mbps}$, actively throttling offered load. | **S4** (`S4_RAN_DEGRADATION`),<br>**S9** (`S9_JOINT_OVERLOAD`) | **Calibrated** (Step 4 sweep evidence) |
-| **Zone 4: Instability / RLF Boundary** | $\ge 25.0\text{ dB}$ | $\ge 25.0\text{ dB}$ | Link budget boundary. Under sustained continuous $10\text{ Mbps}$ UDP, triggers HARQ retransmission exhaustion and MAC/RLC buffer overflow, leading to observed RLF ($100\%$ loss). Unsuitable for steady-state data collection. | None (Excluded from steady-state protocol) | **Observed** (RLF observed at $t=125\text{s}$ under $10\text{M}$ UDP) |
+| **Zone 3: Hard Degradation** | $16.0\text{ dB} \le \text{Att} \le 18.0\text{ dB}$ | **$18.0\text{ dB}$** | Severe radio degradation without link budget collapse. MCS transitions to 16-QAM (MCS $20\text{–}21$), BLER reaches $10\%\text{–}25\%$, RTT surges to $600\text{–}1000\text{ ms}$, PRB peaks at $100\%$. Radio forwarding capacity throttles to $\approx 6\text{–}7\text{ Mbps}$, maintaining connected session while saturating downstream queues. | **S4** (`S4_RAN_DEGRADATION`),<br>**S9** (`S9_JOINT_OVERLOAD`) | **Confirmed** (Empirical 18.0 dB verification) |
+| **Zone 4: Instability / RLF Boundary** | $\ge 20.0\text{ dB}$ | $\ge 20.0\text{ dB}$ | Air interface link budget collapse. Attenuation $\ge 20.0\text{ dB}$ triggers $100\%$ packet loss under continuous load and softmodem abort (`SIGABRT` during RACH / initial sync). Unsuitable for steady-state data collection. | None (Excluded from steady-state protocol) | **Observed** (100% loss and UE abort at $\ge 20\text{ dB}$) |
 
 ---
 
@@ -121,9 +121,9 @@ The table below maps the calibrated attenuation thresholds to thesis experimenta
 |---|---|---|---|---|---|
 | **S1 / S2** | Reference Baseline | **0.0 dB** | Unshaped (no TBF) | Healthy radio (MCS 28, BLER 0%) and unconstrained user plane. | **Confirmed** |
 | **S3** | RAN Soft Degradation | **15.0 dB** | Unshaped (no TBF) | Sub-threshold radio stress (MCS ~25, BLER ~9.5%), zero UPF backlog, no RLF. | **High** |
-| **S4** | RAN Hard Degradation | **20.0 dB** | Unshaped (no TBF) | Severe radio throttling (MCS ~20, PRB 100%), air interface limits arrival goodput. | **High** |
+| **S4** | RAN Hard Degradation | **18.0 dB** | Unshaped (no TBF) | Severe radio throttling (MCS ~20, PRB 100%), air interface limits arrival goodput without link loss. | **High** |
 | **S8** | Joint Soft Degradation | **15.0 dB** | TBF 8.5 Mbps (latency 80ms) | Simultaneous sub-threshold stress: mild radio degradation + moderate UPF queue (6k–15k B). | **High** |
-| **S9** | Joint Hard Overload | **20.0 dB** | TBF 4.0 Mbps (latency 200ms) | Verified joint binding: radio forwards ~6–7 Mbps (Zone 3 Hard), Core throttles to 4 Mbps ($R_{\text{TBF}} < R_{\text{arr}} < R_{\text{offered}}$). | **High** |
+| **S9** | Joint Hard Overload | **18.0 dB** | TBF 4.0 Mbps (latency 200ms) | Verified joint binding: radio forwards ~6–7 Mbps (Zone 3 Hard), Core throttles to 4 Mbps ($R_{\text{TBF}} < R_{\text{arr}} < R_{\text{offered}}$) with saturated queue (~109 kB). | **Confirmed (Active Run)** |
 
 > [!CAUTION]
 > Scenarios S8 and S9 must not be classified as JOINT solely because two impairments are active simultaneously. JOINT classification requires that **both** the RAN and Core limits are verified as simultaneously binding on the same measurement interval.
