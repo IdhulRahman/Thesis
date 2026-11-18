@@ -147,3 +147,33 @@ Even when standard 3GPP query parameters (`ana-req`, `event-filter`) are passed,
 2. **For User Plane Bottleneck Telemetry:** Do not rely on NWDAF `relativeRatio` for core congestion diagnosis. Use the dedicated UPF research telemetry collector (`core_adapter.py` v9) which measures physical kernel queue backlogs (`upf_queue_backlog_bytes`), packet drops (`upf_packet_drops_delta`), and interface throughput (`upf_interface_tx_mbps`) with calibrated monotonic timing.
 
 ---
+
+<a id="case-49"></a>
+## Case 49 — Zero NWDAF User-Plane Volume (`ulVol: 0`) Due to SMF In-Memory Subscription Loss After SMF Restart
+
+### Symptom
+Periodic NBI analytics queries to Kong Gateway (`:8080/nnwdaf-analyticsinfo/v1/analytics?event-id=UE_COMMUNICATION`) return `HTTP 200 OK` with valid JSON, but `ulVol`, `dlVol`, and `commDur` remain permanently `0` despite continuous high-rate user-plane traffic (~10–20 Mbps). Container logs on `oai-smf-slice1` on VM-3 report:
+```text
+[SMF] No subscription available for this event
+```
+
+### Cause
+1. **Volatile In-Memory Event Table in SMF:** The OpenAirInterface SMF (`oai-smf-slice1`) stores active `Nsmf_EventExposure` subscriptions exclusively in volatile heap memory. When SMF is restarted, all existing subscription state is wiped.
+2. **Decoupled Standalone NWDAF Lifecycle:** The standalone NWDAF stack runs on **VM-07 (`10.102.0.233`)**, while the 5G Core control plane runs on **VM-3 (`10.102.0.246`)**.
+3. **One-Shot Initialization in `oai-nwdaf-sbi`:** The Go microservice `oai-nwdaf-sbi` dispatches its `Nsmf_EventExposure` registration (requesting `QOS_MON`, event 98) only once during container startup (`InitConfig()`). If SMF is restarted while `oai-nwdaf-sbi` continues running, SMF rejects incoming UPF usage reports (URRs) because no active subscription exists in memory.
+
+### Solution
+1. **Enforce Cascading Restart Protocol:** Whenever SMF is restarted on VM-3, immediately restart the NWDAF SBI and Engine microservices on **VM-07 (`10.102.0.233`)**:
+   ```bash
+   sudo docker restart oai-nwdaf-sbi oai-nwdaf-engine
+   ```
+2. **Verify Subscription Re-establishment:**
+   Check SMF logs on VM-3 to confirm the subscription handshake:
+   ```bash
+   sudo docker logs --tail 25 oai-smf-slice1 | grep -i "subscription"
+   ```
+   Confirm `Found an event subscription (Event ID 1, Event 98)` appears when user-plane traffic passes.
+3. **Automated Pre-Flight Gate Check:** `scripts/record_experiment.py` enforces a mandatory pre-flight gate check requiring `nwdaf_comm_ul_bytes > 0` before any experimental recording begins.
+
+---
+
