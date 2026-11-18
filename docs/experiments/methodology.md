@@ -56,17 +56,19 @@ To prevent methodological conflation across asynchronous telemetry pipelines, th
 
 *Radio Frame Progress Audit:* All scheduling operations run on Linux wall-clock / elapsed monotonic time. SFN frame progress ratio ($\text{SFN}_{\text{elapsed}} / \text{WallClock}$) is recorded separately to audit RFSimulator real-time stability under load.
 
-### 3.1 Data Splitting Strategy Across Independent Runs (600s Nominal Protocol)
+### 3.1 Authoritative Full 2-Hour (7,200s) Continuous Campaign Protocol & Dataset Splitting
 
-To ensure valid generalization without data leakage, experimental datasets must be partitioned strictly across **independent experiment runs/repetitions**, rather than randomly shuffling individual 1-second time rows:
-* **Nominal 600-Second Run Duration:** Each experimental run executes for **600 seconds** (producing $\approx 600$ 1 Hz snapshots).
-  * *Note on Source Sampling:* 600 rows in CSV does **NOT** equate to 600 independent statistical samples for all metrics. For UPF URR metrics updating at $\approx 30\text{ s}$, a 600-second run provides $\approx 20$ source reporting opportunities per persistent session.
-* **Run-Level Partitioning Budget:** Evaluation datasets are budgeted with an initial target of **10 independent runs per scenario** (e.g., 6 training, 2 validation, 2 testing runs):
-  * **Training Set ($60\%$ / 6 runs):** Independent experiment runs used exclusively for feature normalization (scalers), imputation fitting, and classifier training.
-  * **Validation Set ($20\%$ / 2 runs):** Distinct experiment runs used for hyperparameter tuning and decision threshold selection.
-  * **Testing Set ($20\%$ / 2 runs):** Fully unseen, independent experiment runs evaluated under continuous closed-loop execution.
-  * **Strict Isolation Rule:** All UEs, operational phases, and overlapping temporal feature windows originating from the same execution run must reside in the exact same partition fold. Scalers and imputation statistics must **never** be fitted on validation or test data.
-* **Balanced Scenario Ordering:** To prevent time-of-day or hypervisor thermal accumulation bias, scenario execution order across repetitions must be varied or counterbalanced (e.g., Latin square ordering).
+To ensure valid generalization, statistical depth, and eliminate boundary artifacts, experimental datasets are collected under the **Authoritative Full 2-Hour (7,200-Second) Continuous Protocol** (`record_experiment.py <SCENARIO> --duration 7200`):
+* **2-Hour Continuous Run Duration:** Each experimental scenario executes continuously for **7,200 seconds** (producing 7,200 1 Hz snapshot rows).
+  * *Statistical Reporting Depth:* For 3GPP NWDAF / UPF URR metrics updating on a 30-second cycle, a 7,200-second continuous session provides **$\approx 240$ authentic source reporting opportunities** per persistent PDU session, ensuring rigorous statistical significance.
+* **Continuous Traffic Framing:** Traffic generation on VM-5 is framed for **7,260 seconds (121 minutes)** (`trafgen.sh start 7260 <rate>`) and launched $\approx 15\text{–}30\text{ s}$ before starting the recorder, guaranteeing complete coverage across all 7,200 recording seconds.
+* **Deterministic Run Partitioning Scheme:** The continuous 7,200-row dataset per scenario is partitioned offline into:
+  * **Training Set ($50\%$ / 3,600 samples — 1 Hour):** Chronological first hour of the recording, used exclusively for feature normalization (scalers), imputation parameter fitting, and classifier training.
+  * **Testing Set ($25\%$ / 1,800 samples — 30 Minutes):** Held-out segment for evaluating final generalization metrics.
+  * **Evaluation / Validation Set ($25\%$ / 1,800 samples — 30 Minutes):** Held-out segment used for hyperparameter tuning and decision threshold optimization.
+  * **Strict Isolation Rule:** Scalers and imputation statistics must **never** be fitted on validation or test partitions.
+* **Scenario Execution Order:** To ensure operational efficiency and resolve high-complexity setups first, scenarios are executed in descending order:
+  $$\mathbf{S9} \to \mathbf{S8} \to \mathbf{S7} \to \mathbf{S6} \to \mathbf{S5} \to \mathbf{S4} \to \mathbf{S3} \to \mathbf{S2} \to \mathbf{S1}$$
 
 ### 3.2 Evaluation Integrity & Unbiased Benchmarking
 * **No Artificial Benchmark Bias:** Experiments must **not** be designed to artificially penalize single-domain models or force fused cross-domain models to outperform them. If Core-only telemetry (`B2`) performs strongly on Core-isolated bottlenecks, this is documented as an authentic architectural characteristic, not an experimental flaw or "shortcut learning".
@@ -80,18 +82,14 @@ To ensure valid generalization without data leakage, experimental datasets must 
    Strict causality is enforced: decision at time $t$ only ingests data received at or prior to $t$. No backfilling of future reports is permitted. Repeated values across 1-second ticks represent held information, not new instantaneous line-rate measurements.
 4. **Quality & Freshness Indicators (Not Deletion Filters):** Telemetry freshness indicators (`nwdaf_comm_freshness` at 45s and `e2e_probe_freshness` at 3.5s) function as telemetry health diagnostics, NOT blanket raw data validity masks. Downstream filtering, imputation, or masking policies are explicit analyst decisions that must be declared and tested for sensitivity during offline evaluation.
 
-### 3.4 Treatment Metadata vs. Multi-Phase Ground-Truth Labeling across Recovery
+### 3.4 Treatment Metadata & Ground-Truth Labeling across 2-Hour Continuous Runs
 
 In the raw telemetry CSV generated by `record_experiment.py`, metadata columns `event_scenario`, `event_domain`, and `event_component` record the experimental treatment preset configured at execution start (e.g., `event_domain = "CORE"` for Scenario S7).
 
-Under the 600-second nominal protocol with persistent traffic (framed for 660s on VM-5):
-* **Persistent Demand Model:** Traffic remains actively flowing across all 600 seconds. For disturbance scenarios (S3–S9):
-  1. *Pre-Disturbance Baseline Phase ($t \in [0, 120\text{ s}]$):* Reference load active; no impairment applied. Ground truth: `BASELINE`.
-  2. *Active Disturbance Phase ($t \in [120, 420\text{ s}]$):* Impairment applied for 300 seconds; system displays domain bottleneck signatures.
-  3. *Transient Drainage & Recovery Phase ($t \in [420, 600\text{ s}]$):* Impairment released at $t = 420\text{ s}$ while reference traffic **remains actively flowing**.
-* **Methodological Annotation Rule & Notational Demarcation:**  
-  Labels must **NOT** be automatically switched to `BASELINE` at the exact instant the fault is physically released ($t = 420\text{ s}$), because physical queue drainage requires non-zero empirical recovery time ($T_{\text{recovery}}$).  
-  $T_{\text{recovery}}$ must be determined directly from actual empirical observations (the timestamp when `upf_backlog_bytes_embb` reaches $0\text{ B}$, canary RTT stabilizes $\le 20\text{ ms}$, and receiver goodput matches offered load). If 180s post-fault observation is insufficient, subsequent run durations can be extended (e.g. to 900s) based on pilot evidence. Offline temporal segmentation must use logged event timestamps combined with empirical telemetry evidence.
+Under the authoritative 2-Hour continuous protocol:
+* **Persistent Operating Regime:** Treatments for disturbance scenarios (S3–S9) are applied persistently at session initialization, ensuring that every row in `telemetry_EXP_<SCENARIO>_*.csv` exhibits 100% pure ground-truth labels for classifier training without mid-session human intervention.
+* **Reference Baselines:** Scenarios S1 and S2 run across the full 7,200 seconds under pristine baseline conditions, providing complete 2-hour unperturbed reference distributions.
+* **Offline Segmentation & Split:** The 7,200-sample stream provides continuous temporal evolution that can be partitioned into Training (3,600s), Testing (1,800s), and Evaluation (1,800s) folds without cross-fold leakage.
 
 ---
 
