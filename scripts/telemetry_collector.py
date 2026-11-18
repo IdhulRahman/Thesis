@@ -833,8 +833,10 @@ def poll_external_nfs():
                             now = time.time()
                             last_nwdaf_poll_time = now
                             metrics_store["nwdaf_api_status"] = 1
-                            # STRICT BINDING: Only update communication metrics if the response matches an active run AND exact session generation
-                            if target_run_id and target_run_id == active_run_id and target_gen == run_generation:
+                            # STRICT BINDING: Update communication metrics if response matches active run OR during idle baseline
+                            is_matching_run = bool(target_run_id and target_run_id == active_run_id and target_gen == run_generation)
+                            is_idle_baseline = bool(not target_run_id and not active_run_id)
+                            if is_matching_run or is_idle_baseline:
                                 ue_comms = data.get("ueComms", [])
                                 if ue_comms:
                                     comm = ue_comms[0]
