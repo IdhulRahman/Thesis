@@ -12,22 +12,30 @@ In a virtualized multi-VM 5G testbed, restarting an upstream component invalidat
 
 | Trigger Event (Component Restarted) | Host | Dependent Components That MUST Be Restarted | Reason & Failure Mode if Omitted |
 |---|---|---|---|
-| **`oai-smf-slice1` / `oai-smf-slice2`** | VM-3 | **`oai-nwdaf-sbi`**, **`oai-nwdaf-engine`** | **CRITICAL:** SMF wipes in-memory `Nsmf_EventExposure` subscriptions upon restart. `oai-nwdaf-sbi` only subscribes on initialization. Failure to restart NWDAF SBI causes SMF to drop URR reports (`No subscription available`), resulting in **permanent `ulVol: 0` in telemetry**. |
+| **`oai-smf-slice1` / `oai-smf-slice2`** | VM-3 | **`oai-nwdaf-sbi`**, **`oai-nwdaf-engine`** (VM-07) | **CRITICAL:** SMF wipes in-memory `Nsmf_EventExposure` subscriptions upon restart. `oai-nwdaf-sbi` only subscribes on initialization. Failure to restart NWDAF SBI causes SMF to drop URR reports (`No subscription available`), resulting in **permanent `ulVol: 0` in telemetry**. |
 | **`oai-upf-slice1` / `oai-upf-slice2`** | VM-3 | **`core_adapter.py`**, **SMF PDU Association** | UPF restart destroys existing PFCP sessions and kernel `qdisc` handles. |
 | **gNB DU-1 / DU-2 (`nr-softmodem`)** | VM-4 | **`ran_adapter.py`**, **RFsim attenuation reset (0.0 dB)** | DU restart recreates `/opt/oran/ran/du1.log`. `ran_adapter.py` must re-seek the file from line 0. Channel attenuation must be 0.0 dB for UE initial synchronization. |
 | **gNB CU (`nr-softmodem`)** | VM-4 | **DU-1, DU-2**, **E2 Agent (`ric_e2term`)** | CU restart severs F1-C and E2AP SCTP connections. |
 | **`nrUE` Softmodem (VM-5)** | VM-5 | **Verify `oaitun_ue1` active in `ue1` and `ue2`** | Spawning UE without cleanup causes tun device collisions and `DOWN` interfaces. |
 
 ### Canonical Core Restart Sequence
-Whenever the 5G Core control plane or user plane must be restarted, the following unified sequence must be executed on **VM-3**:
+Whenever the 5G Core control plane or user plane must be restarted, execute:
+
+1. **On VM-3 (Core):**
 ```bash
-# 1. Restart Core Network Functions
+# Restart Core Network Functions
 sudo docker restart oai-nrf-slice12 oai-nssf oai-amf oai-smf-slice1 oai-smf-slice2 oai-upf-slice1 oai-upf-slice2
+```
 
-# 2. MANDATORY: Concurrently restart NWDAF SBI and Engine to re-establish Nsmf subscriptions
+2. **On VM-07 (NWDAF — `10.102.0.233`):**
+```bash
+# MANDATORY: Concurrently restart NWDAF SBI and Engine to re-establish Nsmf subscriptions
 sudo docker restart oai-nwdaf-sbi oai-nwdaf-engine
+```
 
-# 3. Verify N11 subscription state in SMF logs
+3. **On VM-3 (Core):**
+```bash
+# Verify N11 subscription state in SMF logs
 sudo docker logs --tail 20 oai-smf-slice1 | grep -i "subscription"
 ```
 
@@ -60,8 +68,8 @@ If **ANY** of the following conditions occur at launch:
 | **1. RAN Scheduler** | `ran_cell_prb_utilization{cell_id="1"}` | $\mathbf{> 0.0\%}$ (Typically $30\text{–}100\%$) | Restart `ran_adapter.py` on VM-4. Check `du1.log`. |
 | **2. RAN BLER** | `ran_cell_bler{cell_id="1"}` | **Numeric ($\ge 0.0000$)** | Verify DU-1 log output in `/opt/oran/ran/du1.log`. |
 | **3. Core UPF** | `upf_queue_backlog_bytes{snssai="01000001"}` | **Numeric ($\ge 0\text{ B}$)** | Restart `core_adapter.py` on VM-3. Verify `tc qdisc`. |
-| **4. Core NWDAF API** | `nwdaf_api_status` | **Strictly `1`** | Check Kong Gateway (`:8080`) and NWDAF containers on VM-3. |
-| **5. Core NWDAF Volume** | `nwdaf_comm_ul_bytes` | **Strictly $> 0$** (Increments across 30s) | **HALT!** Run `sudo docker restart oai-nwdaf-sbi oai-nwdaf-engine` on VM-3. |
+| **4. Core NWDAF API** | `nwdaf_api_status` | **Strictly `1`** | Check Kong Gateway (`:8080`) and NWDAF containers on VM-07 (`10.102.0.233`). |
+| **5. Core NWDAF Volume** | `nwdaf_comm_ul_bytes` | **Strictly $> 0$** (Increments across 30s) | **HALT!** Run `sudo docker restart oai-nwdaf-sbi oai-nwdaf-engine` on VM-07 (`10.102.0.233`). |
 
 > [!CAUTION]
 > **GATE FAILURE RULE:**  

@@ -264,7 +264,7 @@ def check_preflight_gates(metrics_url=METRICS_URL_DEFAULT):
     # 1. Core NWDAF API Status
     api_status = str(telemetry.get("nwdaf_api_status", "0")).strip()
     if api_status not in ("1", "1.0", "200", "200.0"):
-        failures.append(f"Core NWDAF API status DOWN (status={api_status}). Cek Kong Gateway (:8080) di VM-3.")
+        failures.append(f"Core NWDAF API status DOWN (status={api_status}). Cek Kong Gateway (:8080) di VM-07 (10.102.0.233).")
 
     # 2. Core NWDAF Volume (CRITICAL GATE)
     try:
@@ -272,7 +272,7 @@ def check_preflight_gates(metrics_url=METRICS_URL_DEFAULT):
         if math.isnan(nwdaf_vol) or nwdaf_vol <= 0:
             failures.append(
                 f"Core NWDAF UL Volume bernilai 0 Byte ({telemetry.get('nwdaf_comm_ul_bytes')})! "
-                "SMF subscription terputus. SOLUSI: Jalankan 'sudo docker restart oai-nwdaf-sbi oai-nwdaf-engine' di VM-3!"
+                "SMF subscription terputus. SOLUSI: Jalankan 'sudo docker restart oai-nwdaf-sbi oai-nwdaf-engine' di VM-07 (10.102.0.233)!"
             )
     except (ValueError, TypeError):
         failures.append("Core NWDAF UL Volume tidak valid (NaN / null).")
