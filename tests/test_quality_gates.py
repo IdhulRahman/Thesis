@@ -147,8 +147,10 @@ class TestSimplifiedTelemetryRecorder(unittest.TestCase):
 
     def setUp(self):
         self.test_dir = tempfile.mkdtemp(prefix="test_thesis_recorder_")
+        os.environ["RECORD_EXPERIMENT_SKIP_PREFLIGHT"] = "1"
 
     def tearDown(self):
+        os.environ.pop("RECORD_EXPERIMENT_SKIP_PREFLIGHT", None)
         if os.path.exists(self.test_dir):
             shutil.rmtree(self.test_dir, ignore_errors=True)
 
@@ -241,6 +243,18 @@ metric_three{empty=""} 0.0
         self.assertEqual(data["e2e_slice1_tput_mbps"], "NaN")
         self.assertEqual(data["upf_backlog_bytes_embb"], "NaN")
         self.assertEqual(storage_stats["nwdaf_run_polls_written"], 0)
+
+    def test_06b_preflight_gate_check_validates_telemetry_pillars(self):
+        """POS-06B: check_preflight_gates passes against healthy mock and fails on unreachable or zero volume."""
+        # 1. Unreachable URL must fail gate check
+        passed, fails = record_experiment.check_preflight_gates(metrics_url="http://127.0.0.1:1")
+        self.assertFalse(passed)
+        self.assertTrue(any("Collector (:9100) tidak dapat dihubungi" in f for f in fails))
+
+        # 2. Healthy mock server must pass all gates
+        passed_ok, fails_ok = record_experiment.check_preflight_gates(metrics_url=self.mock_url)
+        self.assertTrue(passed_ok, f"Preflight gate check failed unexpectedly: {fails_ok}")
+        self.assertEqual(len(fails_ok), 0)
 
     def test_07_recording_session_completes_and_generates_manifest(self):
         """POS-07: Full execution of record_experiment records telemetry and valid manifest."""

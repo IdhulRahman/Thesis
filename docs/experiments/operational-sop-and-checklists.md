@@ -35,20 +35,25 @@ sudo docker logs --tail 20 oai-smf-slice1 | grep -i "subscription"
 
 ## 2. Mandatory Pre-Flight Telemetry Gate Check (The 60-Second Rule)
 
-Before launching any long-duration experiment session (Training 3600s, Validation 1800s, Testing 1800s), an operator **MUST execute a 30-second verification probe** and confirm that all four telemetry pillars are actively producing valid, non-zero metrics.
+To prevent wasted recording sessions and guarantee telemetry integrity, `record_experiment.py` now includes a **built-in native Pre-Flight Telemetry Gate Check** that executes automatically prior to writing any files or starting long recordings.
 
-### Step 1: Start Canary Traffic Probe on VM-5 (30 Seconds)
-```bash
-sudo /opt/oran/ue/scripts/trafgen.sh start 30 10
-```
+If **ANY** of the following conditions occur at launch:
+- `nwdaf_api_status != 1` (Kong Gateway or NWDAF down)
+- `nwdaf_comm_ul_bytes <= 0` or NaN (SMF subscription missing)
+- `ran_prb_cell1` or `ran_bler_cell1` is NaN
+- `upf_backlog_bytes_embb` is NaN
+- `e2e_slice1_tput_mbps <= 0` (traffic not transmitting)
 
-### Step 2: Execute Pre-Flight Probe Query on VM-6
-While traffic is actively transmitting (around second 10–20), run the gate check on **VM-6**:
-```bash
-curl -s http://127.0.0.1:9100/metrics | grep -E "(nwdaf_comm_ul_bytes|nwdaf_api_status|ran_cell_prb_utilization\{cell_id=\"1\"\}|ran_cell_bler\{cell_id=\"1\"\}|upf_queue_backlog_bytes\{snssai=\"01000001\"\})"
-```
+`record_experiment.py` **automatically halts with an error message and exit code 1**, preventing empty or invalid datasets from ever being recorded.
 
-### Step 3: Evaluate Pass / Fail Criteria
+### Operator Protocol:
+1. Start traffic on **VM-5**: `sudo /opt/oran/ue/scripts/trafgen.sh start <duration> 10`
+2. Wait 10–15 seconds for traffic to establish.
+3. Start recorder on **VM-6**: `python3 /opt/oran/monitoring/scripts/record_experiment.py <scenario> --duration <sec>`
+   - The script automatically verifies all 5 pillars.
+   - If gates pass: `[✓] Pre-Flight Gate Check: SEMUA PILAR LOLOS!` and recording starts immediately.
+   - If any gate fails: The script stops, prints the failed pillar, and gives the exact remediation command.
+   *(Optional: pass `--skip-preflight` only if deliberately bypassing gate checks).*
 
 | Pillar | Metric Identifier | Required Pre-Flight Condition | Action if FAILED |
 |---|---|---|---|

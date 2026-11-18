@@ -250,6 +250,59 @@ def extract_telemetry(metrics_url=METRICS_URL_DEFAULT, timeout=0.8, expected_run
     return raw_data, scrape_ok, latency_ms, storage_stats
 
 
+def check_preflight_gates(metrics_url=METRICS_URL_DEFAULT):
+    """
+    Evaluates telemetry collector pillars before starting long recordings.
+    Guarantees that RAN, Core UPF, Core NWDAF, and UE traffic are actively producing valid data.
+    """
+    telemetry, scrape_ok, _, _ = extract_telemetry(metrics_url=metrics_url, timeout=2.0, expected_run_id=None)
+    if not scrape_ok:
+        return False, ["Collector (:9100) tidak dapat dihubungi. Pastikan telemetry_collector.py aktif di VM-6."]
+
+    failures = []
+
+    # 1. Core NWDAF API Status
+    api_status = str(telemetry.get("nwdaf_api_status", "0")).strip()
+    if api_status not in ("1", "1.0", "200", "200.0"):
+        failures.append(f"Core NWDAF API status DOWN (status={api_status}). Cek Kong Gateway (:8080) di VM-3.")
+
+    # 2. Core NWDAF Volume (CRITICAL GATE)
+    try:
+        nwdaf_vol = float(telemetry.get("nwdaf_comm_ul_bytes", "NaN"))
+        if math.isnan(nwdaf_vol) or nwdaf_vol <= 0:
+            failures.append(
+                f"Core NWDAF UL Volume bernilai 0 Byte ({telemetry.get('nwdaf_comm_ul_bytes')})! "
+                "SMF subscription terputus. SOLUSI: Jalankan 'sudo docker restart oai-nwdaf-sbi oai-nwdaf-engine' di VM-3!"
+            )
+    except (ValueError, TypeError):
+        failures.append("Core NWDAF UL Volume tidak valid (NaN / null).")
+
+    # 3. RAN PRB Cell-1
+    prb_c1 = telemetry.get("ran_prb_cell1")
+    if prb_c1 in (NAN_STR, None, ""):
+        failures.append("RAN PRB Cell-1 bernilai NaN. Cek ran_adapter.py di VM-4.")
+
+    # 4. RAN BLER Cell-1
+    bler_c1 = telemetry.get("ran_bler_cell1")
+    if bler_c1 in (NAN_STR, None, ""):
+        failures.append("RAN BLER Cell-1 bernilai NaN. Cek du1.log di VM-4.")
+
+    # 5. Core UPF Backlog
+    upf_b = telemetry.get("upf_backlog_bytes_embb")
+    if upf_b in (NAN_STR, None, ""):
+        failures.append("Core UPF Backlog bernilai NaN. Cek core_adapter.py di VM-3.")
+
+    # 6. UE Traffic
+    try:
+        tput = float(telemetry.get("e2e_slice1_tput_mbps", "NaN"))
+        if math.isnan(tput) or tput <= 0.0:
+            failures.append("Trafik UE eMBB belum mengalir (0.0 Mbps / Offline). Jalankan trafgen.sh di VM-5 terlebih dahulu!")
+    except (ValueError, TypeError):
+        failures.append("Trafik UE eMBB tidak terdeteksi (NaN).")
+
+    return (len(failures) == 0), failures
+
+
 def resolve_scenario_metadata(raw_scen):
     clean = (raw_scen or "S1").strip()
     key = clean.upper()
@@ -313,6 +366,7 @@ Contoh Penggunaan:
     parser.add_argument("-r", "--run-id", default=None, help="ID unik eksperimen (otomatis jika tidak diisi)")
     parser.add_argument("--metrics-url", default=METRICS_URL_DEFAULT, help=f"URL Prometheus Exporter (default: {METRICS_URL_DEFAULT})")
     parser.add_argument("--data-dir", default=DATA_DIR_DEFAULT, help=f"Direktori data telemetri (default: {DATA_DIR_DEFAULT})")
+    parser.add_argument("--skip-preflight", action="store_true", help="Lewati pemeriksaan pra-perekaman (pre-flight gate check)")
 
     args = parser.parse_args()
 
@@ -353,6 +407,23 @@ Contoh Penggunaan:
 
     scenario_name, canonical_scenario, domain, component = resolve_scenario_metadata(scen_input)
     phase_id = f"phase_1_{scen_input.strip().upper()}"
+
+    # Pre-Flight Telemetry Gate Check
+    skip_pf = args.skip_preflight or (os.getenv("RECORD_EXPERIMENT_SKIP_PREFLIGHT") == "1")
+    if not skip_pf:
+        print("\n[*] Menjalankan Pre-Flight Telemetry Gate Check...")
+        passed, gate_failures = check_preflight_gates(metrics_url=args.metrics_url)
+        if not passed:
+            print("\n" + "=" * 80)
+            print("[-] PRE-FLIGHT GATE CHECK GAGAL! PEREKAMAN DIBATALKAN!")
+            print("=" * 80)
+            for i, fail_msg in enumerate(gate_failures, 1):
+                print(f"  {i}. [GAGAL] {fail_msg}")
+            print("\n[!] Perbaiki masalah di atas sebelum memulai perekaman.")
+            print("    (Gunakan flag --skip-preflight jika sengaja mengabaikan gate check ini).")
+            print("=" * 80 + "\n")
+            sys.exit(1)
+        print("[✓] Pre-Flight Gate Check: SEMUA PILAR LOLOS (RAN, UPF, NWDAF Volume, UE Aktif)!\n")
 
     # Auto-generate unique Run ID if not provided
     ts_now = time.strftime('%Y%m%d_%H%M%S')
