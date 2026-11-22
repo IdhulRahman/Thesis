@@ -5,7 +5,7 @@
 **Authoritative Specification:** Single Source of Truth for Scenario Definitions, Treatment Parameters, and Response Hypotheses  
 **Target Architecture:** VM-5 (UE Emulation), VM-4 (Split RAN), VM-3 (UPF Core Host), VM-6 (Telemetry Collector & Recorder)  
 **Classification Target Classes:** `BASELINE`, `RAN`, `CORE`, `JOINT`  
-**Treatment Scenario Identifiers:** `S1`, `S2`, `S3`, `S4`, `S5`, `S6`, `S7`, `S8`, `S9`
+**Treatment Scenario Identifiers:** `S1`, `S2`, `S3`, `S4`, `S5`, `S6`, `S7`, `S8`, `S9`, `S10`, `S11`
 
 ---
 
@@ -29,9 +29,9 @@ $$\mathcal{C} = \{\text{BASELINE}, \text{RAN}, \text{CORE}, \text{JOINT}\}$$
 
 The experimental Scenario IDs serve as **treatment scenario identifiers** to systematically induce distinct physical phenomena. Scenario numbers are assigned in ascending severity order within each class (lower number = softer, higher number = harder):
 
-* **`BASELINE` Target Class:** Evaluated under `S1` (Light Normal) and `S2` (Higher Normal), verifying that varying traffic volume without capacity exhaustion remains classified as healthy baseline.
+* **`BASELINE` Target Class:** Evaluated under `S1` (Light Normal), `S2` (Higher Normal), and `S11` (External WAN Propagation Delay Confounder Breaker: high E2E latency without RAN/Core bottleneck).
 * **`RAN` Target Class:** Evaluated under `S3` (Soft Radio Degradation via mild attenuation), `S4` (Hard Radio Channel Degradation via heavy attenuation), and `S5` (Hard Radio Capacity Overload under clean channel).
-* **`CORE` Target Class:** Evaluated under `S6` (Soft UPF egress rate limiting) and `S7` (Hard UPF egress rate limiting via binding Token Bucket Filter).
+* **`CORE` Target Class:** Evaluated under `S6` (Soft UPF egress rate limiting), `S7` (Hard UPF egress rate limiting via binding deep queue TBF), and `S10` (Core Strict Policing / Shallow Buffer Drop: volume rate drops at UPF/NWDAF without latency spike).
 * **`JOINT` Target Class:** Evaluated under `S8` (Simultaneous soft radio + soft core impairment) and `S9` (Simultaneous active radio degradation and binding core transport throttling).
 * **Inter-Scenario Reset Policy:** System resets (removing TBF rate limiters, resetting RF attenuation to 0.0 dB, stopping residual traffic) are strictly operational maintenance procedures executed between runs; they do not constitute experimental recording classes.
 
@@ -47,7 +47,7 @@ Under the authoritative **Full 2-Hour (7,200-Second) Continuous Campaign Protoco
    * **Testing Partition (25% — 1,800 samples / 30 Minutes):** Held-out partition for unbiased generalization testing.
    * **Validation / Evaluation Partition (25% — 1,800 samples / 30 Minutes):** Held-out partition for hyperparameter tuning and decision threshold evaluation.
 4. **Execution Order:** To maximize efficiency and address the most operationally complex conditions first, scenario collection proceeds in descending complexity order:  
-   $$\mathbf{S9} \to \mathbf{S8} \to \mathbf{S7} \to \mathbf{S6} \to \mathbf{S5} \to \mathbf{S4} \to \mathbf{S3} \to \mathbf{S2} \to \mathbf{S1}$$
+   $$\mathbf{S9} \to \mathbf{S8} \to \mathbf{S7} \to \mathbf{S10} \to \mathbf{S6} \to \mathbf{S5} \to \mathbf{S4} \to \mathbf{S3} \to \mathbf{S11} \to \mathbf{S2} \to \mathbf{S1}$$
 
 ---
 
@@ -66,6 +66,8 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 | **`S7`** | `S7_CORE_QUEUE_TBF` | `CORE` | Hard | UPF-1 Egress (`eth0`) | Hard UPF-host/container egress rate shaping via binding TBF | Fixed load ($\approx 10\text{ Mbps}$), binding TBF rate ($5\text{–}6\text{ Mbps}$, latency $200\text{ ms}$) | UPF backlog surges, packet drops increase, egress rate matches TBF, radio metrics nominal. |
 | **`S8`** | `S8_JOINT_SOFT` | `JOINT` | Soft | DU-1 UL + UPF-1 Egress | Simultaneous soft radio attenuation and soft core rate limiting | Candidate UL attenuation: 25 dB (preliminary; stressed radio, binding status pending receiver evidence per [rf-attenuation-calibration.md](rf-attenuation-calibration.md)) + Soft TBF ($8\text{–}8.5\text{ Mbps}$) | Sub-threshold degradation in both domains: PRB ~58–65%, Backlog ~6k–14k B, RTT ~26–30 ms. |
 | **`S9`** | `S9_JOINT_OVERLOAD` | `JOINT` | Hard | DU-1 UL + UPF-1 Egress | Simultaneous active radio impairment and binding Core shaping | Degraded radio forwarding rate $R_{\text{arr}}$ + binding TBF ($R_{\text{TBF}} < R_{\text{arr}}$) | Simultaneous radio degradation (low SNR/MCS, elevated BLER) AND Core congestion (elevated UPF backlog and drops). |
+| **`S10`** | `S10_CORE_POLICING` | `CORE` | Hard-Policing | UPF-1 Egress (`eth0`) | Core strict rate policing with shallow buffer drop | Fixed load ($\approx 10\text{ Mbps}$), TBF rate $5.0\text{ Mbps}$, shallow burst/limit ($16\text{ KB}$) | Packet drops at UPF, receiver throughput halved ($\approx 5\text{ Mbps}$), NWDAF ratio $\approx 0.49$, but backlog stays shallow ($< 16\text{ KB}$) and RTT stays uninflated ($\approx 52\text{ ms}$). Confounder breaker against RTT-inflation heuristics. |
+| **`S11`** | `S11_WAN_DELAY` | `BASELINE` | Confounder-WAN | External Data Network (DN) | External WAN propagation delay injection without capacity loss | Fixed load ($\approx 10\text{ Mbps}$ unthrottled), netem delay $200\text{ ms}$, zero UPF queue, clean RF ($0.0\text{ dB}$) | RTT surges to $> 210\text{ ms}$ mimicking transport failure, but UPF backlog is 0 B, NWDAF throughput is nominal ($100\%$, ratio $\approx 1.01$), radio BLER is 0.0. Confounder breaker against RTT-only fault heuristics. |
 
 ---
 
@@ -283,14 +285,61 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 
 ---
 
+### 3.10 Scenario S10 — Core Strict Policing / Shallow Buffer Drop (Confounder Breaker)
+
+1. **Objective:** Induce genuine Core transport congestion via aggressive rate policing with a shallow buffer drop policy, causing severe packet drops and flow throughput reduction while keeping buffer occupancy minimal and Round-Trip Time (RTT) uninflated. This breaks the heuristic shortcut where models conflate Core faults strictly with high RTT.
+2. **Initial Conditions:** System at reference condition; clean RF channel ($0.0\text{ dB}$ attenuation, Profile 1), default UPF container.
+3. **Independent Variables (Changed):** UPF-1 egress shaped using strict TBF policing with shallow buffer (`rate 5mbit burst 16k limit 16k`). Offered traffic on Slice 1 set to $10.0\text{ Mbps}$ UDP.
+4. **Controlled Variables (Maintained):** Reference radio channel ($0.0\text{ dB}$ attenuation), Slice 2 canary probing (100 ms interval).
+5. **Planned Execution Sequence (Full 2-Hour Continuous Protocol):**
+   ```bash
+   # Step 1 (VM-3 UPF): Configure strict rate policing with shallow buffer
+   sudo docker exec oai-upf-slice1 tc qdisc replace dev eth0 root tbf rate 5mbit burst 16k limit 16k
+
+   # Step 2 (VM-5 UE): Launch continuous moderate traffic for 7,260s
+   sudo /opt/oran/ue/scripts/trafgen.sh start 7260 10
+
+   # Step 3 (VM-6 Monitoring): Start recorder ~15-30s after traffic starts
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S10 --duration 7200 --notes "S10 Core Strict Policing Shallow Buffer 2h Continuous Campaign"
+   ```
+6. **Evidence to Collect:** Telemetry CSV (7,200 rows), NWDAF raw poll responses (`nwdaf_raw_poll_responses.jsonl`), `tc -s qdisc` readback logs.
+7. **Responses to Examine:** Verify sender offered rate ($10\text{ Mbps}$) exceeds receiver throughput ($\approx 5\text{ Mbps}$), NWDAF `core_flow_ratio` drops to $\approx 0.490$, but UPF queue backlog remains shallow ($\le 15.48\text{ KB}$), ICMP RTT remains low/stable ($51.8\text{ ms}$ median), radio BLER is 0.0.
+8. **Interpretation Boundaries:** Entire 7,200s run represents ground-truth `CORE` fault characterized by volume policing rather than queue inflation.
+
+---
+
+### 3.11 Scenario S11 — External WAN Propagation Delay (Confounder Breaker)
+
+1. **Objective:** Induce substantial End-to-End latency ($> 200\text{ ms}$) originating strictly outside the 3GPP cellular access and Core domains (simulating transcontinental WAN propagation or external CDN delay), while maintaining complete capacity, zero radio packet loss, and zero Core queuing. This breaks the confounder where models predict `CORE` or `RAN` whenever canary RTT is elevated.
+2. **Initial Conditions:** System at reference condition; clean RF channel ($0.0\text{ dB}$ attenuation, Profile 1), default unshaped UPF container.
+3. **Independent Variables (Changed):** Network emulation delay applied at external WAN/DN egress interface: `tc qdisc replace dev eth0 root netem delay 200ms`. Offered traffic on Slice 1 set to $10.0\text{ Mbps}$ UDP unthrottled.
+4. **Controlled Variables (Maintained):** Reference radio channel ($0.0\text{ dB}$ attenuation), unconstrained UPF egress bandwidth.
+5. **Planned Execution Sequence (Full 2-Hour Continuous Protocol):**
+   ```bash
+   # Step 1 (VM-3 / External Router): Configure WAN propagation delay
+   sudo tc qdisc replace dev eth0 root netem delay 200ms
+
+   # Step 2 (VM-5 UE): Launch continuous moderate traffic for 7,260s
+   sudo /opt/oran/ue/scripts/trafgen.sh start 7260 10
+
+   # Step 3 (VM-6 Monitoring): Start recorder ~15-30s after traffic starts
+   python3 /opt/oran/monitoring/scripts/record_experiment.py S11 --duration 7200 --notes "S11 External WAN Propagation Delay 200ms 2h Continuous Campaign"
+   ```
+6. **Evidence to Collect:** Telemetry CSV (7,200 rows), NWDAF raw poll responses (`nwdaf_raw_poll_responses.jsonl`), iperf receiver and ping logs.
+7. **Responses to Examine:** RTT surges to $\approx 214\text{ ms}$ (SLA violated), but 100% of offered traffic is delivered ($10\text{ Mbps}$ goodput), UPF queue backlog is 0 B, NWDAF `core_flow_ratio` is nominal ($1.010$), radio PRB is normal ($\approx 66.2\%$), BLER is 0.0.
+8. **Interpretation Boundaries:** Entire 7,200s run represents healthy cellular network operation, ground-truth `BASELINE`.
+
+---
+
 ## 4. Operational Reset & Inter-Scenario Cleanup Procedure
 
 1. **Objective:** Deterministically restore all radio, Core, and traffic components to the unperturbed baseline state between experimental runs.
 2. **Operational Scope:** This reset sequence is strictly an operational recovery procedure and maintenance action executed between experiment runs; **it is NOT a machine learning training class and is not recorded by the telemetry collector**.
 3. **Execution Commands:**
    ```bash
-   # 1. VM-3: Remove all qdisc rate limiting on UPF-1
+   # 1. VM-3: Remove all qdisc rate limiting on UPF-1 and host netem delay
    sudo docker exec oai-upf-slice1 tc qdisc del dev eth0 root 2>/dev/null || true
+   sudo tc qdisc del dev eth0 root 2>/dev/null || true
    # 2. VM-4: Reset all RFSimulator channel parameters to verified Profile 1 baseline
    python3 /opt/oran/ran/scripts/rfsim_channel_control.py reset --port 9090
    # 3. VM-5: Terminate any residual traffic processes
@@ -302,7 +351,7 @@ Scenarios are ordered by class and ascending severity (Normal → Soft → Hard)
 
 ## 5. Authoritative Data Collection Sequence (Full 2-Hour Continuous Campaign)
 
-The following sequence governs the official thesis experimental campaign under the **Full 2-Hour (7,200s) Continuous Protocol**. Collection executes in descending complexity order ($\mathbf{S9} \to \mathbf{S1}$):
+The following sequence governs the official thesis experimental campaign under the **Full 2-Hour (7,200s) Continuous Protocol**. Collection executes in descending complexity order ($\mathbf{S9} \to \mathbf{S10} \to \mathbf{S11} \to \mathbf{S1}$):
 
 | Order | Scenario | Target Class | Treatment Setup | Traffic (VM-5) | Recording (VM-6) | Output Dataset |
 |:---:|:---:|:---:|---|---|---|---|
@@ -312,18 +361,22 @@ The following sequence governs the official thesis experimental campaign under t
 | 4 | *Reset* | — | Reset RF to 0.0 dB, remove UPF qdisc, verify pristine baseline | — | — | — |
 | 5 | **S7** | `CORE` | Binding UPF TBF ($5.0\text{ Mbps}$, lat $200\text{ ms}$) on clean RF | `trafgen.sh start 7260 10` | `record_experiment.py S7 --duration 7200` | `telemetry_EXP_S7_*.csv` (7,200 rows) |
 | 6 | *Reset* | — | Remove UPF qdisc, verify pristine baseline | — | — | — |
-| 7 | **S6** | `CORE` | Mild UPF TBF ($8.5\text{ Mbps}$, lat $80\text{ ms}$) on clean RF | `trafgen.sh start 7260 10` | `record_experiment.py S6 --duration 7200` | `telemetry_EXP_S6_*.csv` (7,200 rows) |
+| 7 | **S10** | `CORE` | Core Strict Policing / Shallow Buffer ($5.0\text{ Mbps}$, burst/limit $16\text{ KB}$) on clean RF | `trafgen.sh start 7260 10` | `record_experiment.py S10 --duration 7200` | `telemetry_EXP_S10_*.csv` (7,200 rows) |
 | 8 | *Reset* | — | Remove UPF qdisc, verify pristine baseline | — | — | — |
-| 9 | **S5** | `RAN` | Radio Capacity Saturation ($20.0\text{ Mbps}$ offered load) on clean RF | `trafgen.sh start 7260 20` | `record_experiment.py S5 --duration 7200` | `telemetry_EXP_S5_*.csv` (7,200 rows) |
-| 10 | *Reset* | — | Stop overload traffic, verify pristine baseline | — | — | — |
-| 11 | **S4** | `RAN` | Hard RF Attenuation ($18.0\text{ dB}$) on unshaped UPF | `trafgen.sh start 7260 10` | `record_experiment.py S4 --duration 7200` | `telemetry_EXP_S4_*.csv` (7,200 rows) |
-| 12 | *Reset* | — | Reset RF to 0.0 dB, verify pristine baseline | — | — | — |
-| 13 | **S3** | `RAN` | Soft RF Attenuation ($15.0\text{ dB}$) on unshaped UPF | `trafgen.sh start 7260 10` | `record_experiment.py S3 --duration 7200` | `telemetry_EXP_S3_*.csv` (7,200 rows) |
+| 9 | **S6** | `CORE` | Mild UPF TBF ($8.5\text{ Mbps}$, lat $80\text{ ms}$) on clean RF | `trafgen.sh start 7260 10` | `record_experiment.py S6 --duration 7200` | `telemetry_EXP_S6_*.csv` (7,200 rows) |
+| 10 | *Reset* | — | Remove UPF qdisc, verify pristine baseline | — | — | — |
+| 11 | **S5** | `RAN` | Radio Capacity Saturation ($20.0\text{ Mbps}$ offered load) on clean RF | `trafgen.sh start 7260 20` | `record_experiment.py S5 --duration 7200` | `telemetry_EXP_S5_*.csv` (7,200 rows) |
+| 12 | *Reset* | — | Stop overload traffic, verify pristine baseline | — | — | — |
+| 13 | **S4** | `RAN` | Hard RF Attenuation ($18.0\text{ dB}$) on unshaped UPF | `trafgen.sh start 7260 10` | `record_experiment.py S4 --duration 7200` | `telemetry_EXP_S4_*.csv` (7,200 rows) |
 | 14 | *Reset* | — | Reset RF to 0.0 dB, verify pristine baseline | — | — | — |
-| 15 | **S2** | `BASELINE` | Unperturbed High Load ($10.0\text{ Mbps}$) on clean RF and unshaped UPF | `trafgen.sh start 7260 10` | `record_experiment.py S2 --duration 7200` | `telemetry_EXP_S2_*.csv` (7,200 rows) |
-| 16 | *Reset* | — | Verify pristine baseline | — | — | — |
-| 17 | **S1** | `BASELINE` | Unperturbed Light Load ($5.0\text{ Mbps}$) on clean RF and unshaped UPF | `trafgen.sh start 7260 5` | `record_experiment.py S1 --duration 7200` | `telemetry_EXP_S1_*.csv` (7,200 rows) |
-| 18 | *Reset* | — | Final campaign cleanup | — | — | — |
+| 15 | **S3** | `RAN` | Soft RF Attenuation ($15.0\text{ dB}$) on unshaped UPF | `trafgen.sh start 7260 10` | `record_experiment.py S3 --duration 7200` | `telemetry_EXP_S3_*.csv` (7,200 rows) |
+| 16 | *Reset* | — | Reset RF to 0.0 dB, verify pristine baseline | — | — | — |
+| 17 | **S11** | `BASELINE` | External WAN Delay ($200\text{ ms}$ netem) on clean RF and unshaped UPF | `trafgen.sh start 7260 10` | `record_experiment.py S11 --duration 7200` | `telemetry_EXP_S11_*.csv` (7,200 rows) |
+| 18 | *Reset* | — | Remove netem delay, verify pristine baseline | — | — | — |
+| 19 | **S2** | `BASELINE` | Unperturbed High Load ($10.0\text{ Mbps}$) on clean RF and unshaped UPF | `trafgen.sh start 7260 10` | `record_experiment.py S2 --duration 7200` | `telemetry_EXP_S2_*.csv` (7,200 rows) |
+| 20 | *Reset* | — | Verify pristine baseline | — | — | — |
+| 21 | **S1** | `BASELINE` | Unperturbed Light Load ($5.0\text{ Mbps}$) on clean RF and unshaped UPF | `trafgen.sh start 7260 5` | `record_experiment.py S1 --duration 7200` | `telemetry_EXP_S1_*.csv` (7,200 rows) |
+| 22 | *Reset* | — | Final campaign cleanup | — | — | — |
 
 > [!NOTE]
 > * **Continuous Traffic Framing:** Traffic runs for 7,260s while the recorder captures 7,200 ticks (1 Hz).
